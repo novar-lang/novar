@@ -2445,6 +2445,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "novar_cluster"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "novar_hir",
+ "novar_modules",
+ "novar_runtime",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "novar_codegen"
 version = "0.1.0"
 dependencies = [
