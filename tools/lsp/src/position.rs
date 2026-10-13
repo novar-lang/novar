@@ -2,7 +2,8 @@
 
 use std::ops::Range;
 
-use lsp_types::{Position, Range as LspRange};
+pub use lsp_types::Position;
+use lsp_types::Range as LspRange;
 
 #[derive(Debug)]
 pub struct LineIndex {

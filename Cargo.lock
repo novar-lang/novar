@@ -2532,6 +2532,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "novar_wasm"
+version = "0.1.0"
+dependencies = [
+ "novar_diagnostics",
+ "novar_hir",
+ "novar_lsp",
+ "novar_parser",
+ "novar_runtime",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

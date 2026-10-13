@@ -22,3 +22,5 @@ python/target/
 *.whl
 __pycache__/
 .pytest_cache/
+playground/pkg/
+playground/pkg-node/

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Novar Playground</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Novar <span>playground</span></h1>
+    <label>Example
+      <select id="examples"></select>
+    </label>
+    <label>Run
+      <select id="function"></select>
+    </label>
+    <div id="args"></div>
+    <button id="run" title="Ctrl+Enter">Run ▶</button>
+    <button id="share" title="Copy a link to this program">Share</button>
+  </header>
+
+  <main>
+    <section class="editor">
+      <div class="stack">
+        <pre id="highlight" aria-hidden="true"></pre>
+        <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Novar source"></textarea>
+      </div>
+      <div id="status" aria-live="polite">Loading the compiler…</div>
+    </section>
+
+    <section class="panels">
+      <h2>Output</h2>
+      <pre id="output" class="panel"></pre>
+      <h2>Problems <span id="problem-count"></span></h2>
+      <ul id="problems" class="panel"></ul>
+    </section>
+  </main>
+
+  <footer>
+    Runs entirely in your browser: the Novar type checker and interpreter compiled to WebAssembly,
+    with offline stand-ins for the embedding model, vector database and LLM.
+    Programs are limited to a fixed number of steps.
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
