@@ -6,6 +6,7 @@ use chumsky::{
 };
 use novar_ast::*;
 use novar_ast::{Span, Spanned};
+use novar_diagnostics::Diagnostic;
 use novar_lexer::Token;
 
 macro_rules! run {
@@ -13,32 +14,20 @@ macro_rules! run {
         let iter = $tokens.into_iter().map(|(t, s)| (t, SimpleSpan::from(s)));
         let stream = Stream::from_iter(iter).map(SimpleSpan::from($eoi..$eoi), |(t, s)| (t, s));
         let (out, errs) = $parser.parse(stream).into_output_errors();
-        let errs: Vec<ParseError> = errs
+        let errs: Vec<Diagnostic> = errs
             .into_iter()
-            .map(|e| ParseError {
-                span: e.span().into_range(),
-                message: e.to_string(),
-            })
+            .map(|e| Diagnostic::error(e.span().into_range(), e.to_string()))
             .collect();
         (out, errs)
     }};
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParseError {
-    pub span: Span,
-    pub message: String,
-}
-
 /// Lexes and parses `src`. Returns the program (when recovery allowed one) and all errors.
-pub fn parse(src: &str) -> (Option<Program>, Vec<ParseError>) {
+pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
     let (tokens, lex_errors) = novar_lexer::tokenize(src);
-    let mut errors: Vec<ParseError> = lex_errors
+    let mut errors: Vec<Diagnostic> = lex_errors
         .into_iter()
-        .map(|span| ParseError {
-            span,
-            message: "invalid token".into(),
-        })
+        .map(|span| Diagnostic::error(span, "invalid token"))
         .collect();
     let (program, parse_errors) = run!(program(), tokens, src.len());
     errors.extend(parse_errors);
@@ -47,21 +36,18 @@ pub fn parse(src: &str) -> (Option<Program>, Vec<ParseError>) {
 }
 
 /// Parses a single expression (used for f-string interpolations and tests).
-pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<ParseError>) {
+pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Diagnostic>) {
     parse_expr_at(src, 0)
 }
 
-fn parse_expr_at(src: &str, offset: usize) -> (Option<Expr>, Vec<ParseError>) {
+fn parse_expr_at(src: &str, offset: usize) -> (Option<Expr>, Vec<Diagnostic>) {
     let (mut tokens, lex_errors) = novar_lexer::tokenize(src);
     for (_, span) in &mut tokens {
         *span = span.start + offset..span.end + offset;
     }
-    let mut errors: Vec<ParseError> = lex_errors
+    let mut errors: Vec<Diagnostic> = lex_errors
         .into_iter()
-        .map(|s| ParseError {
-            span: s.start + offset..s.end + offset,
-            message: "invalid token".into(),
-        })
+        .map(|s| Diagnostic::error(s.start + offset..s.end + offset, "invalid token"))
         .collect();
     let (expr, parse_errors) = run!(expr().then_ignore(end()), tokens, src.len() + offset);
     errors.extend(parse_errors);
@@ -154,10 +140,9 @@ fn unescape(raw: &str) -> String {
 
 /// Splits the body of an f-string (without `f"` and `"`) into text and `{expr}` parts.
 /// `offset` is the byte offset of `body` in the source file.
-fn fstring_parts(body: &str, offset: usize) -> Result<Vec<FPart>, ParseError> {
-    let err = |start: usize, end: usize, message: &str| ParseError {
-        span: offset + start..offset + end,
-        message: message.into(),
+fn fstring_parts(body: &str, offset: usize) -> Result<Vec<FPart>, Diagnostic> {
+    let err = |start: usize, end: usize, message: &str| {
+        Diagnostic::error(offset + start..offset + end, message)
     };
     let mut parts = Vec::new();
     let mut text = String::new();
@@ -337,7 +322,16 @@ where
         let paren = expr
             .clone()
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|e| e.node);
+            .map(|e| e.node)
+            .recover_with(via_parser(nested_delimiters(
+                Token::LParen,
+                Token::RParen,
+                [
+                    (Token::LBrace, Token::RBrace),
+                    (Token::LBracket, Token::RBracket),
+                ],
+                |_| ExprKind::Error,
+            )));
 
         let primary = choice((
             float,
@@ -365,7 +359,16 @@ where
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(Postfix::Call);
+            .map(Postfix::Call)
+            .recover_with(via_parser(nested_delimiters(
+                Token::LParen,
+                Token::RParen,
+                [
+                    (Token::LBrace, Token::RBrace),
+                    (Token::LBracket, Token::RBracket),
+                ],
+                |_| Postfix::Call(Vec::new()),
+            )));
         let field = just(Token::Dot).ignore_then(ident()).map(Postfix::Field);
         let postfix = primary.foldl_with(call.or(field).repeated(), |base, op, e| {
             let kind = match op {
@@ -455,9 +458,16 @@ fn block<'a, 's: 'a, I>(
 where
     I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
 {
-    let item = let_stmt(expr.clone()).map(BlockItem::Let).or(expr
-        .then(just(Token::Semi).or_not())
-        .map(|(e, semi)| BlockItem::Expr(e, semi.is_some())));
+    let item = let_stmt(expr.clone())
+        .map(BlockItem::Let)
+        .or(expr
+            .then(just(Token::Semi).or_not())
+            .map(|(e, semi)| BlockItem::Expr(e, semi.is_some())))
+        .recover_with(skip_until(
+            any().and_is(just(Token::RBrace).not()).ignored(),
+            just(Token::Semi).ignored(),
+            || BlockItem::Expr(spanned(ExprKind::Error, (0..0).into()), true),
+        ));
     item.repeated()
         .collect::<Vec<_>>()
         .delimited_by(just(Token::LBrace), just(Token::RBrace))
@@ -485,6 +495,19 @@ where
                 span: span.into_range(),
             })
         })
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBrace,
+            Token::RBrace,
+            [
+                (Token::LParen, Token::RParen),
+                (Token::LBracket, Token::RBracket),
+            ],
+            |span: SimpleSpan| Block {
+                stmts: Vec::new(),
+                tail: None,
+                span: span.into_range(),
+            },
+        )))
 }
 
 fn program<'a, 's: 'a, I>() -> impl Parser<'a, I, Program, Extra<'a, 's>>
@@ -590,7 +613,18 @@ where
 
     let global_let = let_stmt(expr).map(Item::Let);
 
+    let item_start = one_of([
+        Token::Import,
+        Token::Struct,
+        Token::Fn,
+        Token::Pub,
+        Token::At,
+        Token::Let,
+    ])
+    .ignored();
+
     choice((import, struct_, func, global_let))
+        .recover_with(skip_then_retry_until(any().ignored(), item_start))
         .repeated()
         .collect::<Vec<_>>()
         .then_ignore(end())
@@ -719,6 +753,40 @@ mod tests {
     fn missing_semicolon_is_reported() {
         let (_, errs) = parse("fn f() { a b }");
         assert!(!errs.is_empty());
+    }
+
+    #[test]
+    fn recovers_and_keeps_later_items() {
+        let src = "fn a() { let x = ; let y = 1; y }\nfn b() { 1 + }\nfn c() -> i32 { 3 }\n";
+        let (p, errs) = parse(src);
+        assert!(errs.len() >= 2, "{errs:?}");
+        let names: Vec<_> = p
+            .expect("recovery should still yield a program")
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Fn(f) => Some(f.name.node.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            names.contains(&"a".to_string()) && names.contains(&"c".to_string()),
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn recovers_from_garbage_between_items() {
+        let (p, errs) = parse("struct A { x: i32 } ??? ) fn f() {} struct B { y: i32 }");
+        assert!(!errs.is_empty());
+        assert!(p.unwrap().items.len() >= 2);
+    }
+
+    #[test]
+    fn recovers_from_unbalanced_call() {
+        let (p, errs) = parse("fn f() { g(1, ; 2) } fn h() {}");
+        assert!(!errs.is_empty());
+        assert!(p.is_some());
     }
 
     #[test]
