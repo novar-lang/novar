@@ -10,3 +10,19 @@ publish = false
 
 [lints]
 workspace = true
+
+[features]
+# Object/executable generation through LLVM 22 (needs LLVM installed; see scripts/llvm-env.sh).
+llvm = ["dep:novar_hir", "dep:novar_diagnostics", "dep:novar_mlir", "novar_mlir/llvm", "dep:inkwell", "dep:melior", "dep:mlir-sys", "dep:libc"]
+
+[dependencies]
+inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-prefer-dynamic", "target-x86", "target-aarch64"], optional = true }
+libc = { version = "0.2", optional = true }
+melior = { version = "0.27", optional = true }
+mlir-sys = { version = "220", optional = true }
+novar_diagnostics = { version = "0.1.0", path = "../diagnostics", optional = true }
+novar_hir = { version = "0.1.0", path = "../semantic", optional = true }
+novar_mlir = { version = "0.1.0", path = "../ir", optional = true }
+
+[dev-dependencies]
+novar_parser = { version = "0.1.0", path = "../parser" }
