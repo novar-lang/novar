@@ -751,3 +751,24 @@ fn std_registry_can_be_browsed() {
     );
     assert!(methods_of("PgVectorClient").contains(&"with_vector"));
 }
+
+#[test]
+fn distributed_map_needs_a_named_function() {
+    assert_clean(
+        "fn sq(x: i64) -> i64 { x * x } fn f(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, sq) }",
+    );
+    assert_clean(
+        "fn sq(x: i64) -> i64 { x * x } fn f(v: Vec<i64>) -> Vec<i64> { v |> std::dist::map(sq) }",
+    );
+    assert_err(
+        "fn f(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, |x| x * 2) }",
+        "needs the name of a top-level function",
+    );
+    assert_err(
+        "fn sq(x: i64) -> i64 { x } fn f(v: Vec<String>) { std::dist::map(v, sq); }",
+        "mismatched",
+    );
+    assert_clean(
+        "fn d(x: i32) -> i32 { x } fn f(v: Vec<i32>) -> Vec<i32> { std::iter::map(v, d) }",
+    );
+}

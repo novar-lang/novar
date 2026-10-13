@@ -119,6 +119,7 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Value::vec(out))
         }
+        "std::dist::map" => dist_map(interp, &args),
         "std::iter::filter" => {
             let items = want_vec(&args[0])?;
             let mut out = Vec::new();
@@ -347,4 +348,79 @@ fn row(id: &str, text: &str, score: f64) -> Value {
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+/// `std::dist::map(items, f)`: `f(item)` for every item, in parallel, wherever the interpreter's
+/// executor puts it. Results come back in input order.
+fn dist_map(interp: &Interp, args: &[Value]) -> Res {
+    let items = want_vec(&args[0])?;
+    let Value::Func(name) = &args[1] else {
+        return err("`std::dist::map` needs the name of a top-level function, not a closure");
+    };
+    if let Some(exec) = interp.executor() {
+        let (_, ret) = interp
+            .signature(name)
+            .ok_or_else(|| RuntimeError::new(format!("no function `{name}`")))?;
+        let payload: Vec<serde_json::Value> = items.iter().map(Value::to_json).collect();
+        let (params, _) = interp.signature(name).expect("checked above");
+        if params.len() != 1 {
+            return err(format!(
+                "`{name}` must take exactly one argument to be mapped"
+            ));
+        }
+        let results = exec.map(name, payload).map_err(RuntimeError::new)?;
+        if results.len() != items.len() {
+            return err(format!(
+                "the executor returned {} results for {} items",
+                results.len(),
+                items.len()
+            ));
+        }
+        let ret = match ret {
+            // A function returning `Result<T, E>` yields `T` per item; errors fail the whole map.
+            Ty::Result(ok, _) => *ok,
+            other => other,
+        };
+        let out = results
+            .iter()
+            .map(|j| {
+                interp
+                    .value_from_json(&ret, j)
+                    .map_err(|e| RuntimeError::new(format!("result of `{name}`: {e}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(Value::vec(out));
+    }
+
+    // No executor: spread the calls over this machine's cores.
+    let n = items.len();
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |p| p.get())
+        .min(n.max(1));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<Option<Result<Value, RuntimeError>>>> =
+        (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= n {
+                        break;
+                    }
+                    let r = interp.apply(&args[1], vec![items[i].clone()]);
+                    *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+                }
+            });
+        }
+    });
+    slots
+        .into_iter()
+        .map(|s| {
+            s.into_inner()
+                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|| err("a worker thread stopped early"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::vec)
 }

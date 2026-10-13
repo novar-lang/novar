@@ -1471,6 +1471,19 @@ impl Checker {
             tys.push(a.ty.clone());
             checked.push(a);
         }
+        // Distributed calls ship the function by name, so only top-level functions qualify.
+        if let hir::ExprKind::Extern(path) = &callee.kind {
+            if path.join("::") == "std::dist::map" {
+                if let Some(f) = checked.get(1) {
+                    if !matches!(f.kind, hir::ExprKind::Fn(_)) {
+                        self.diags.push(
+                            Diagnostic::error(f.span.clone(), "`std::dist::map` needs the name of a top-level function")
+                                .with_note("closures capture local variables and cannot be sent to other machines"),
+                        );
+                    }
+                }
+            }
+        }
         let tys: Vec<Ty> = tys.iter().map(|t| self.resolve(t)).collect();
         let mut ty = match (sig.check)(&tys) {
             Ok(t) => t,

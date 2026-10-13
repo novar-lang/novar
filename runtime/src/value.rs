@@ -95,6 +95,8 @@ pub enum Value {
     Err(Box<Value>),
     Status(u16, Arc<str>),
     Closure(Arc<Closure>),
+    /// A reference to a top-level function, by name (callable, and shippable to other machines).
+    Func(Arc<str>),
     Native(Native),
 }
 
@@ -187,7 +189,7 @@ impl Value {
             Value::Table(_) => "Table",
             Value::Ok(_) | Value::Err(_) => "Result",
             Value::Status(..) => "Status",
-            Value::Closure(_) => "function",
+            Value::Closure(_) | Value::Func(_) => "function",
             Value::Native(_) => "object",
         }
     }
@@ -244,7 +246,7 @@ impl Value {
             Value::Ok(v) => v.to_json(),
             Value::Err(v) => serde_json::json!({ "error": v.to_json() }),
             Value::Status(code, msg) => serde_json::json!({ "status": code, "message": &**msg }),
-            Value::Closure(_) => Json::String("<function>".into()),
+            Value::Closure(_) | Value::Func(_) => Json::String("<function>".into()),
             Value::Native(_) => Json::String("<object>".into()),
         }
     }
@@ -307,6 +309,7 @@ impl fmt::Display for Value {
             Value::Err(v) => write!(f, "Err({v})"),
             Value::Status(code, msg) => write!(f, "{code}: {msg}"),
             Value::Closure(_) => f.write_str("<function>"),
+            Value::Func(name) => write!(f, "<fn {name}>"),
             Value::Native(_) => f.write_str("<object>"),
         }
     }

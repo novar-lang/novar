@@ -11,6 +11,17 @@ use serde_json::Value as Json;
 use crate::std_impl;
 use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
 
+/// Runs `std::dist::map` somewhere other than the calling thread: other processes, other machines,
+/// a Ray cluster. Arguments and results travel as JSON, converted with the function's static types.
+pub trait Executor: Send + Sync {
+    /// Calls the top-level function `function` once per item and returns the results in order.
+    fn map(
+        &self,
+        function: &str,
+        items: Vec<serde_json::Value>,
+    ) -> Result<Vec<serde_json::Value>, String>;
+}
+
 /// Maximum nesting of function calls before evaluation aborts. The native stack grows on demand
 /// (see `stacker`), so this is a language limit, not a limit of the thread's stack.
 const MAX_DEPTH: usize = 2000;
@@ -73,6 +84,7 @@ pub struct Interp {
     /// Remaining evaluation steps; `u64::MAX` means unlimited.
     fuel: std::sync::atomic::AtomicU64,
     quantization: std::sync::atomic::AtomicU8,
+    executor: RwLock<Option<Arc<dyn Executor>>>,
 }
 
 impl fmt::Debug for Interp {
@@ -113,6 +125,7 @@ impl Interp {
             live: std::sync::atomic::AtomicBool::new(live),
             fuel: std::sync::atomic::AtomicU64::new(u64::MAX),
             quantization: std::sync::atomic::AtomicU8::new(0),
+            executor: RwLock::new(None),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -195,6 +208,45 @@ impl Interp {
         match self.quantization.load(std::sync::atomic::Ordering::Relaxed) {
             1 => novar_hir::Quantization::Int8,
             _ => novar_hir::Quantization::None,
+        }
+    }
+
+    /// Where `std::dist::map` runs its calls. Without one, calls run on this machine's threads.
+    pub fn set_executor(&self, executor: Arc<dyn Executor>) {
+        *self.executor.write().unwrap_or_else(|e| e.into_inner()) = Some(executor);
+    }
+
+    pub(crate) fn executor(&self) -> Option<Arc<dyn Executor>> {
+        self.executor
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Calls `name` with JSON arguments (converted by the parameter types) and returns the result
+    /// as JSON; an `Ok(v)` result becomes `v`. This is how workers run remote calls.
+    pub fn call_json(&self, name: &str, args: &[Json]) -> Result<Json, String> {
+        let (params, _) = self
+            .signature(name)
+            .ok_or_else(|| format!("no function `{name}`"))?;
+        if params.len() != args.len() {
+            return Err(format!(
+                "`{name}` takes {} argument(s), got {}",
+                params.len(),
+                args.len()
+            ));
+        }
+        let values = params
+            .iter()
+            .zip(args)
+            .map(|((pname, ty), arg)| {
+                self.value_from_json(ty, arg)
+                    .map_err(|e| format!("argument `{pname}`: {e}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        match self.call(name, values).map_err(|e| e.to_string())? {
+            Value::Err(e) => Err(format!("Err({e})")),
+            v => Ok(v.to_json()),
         }
     }
 
@@ -348,6 +400,13 @@ impl Interp {
     }
 
     fn apply_at(&self, f: &Value, args: Vec<Value>, depth: usize) -> Eval {
+        if let Value::Func(name) = f {
+            let func = self
+                .fns
+                .get(&**name)
+                .ok_or_else(|| Ctrl::Fail(RuntimeError::new(format!("no function `{name}`"))))?;
+            return self.call_fn(func, args, depth);
+        }
         let Value::Closure(c) = f else {
             return fail(format!("{} is not callable", f.type_name()));
         };
@@ -594,7 +653,7 @@ impl Interp {
                         "global `{name}` is not initialised yet"
                     )))
                 }),
-            ExprKind::Fn(name) => fail(format!("function `{name}` cannot be used as a value yet")),
+            ExprKind::Fn(name) => Ok(Value::Func(name.as_str().into())),
             ExprKind::Extern(path) => {
                 fail(format!("`{}` cannot be used as a value", path.join("::")))
             }

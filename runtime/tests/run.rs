@@ -474,3 +474,92 @@ fn deep_recursion_works_on_a_small_thread_stack_and_runaway_recursion_is_an_erro
     assert_eq!(deep, 1500 * 1501 / 2);
     assert!(runaway.contains("stack overflow"), "{runaway}");
 }
+
+#[test]
+fn top_level_functions_are_values() {
+    let src = r#"
+        fn double(x: i64) -> i64 { x * 2 }
+        fn apply_all(v: Vec<i64>) -> Vec<i64> { std::iter::map(v, double) }
+        fn total(v: Vec<i64>) -> i64 { let mut s = 0; for x in apply_all(v) { s += x; } s }
+    "#;
+    let v = Value::vec((1..=4).map(Value::Int).collect());
+    assert_eq!(int(run(src, "total", vec![v])), 20);
+}
+
+#[test]
+fn dist_map_spreads_work_over_threads_and_keeps_order() {
+    let src = r#"
+        fn square(x: i64) -> i64 { x * x }
+        fn all(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, square) }
+        fn fails(x: i64) -> i64 { 10 / x }
+        fn bad(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, fails) }
+    "#;
+    let i = load(src);
+    let input = Value::vec((0..200).map(Value::Int).collect());
+    let Value::Vec(out) = i.call("all", vec![input]).unwrap() else {
+        panic!()
+    };
+    let squares: Vec<i64> = out.snapshot().iter().map(|v| int(v.clone())).collect();
+    assert_eq!(squares, (0..200).map(|x| x * x).collect::<Vec<_>>());
+    // An error in any call fails the whole map.
+    let e = i
+        .call("bad", vec![Value::vec(vec![Value::Int(5), Value::Int(0)])])
+        .unwrap_err();
+    assert!(e.message.contains("division by zero"), "{e}");
+}
+
+#[test]
+fn dist_map_can_use_a_custom_executor() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Counting(AtomicUsize);
+    impl novar_runtime::Executor for Counting {
+        fn map(
+            &self,
+            function: &str,
+            items: Vec<serde_json::Value>,
+        ) -> Result<Vec<serde_json::Value>, String> {
+            self.0.fetch_add(items.len(), Ordering::SeqCst);
+            Ok(items
+                .iter()
+                .map(|j| serde_json::json!(j.as_i64().unwrap() + 1000 + function.len() as i64))
+                .collect())
+        }
+    }
+    let i = load(
+        "fn work(x: i64) -> i64 { x } fn all(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, work) }",
+    );
+    let exec = std::sync::Arc::new(Counting(AtomicUsize::new(0)));
+    i.set_executor(exec.clone());
+    let Value::Vec(out) = i
+        .call("all", vec![Value::vec(vec![Value::Int(1), Value::Int(2)])])
+        .unwrap()
+    else {
+        panic!()
+    };
+    let got: Vec<i64> = out.snapshot().into_iter().map(int).collect();
+    assert_eq!(got, [1005, 1006], "the executor decided the results");
+    assert_eq!(exec.0.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn call_json_converts_by_the_parameter_types() {
+    let i = load(
+        "struct P { x: i64, y: i64 } fn add(p: P, k: i64) -> i64 { p.x + p.y + k } fn boom() -> Result<i64, String> { Err(\"no\") }",
+    );
+    assert_eq!(
+        i.call_json("add", &[json!({"x": 1, "y": 2}), json!(10)])
+            .unwrap(),
+        json!(13)
+    );
+    assert!(
+        i.call_json("add", &[json!({"x": 1}), json!(1)])
+            .unwrap_err()
+            .contains("argument `p`")
+    );
+    assert!(
+        i.call_json("add", &[json!(1)])
+            .unwrap_err()
+            .contains("takes 2")
+    );
+    assert!(i.call_json("boom", &[]).unwrap_err().contains("Err(no)"));
+}

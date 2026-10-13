@@ -142,8 +142,12 @@ fn map_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
 
 fn map(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 2)?;
-    elem(args, 0)?;
+    let item = elem(args, 0)?;
     match &args[1] {
+        Ty::Fn(p, _) if p.len() == 1 && !p[0].accepts(&item) => Err(format!(
+            "the function takes `{}` but the vector holds `{item}`: mismatched element type",
+            p[0]
+        )),
         Ty::Fn(p, r) if p.len() == 1 => Ok(vec_of((**r).clone())),
         Ty::Unknown => Ok(vec_of(Ty::Unknown)),
         other => Err(format!(
@@ -165,6 +169,10 @@ fn filter(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 2)?;
     let t = elem(args, 0)?;
     match &args[1] {
+        Ty::Fn(p, _) if p.len() == 1 && !p[0].accepts(&t) => Err(format!(
+            "the predicate takes `{}` but the vector holds `{t}`: mismatched element type",
+            p[0]
+        )),
         Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(vec_of(t)),
         Ty::Unknown => Ok(vec_of(t)),
         other => Err(format!(
@@ -646,6 +654,14 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         Sig {
             check: filter,
             hint: filter_hint,
+            from_expected: None,
+        },
+    ),
+    (
+        "std::dist::map",
+        Sig {
+            check: map,
+            hint: map_hint,
             from_expected: None,
         },
     ),
