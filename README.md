@@ -41,8 +41,21 @@ novar build prog.nv -o prog          # needs `fn main() -> i32`; the result is t
 novar jit prog.nv fib 30
 ```
 
-The native subset covers integers, floats, booleans, `if`, `return` and calls.
-Strings, structs and std items still run only in the interpreter (`novar run`/`serve`).
+The native subset covers integers, floats, booleans, `if`, `return`, calls, global
+constants, structs of supported types, `let mut` with `=`/`+=`/..., `while`, `for i in a..b`
+and `for x in vec`, arrays of numbers/bools (`[1, 2, 3]`, `v[i]`, `.len()`, bounds-checked),
+element/field assignment (`v[i] = x`, `p.a.b += 1`, `mut` parameters), and strings (literals, `+`, `==`, `.len()`, `.is_empty()`, f-strings with integers, booleans
+and strings, `std::io::print`/`println`). Closures, floats in f-strings, arrays of
+strings/structs, tensors and the rest of std still run only in the interpreter (`novar run`/`serve`). Strings built with `+` are
+never freed yet.
+
+### Value semantics
+
+Structs and strings are values: copying one and then changing the copy leaves the original
+alone. A `Vec` is a reference: `let b = a;` makes both names share the same elements, so
+`a[0] = 1` is visible through `b`, and a function taking `mut v: Vec<T>` can fill the caller's
+vector. Untyped number literals take their type from how they are used (`let mut n = 0;`
+becomes `u64` if you compare it with `v.len()`) and default to `i32` / `f64`.
 
 ## License
 
