@@ -15,6 +15,7 @@ members = [
     "cli",
     "benchmarks",
     "tools/lsp",
+    "tools/package-manager",
     "playground",
 ]
 
