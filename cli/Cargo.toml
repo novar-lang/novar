@@ -30,3 +30,6 @@ tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "macros", "s
 [features]
 # Native backend (MLIR + LLVM 22). Needs LLVM installed; see scripts/llvm-env.sh.
 llvm = ["dep:novar_codegen", "dep:novar_mlir", "novar_codegen/llvm", "novar_mlir/llvm"]
+
+[dev-dependencies]
+serde_json = "1.0.154"
