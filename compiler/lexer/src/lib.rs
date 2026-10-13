@@ -127,6 +127,62 @@ pub enum Token<'src> {
     RBracket,
 }
 
+impl std::fmt::Display for Token<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Token::*;
+        let s = match self {
+            Import => "import",
+            Fn => "fn",
+            Let => "let",
+            Mut => "mut",
+            Struct => "struct",
+            Enum => "enum",
+            Pub => "pub",
+            Return => "return",
+            If => "if",
+            Else => "else",
+            For => "for",
+            In => "in",
+            While => "while",
+            True => "true",
+            False => "false",
+            Ident(s) | Int(s) | Float(s) | Str(s) | FStr(s) => s,
+            Pipe => "|>",
+            PathSep => "::",
+            Arrow => "->",
+            FatArrow => "=>",
+            EqEq => "==",
+            NotEq => "!=",
+            LtEq => "<=",
+            GtEq => ">=",
+            AndAnd => "&&",
+            OrOr => "||",
+            Eq => "=",
+            Lt => "<",
+            Gt => ">",
+            Bar => "|",
+            Bang => "!",
+            Plus => "+",
+            Minus => "-",
+            Star => "*",
+            Slash => "/",
+            Percent => "%",
+            Dot => ".",
+            Comma => ",",
+            Semi => ";",
+            Colon => ":",
+            At => "@",
+            LParen => "(",
+            RParen => ")",
+            LBrace => "{",
+            RBrace => "}",
+            LBracket => "[",
+            RBracket => "]",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Tokenizes `src`, collecting lexical errors instead of stopping at the first one.
 pub fn tokenize(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
     let mut tokens = Vec::new();

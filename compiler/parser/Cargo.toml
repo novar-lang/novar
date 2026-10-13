@@ -10,3 +10,8 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+chumsky = "0.13.0"
+novar_ast = { version = "0.1.0", path = "../ast" }
+novar_lexer = { version = "0.1.0", path = "../lexer" }
