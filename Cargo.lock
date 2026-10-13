@@ -2434,9 +2434,12 @@ dependencies = [
  "novar_hir",
  "novar_lsp",
  "novar_mlir",
+ "novar_modules",
  "novar_parser",
+ "novar_pkg",
  "novar_runtime",
  "novar_server",
+ "serde",
  "serde_json",
  "tokio",
 ]

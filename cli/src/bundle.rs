@@ -4,13 +4,39 @@
 //! On macOS the copy keeps the executable's original ad-hoc signature, which still covers the
 //! executable part; `codesign --verify --strict` rejects the trailing payload but the loader runs it.
 //!
-//! Layout of a bundled binary: `[novar executable][program source][u64 LE source length]["NOVARAPP"]`.
+//! Layout of a bundled binary: `[novar executable][JSON program][u64 LE JSON length]["NOVARAPP"]`,
+//! where the JSON holds every source file of the program (see [`Bundle`]).
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::{CliError, check, failed};
+use serde::{Deserialize, Serialize};
+
+use crate::{CliError, failed};
+
+/// A whole program: every source file that went into it, so the binary needs no files at run time.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Bundle {
+    /// Path of the entry file, as it was loaded.
+    pub entry: String,
+    /// `(path, text)` of every module, entry first.
+    pub files: Vec<(String, String)>,
+    /// `(package name, source directory)` of every dependency.
+    pub deps: Vec<(String, String)>,
+}
+
+impl Bundle {
+    pub fn packages(&self) -> Vec<novar_modules::Package> {
+        self.deps
+            .iter()
+            .map(|(name, dir)| novar_modules::Package {
+                name: name.clone(),
+                src_dir: PathBuf::from(dir),
+            })
+            .collect()
+    }
+}
 
 const MAGIC: &[u8; 8] = b"NOVARAPP";
 const FOOTER: u64 = 16;
@@ -41,13 +67,15 @@ fn read_payload(exe: &Path) -> std::io::Result<Option<(String, u64)>> {
 }
 
 /// The program bundled into the running executable, if any.
-pub fn embedded() -> Option<String> {
+pub fn embedded() -> Option<Bundle> {
     let exe = std::env::current_exe().ok()?;
-    read_payload(&exe).ok().flatten().map(|(src, _)| src)
+    let (json, _) = read_payload(&exe).ok().flatten()?;
+    serde_json::from_str(&json).ok()
 }
 
 /// Writes a copy of this executable with `source` appended to `out`.
-pub fn write_bundle(source: &str, out: &Path) -> std::io::Result<()> {
+pub fn write_bundle(bundle: &Bundle, out: &Path) -> std::io::Result<()> {
+    let source = serde_json::to_string(bundle).map_err(std::io::Error::other)?;
     let exe = std::env::current_exe()?;
     // Rebundling a bundle must not stack payloads: copy only the plain executable.
     let base_len = match read_payload(&exe)? {
@@ -111,18 +139,16 @@ pub fn build_serve(file: &str, flags: &[&str]) -> Result<(), CliError> {
             _ => return Err(CliError::Usage),
         }
     }
-    let hir = check(file)?;
-    if novar_server::routes(&hir).is_empty() {
+    let checked = crate::check_project(file)?;
+    if novar_server::routes(&checked.hir).is_empty() {
         return failed("no `@endpoint` functions found, there is nothing to serve");
     }
-    let source =
-        std::fs::read_to_string(file).or_else(|e| failed(format!("cannot read `{file}`: {e}")))?;
     let stem = Path::new(file)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("service");
     let out = out.unwrap_or_else(|| stem.to_string());
-    write_bundle(&source, Path::new(&out))
+    write_bundle(&checked.bundle, Path::new(&out))
         .or_else(|e| failed(format!("cannot write `{out}`: {e}")))?;
     eprintln!("wrote {out}  (single binary; run it with --port N, --host H, --seed FILE, --live)");
     if docker {

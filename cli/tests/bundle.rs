@@ -167,3 +167,145 @@ fn the_dockerfile_is_multi_stage_and_names_the_program() {
     assert!(docker.contains("COPY --from=builder /out/service /service"));
     assert!(docker.contains("USER nonroot") && docker.contains("EXPOSE 8080"));
 }
+
+#[test]
+fn a_multi_file_program_is_bundled_with_all_its_modules() {
+    let dir = scratch("multi-app");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.nv"),
+        "import util::shout;\nstruct In { name: String }\nstruct Out { greeting: String }\n\
+         @endpoint(path = \"/hello\", method = \"POST\")\npub fn hello(p: In) -> Result<Out, String> { Ok(Out { greeting: shout(p.name) }) }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("util.nv"),
+        "pub fn shout(s: String) -> String { f\"{s}!\" }\n",
+    )
+    .unwrap();
+    let exe = scratch("multi-service");
+    let out = Command::new(NOVAR)
+        .args(["build", "--serve"])
+        .arg(dir.join("main.nv"))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The service must not read the sources again: delete them.
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let port = free_port();
+    let child = Command::new(&exe)
+        .args(["--host", "127.0.0.1", "--port", &port.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _server = Server(child);
+    wait_for(port);
+    let (status, body) = post(port, "/hello", r#"{"name":"modules"}"#).unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({"greeting": "modules!"})
+    );
+}
+
+#[test]
+fn errors_in_a_module_are_reported_against_that_file() {
+    let dir = scratch("err-app");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.nv"),
+        "import util::bad;\nfn main() -> i32 { bad() }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("util.nv"),
+        "pub fn bad() -> i32 {\n    \"nope\"\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(NOVAR)
+        .arg("check")
+        .arg(dir.join("main.nv"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("util.nv:2:5") && err.contains("expected `i32`, found `String`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn nvpm_projects_run_against_installed_dependencies() {
+    use novar_pkg::{Project, registry};
+
+    let root = scratch("nvpm-e2e");
+    let _ = std::fs::remove_dir_all(&root);
+    let (reg, lib, app, home) = (
+        root.join("registry"),
+        root.join("mathx"),
+        root.join("app"),
+        root.join("home"),
+    );
+    std::fs::create_dir_all(lib.join("src")).unwrap();
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(
+        lib.join("novar.toml"),
+        "[package]\nname = \"mathx\"\nversion = \"1.3.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        lib.join("src/lib.nv"),
+        "pub fn cube(x: i64) -> i64 { x * x * x }\n",
+    )
+    .unwrap();
+    registry::publish(&reg, &lib).unwrap();
+
+    std::fs::write(
+        app.join("novar.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nmathx = \"^1.2\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src/main.nv"),
+        "import mathx::cube;\nfn main() -> i64 { cube(3) + 1 }\n",
+    )
+    .unwrap();
+
+    // Without a lockfile the compiler asks for `nvpm install`.
+    let out = Command::new(NOVAR)
+        .env("NVPM_HOME", &home)
+        .arg("check")
+        .arg(app.join("src/main.nv"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("nvpm install"));
+
+    let project = Project::open(&app).unwrap();
+    let r = registry::open(reg.to_str().unwrap());
+    unsafe { std::env::set_var("NVPM_HOME", &home) };
+    project.lock(Some(r.as_ref())).unwrap();
+    project.install(Some(r.as_ref())).unwrap();
+
+    let out = Command::new(NOVAR)
+        .env("NVPM_HOME", &home)
+        .args(["run"])
+        .arg(app.join("src/main.nv"))
+        .arg("main")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "28");
+}
