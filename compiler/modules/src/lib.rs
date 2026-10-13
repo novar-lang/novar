@@ -26,6 +26,58 @@ use novar_diagnostics::Diagnostic;
 
 pub use source_map::{SourceFile, SourceMap};
 
+impl Loaded {
+    /// Every file that was read, as `(path, text)`, entry first. Enough to rebuild the program
+    /// later with [`MemFiles`].
+    pub fn sources(&self) -> Vec<(String, String)> {
+        self.map
+            .files
+            .iter()
+            .map(|f| (f.name.clone(), f.text.clone()))
+            .collect()
+    }
+}
+
+/// Where module files come from. The real file system normally; an in-memory table when a
+/// program has been bundled into a binary.
+pub trait Files {
+    fn read(&self, path: &Path) -> std::io::Result<String>;
+    fn is_file(&self, path: &Path) -> bool;
+}
+
+/// The operating system's files.
+#[derive(Debug, Clone, Copy)]
+pub struct OsFiles;
+
+impl Files for OsFiles {
+    fn read(&self, path: &Path) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+}
+
+/// Files held in memory, keyed by the same paths the sources were loaded from.
+#[derive(Debug, Clone, Default)]
+pub struct MemFiles(pub HashMap<PathBuf, String>);
+
+impl Files for MemFiles {
+    fn read(&self, path: &Path) -> std::io::Result<String> {
+        self.0.get(path).cloned().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} is not bundled", path.display()),
+            )
+        })
+    }
+
+    fn is_file(&self, path: &Path) -> bool {
+        self.0.contains_key(path)
+    }
+}
+
 /// A dependency: the name used in `import name::...` and the directory with its modules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package {
@@ -57,6 +109,7 @@ struct Module {
 }
 
 struct Loader<'a> {
+    files: &'a dyn Files,
     deps: &'a [Package],
     root_dir: Option<PathBuf>,
     map: SourceMap,
@@ -91,7 +144,19 @@ pub fn load_text(
     root_dir: Option<&Path>,
     deps: &[Package],
 ) -> Loaded {
+    load_in(&OsFiles, entry_name, text, root_dir, deps)
+}
+
+/// Like [`load_text`], reading modules through `files`.
+pub fn load_in(
+    files: &dyn Files,
+    entry_name: &str,
+    text: &str,
+    root_dir: Option<&Path>,
+    deps: &[Package],
+) -> Loaded {
     let mut l = Loader {
+        files,
         deps,
         root_dir: root_dir.map(Path::to_path_buf),
         map: SourceMap::default(),
@@ -150,11 +215,11 @@ impl Loader<'_> {
             base.push(seg);
         }
         let file = base.with_extension("nv");
-        if file.is_file() {
+        if self.files.is_file(&file) {
             return Some(file);
         }
         let nested = base.join("mod.nv");
-        nested.is_file().then_some(nested)
+        self.files.is_file(&nested).then_some(nested)
     }
 
     /// Loads (once) the module `key`; `None` when no such file exists.
@@ -163,7 +228,7 @@ impl Loader<'_> {
             return Some(idx);
         }
         let file = self.module_file(&key)?;
-        let text = std::fs::read_to_string(&file).ok()?;
+        let text = self.files.read(&file).ok()?;
         let idx = self.add_module(key, &file.display().to_string(), &text);
         self.process(idx);
         self.order.push(idx);

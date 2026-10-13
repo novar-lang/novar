@@ -252,3 +252,41 @@ fn load_text_uses_the_unsaved_buffer() {
     );
     assert_eq!(ok(&loaded), "2");
 }
+
+#[test]
+fn bundled_sources_rebuild_the_same_program_without_the_file_system() {
+    use novar_modules::{MemFiles, load_in};
+    let p = Project::new("bundle");
+    p.file(
+        "app/main.nv",
+        "import mathx::dot;\nimport helper::twice;\nfn main() -> i32 { twice(dot(2, 3)) }\n",
+    )
+    .file("app/helper.nv", "pub fn twice(x: i32) -> i32 { x * 2 }\n")
+    .file(
+        "mathx/src/lib.nv",
+        "pub fn dot(a: i32, b: i32) -> i32 { a * b }\n",
+    );
+    let deps = [dep("mathx", &p, "mathx/src")];
+    let entry = p.path("app/main.nv");
+    let first = load(&entry, &deps).unwrap();
+    assert_eq!(ok(&first), "12");
+
+    let mem = MemFiles(
+        first
+            .sources()
+            .into_iter()
+            .map(|(n, t)| (PathBuf::from(n), t))
+            .collect(),
+    );
+    let text = std::fs::read_to_string(&entry).unwrap();
+    drop(p); // the files are gone from disk
+    let again = load_in(
+        &mem,
+        &entry.display().to_string(),
+        &text,
+        entry.parent(),
+        &deps,
+    );
+    assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
+    assert_eq!(ok(&again), "12");
+}
