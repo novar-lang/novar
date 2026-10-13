@@ -2494,6 +2494,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "novar_modules"
+version = "0.1.0"
+dependencies = [
+ "novar_ast",
+ "novar_diagnostics",
+ "novar_hir",
+ "novar_parser",
+ "novar_runtime",
+]
+
+[[package]]
 name = "novar_parser"
 version = "0.1.0"
 dependencies = [

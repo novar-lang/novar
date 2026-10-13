@@ -1,0 +1,403 @@
+//! Multi-file Novar programs.
+//!
+//! A *package* is a directory of `.nv` files. Its root module is the entry file (or `lib.nv` for
+//! a dependency); `a/b.nv` or `a/b/mod.nv` is the module `a::b`. Other modules are used with
+//! `import`:
+//!
+//! ```text
+//! import util::clamp;                 // ./util.nv, relative to the package root
+//! import crate::geometry::{Point, norm};
+//! import mathx::vec::dot;             // package `mathx`, file vec.nv
+//! ```
+//!
+//! Only `pub fn` and `pub struct` items can be imported. Loading merges every module into one
+//! [`novar_ast::Program`], renaming items from other modules to unique names (`mathx__vec__dot`)
+//! and rewriting every reference, so the type checker and backends never see modules. All files
+//! share one offset space (see [`SourceMap`]) so diagnostics keep pointing at the right file.
+
+mod rewrite;
+mod source_map;
+
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use novar_ast::{Import, Item, Program};
+use novar_diagnostics::Diagnostic;
+
+pub use source_map::{SourceFile, SourceMap};
+
+/// A dependency: the name used in `import name::...` and the directory with its modules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    pub name: String,
+    pub src_dir: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct Loaded {
+    /// Every module merged into one program (dependencies first, the entry module last).
+    pub program: Program,
+    pub map: SourceMap,
+    /// Parse errors and module / import problems. Type errors come from checking `program`.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct ModKey {
+    /// 0 is the package being built, `n` is `deps[n - 1]`.
+    pkg: usize,
+    path: Vec<String>,
+}
+
+struct Module {
+    key: ModKey,
+    program: Program,
+    /// `(local name, module index, item name, import span)`
+    imports: Vec<(String, usize, String)>,
+}
+
+struct Loader<'a> {
+    deps: &'a [Package],
+    root_dir: Option<PathBuf>,
+    map: SourceMap,
+    modules: Vec<Module>,
+    index: HashMap<ModKey, usize>,
+    order: Vec<usize>,
+    diags: Vec<Diagnostic>,
+}
+
+/// Loads the program whose entry file is `entry`.
+pub fn load(entry: &Path, deps: &[Package]) -> Result<Loaded, String> {
+    let text = std::fs::read_to_string(entry)
+        .map_err(|e| format!("cannot read `{}`: {e}", entry.display()))?;
+    let root = entry
+        .parent()
+        .map(Path::to_path_buf)
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("."));
+    Ok(load_text(
+        &entry.display().to_string(),
+        &text,
+        Some(&root),
+        deps,
+    ))
+}
+
+/// Like [`load`], with the entry file's text supplied by the caller (an unsaved editor buffer).
+/// `root_dir` is where sibling modules are looked up.
+pub fn load_text(
+    entry_name: &str,
+    text: &str,
+    root_dir: Option<&Path>,
+    deps: &[Package],
+) -> Loaded {
+    let mut l = Loader {
+        deps,
+        root_dir: root_dir.map(Path::to_path_buf),
+        map: SourceMap::default(),
+        modules: Vec::new(),
+        index: HashMap::new(),
+        order: Vec::new(),
+        diags: Vec::new(),
+    };
+    let entry = l.add_module(
+        ModKey {
+            pkg: 0,
+            path: vec![],
+        },
+        entry_name,
+        text,
+    );
+    l.process(entry);
+    l.order.push(entry);
+    l.link()
+}
+
+impl Loader<'_> {
+    fn package_name(&self, pkg: usize) -> String {
+        if pkg == 0 {
+            "crate".into()
+        } else {
+            self.deps[pkg - 1].name.clone()
+        }
+    }
+
+    fn add_module(&mut self, key: ModKey, name: &str, text: &str) -> usize {
+        let base = self.map.add(name, text);
+        let (program, errors) = novar_parser::parse_at(text, base);
+        self.diags.extend(errors);
+        let idx = self.modules.len();
+        self.modules.push(Module {
+            key: key.clone(),
+            program: program.unwrap_or_default(),
+            imports: Vec::new(),
+        });
+        self.index.insert(key, idx);
+        idx
+    }
+
+    fn module_file(&self, key: &ModKey) -> Option<PathBuf> {
+        let dir = if key.pkg == 0 {
+            self.root_dir.clone()?
+        } else {
+            self.deps[key.pkg - 1].src_dir.clone()
+        };
+        if key.path.is_empty() {
+            return (key.pkg != 0).then(|| dir.join("lib.nv"));
+        }
+        let mut base = dir;
+        for seg in &key.path {
+            base.push(seg);
+        }
+        let file = base.with_extension("nv");
+        if file.is_file() {
+            return Some(file);
+        }
+        let nested = base.join("mod.nv");
+        nested.is_file().then_some(nested)
+    }
+
+    /// Loads (once) the module `key`; `None` when no such file exists.
+    fn load_module(&mut self, key: ModKey) -> Option<usize> {
+        if let Some(&idx) = self.index.get(&key) {
+            return Some(idx);
+        }
+        let file = self.module_file(&key)?;
+        let text = std::fs::read_to_string(&file).ok()?;
+        let idx = self.add_module(key, &file.display().to_string(), &text);
+        self.process(idx);
+        self.order.push(idx);
+        Some(idx)
+    }
+
+    fn exports(&self, idx: usize) -> HashMap<String, bool> {
+        let mut out = HashMap::new();
+        for item in &self.modules[idx].program.items {
+            match item {
+                Item::Fn(f) => {
+                    out.insert(f.name.node.clone(), f.is_pub);
+                }
+                Item::Struct(s) => {
+                    out.insert(s.name.node.clone(), s.is_pub);
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn describe(&self, key: &ModKey) -> String {
+        std::iter::once(self.package_name(key.pkg))
+            .chain(key.path.iter().cloned())
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
+    /// Resolves the `import`s of module `idx`, loading what they refer to.
+    fn process(&mut self, idx: usize) {
+        let imports: Vec<Import> = self.modules[idx]
+            .program
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Import(imp) if imp.path.first().is_some_and(|s| s.node != "std") => {
+                    Some(imp.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let current_pkg = self.modules[idx].key.pkg;
+        for imp in imports {
+            let segs: Vec<String> = imp.path.iter().map(|s| s.node.clone()).collect();
+            let (pkg, rest) = match segs[0].as_str() {
+                "crate" => (current_pkg, &segs[1..]),
+                name => match self.deps.iter().position(|d| d.name == name) {
+                    Some(i) => (i + 1, &segs[1..]),
+                    None => (current_pkg, &segs[..]),
+                },
+            };
+            let items: Vec<String> = if imp.group.is_empty() {
+                vec![rest.last().cloned().unwrap_or_default()]
+            } else {
+                imp.group.iter().map(|g| g.node.clone()).collect()
+            };
+            let module_path: Vec<String> = if imp.group.is_empty() {
+                rest[..rest.len().saturating_sub(1)].to_vec()
+            } else {
+                rest.to_vec()
+            };
+            if rest.is_empty() && imp.group.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    imp.span.clone(),
+                    "an import must name an item, e.g. `import util::helper;`",
+                ));
+                continue;
+            }
+            let key = ModKey {
+                pkg,
+                path: module_path,
+            };
+            let Some(target) = self.load_module(key.clone()) else {
+                self.diags.push(
+                    Diagnostic::error(
+                        imp.span.clone(),
+                        format!("cannot find the module `{}`", self.describe(&key)),
+                    )
+                    .with_note(match self.module_file(&key) {
+                        Some(f) => format!("expected the file {}", f.display()),
+                        None => "no such file; module `a::b` lives in `a/b.nv` or `a/b/mod.nv`"
+                            .to_string(),
+                    }),
+                );
+                continue;
+            };
+            let exports = self.exports(target);
+            for (name, ident) in items.iter().zip(if imp.group.is_empty() {
+                vec![imp.path.last().unwrap().clone()]
+            } else {
+                imp.group.clone()
+            }) {
+                match exports.get(name) {
+                    Some(true) => {
+                        self.modules[idx]
+                            .imports
+                            .push((name.clone(), target, name.clone()))
+                    }
+                    Some(false) => self.diags.push(
+                        Diagnostic::error(ident.span.clone(), format!("`{name}` is private"))
+                            .with_note(format!(
+                                "mark it `pub` in `{}` to import it",
+                                self.describe(&key)
+                            )),
+                    ),
+                    None => self.diags.push(Diagnostic::error(
+                        ident.span.clone(),
+                        format!(
+                            "module `{}` has no function or struct `{name}`",
+                            self.describe(&key)
+                        ),
+                    )),
+                }
+            }
+        }
+    }
+
+    /// The program-wide name of `item` defined in module `idx`.
+    fn mangled(&self, idx: usize, item: &str) -> String {
+        let key = &self.modules[idx].key;
+        if idx == 0 {
+            return item.to_string();
+        }
+        let mut parts = vec![self.package_name(key.pkg)];
+        parts.extend(key.path.iter().cloned());
+        parts.push(item.to_string());
+        parts.join("__")
+    }
+
+    fn display(&self, idx: usize, item: &str) -> String {
+        let key = &self.modules[idx].key;
+        let mut parts = vec![self.package_name(key.pkg)];
+        parts.extend(key.path.iter().cloned());
+        parts.push(item.to_string());
+        parts.join("::")
+    }
+
+    fn link(mut self) -> Loaded {
+        let order = std::mem::take(&mut self.order);
+        let mut merged = Program::default();
+        let mut std_imports: Vec<Item> = Vec::new();
+        let mut seen_std: HashMap<String, String> = HashMap::new();
+
+        for &idx in &order {
+            // Names visible at the top level of this module.
+            let mut names: HashMap<String, String> = HashMap::new();
+            let mut declared: HashSet<String> = HashSet::new();
+            for item in &self.modules[idx].program.items {
+                let n = match item {
+                    Item::Fn(f) => &f.name,
+                    Item::Struct(s) => &s.name,
+                    Item::Let(l) => &l.name,
+                    Item::Import(_) => continue,
+                };
+                declared.insert(n.node.clone());
+                let mangled = self.mangled(idx, &n.node);
+                if mangled != n.node {
+                    self.map
+                        .display_names
+                        .insert(mangled.clone(), self.display(idx, &n.node));
+                }
+                names.insert(n.node.clone(), mangled);
+            }
+            let imports = self.modules[idx].imports.clone();
+            for (local, target, item) in imports {
+                if declared.contains(&local) {
+                    self.diags.push(Diagnostic::error(
+                        0..0,
+                        format!(
+                            "`{local}` is both defined and imported in `{}`",
+                            self.display(idx, "")
+                        ),
+                    ));
+                }
+                let mangled = self.mangled(target, &item);
+                if mangled != item {
+                    self.map
+                        .display_names
+                        .insert(mangled.clone(), self.display(target, &item));
+                }
+                names.insert(local, mangled);
+            }
+
+            let items = std::mem::take(&mut self.modules[idx].program.items);
+            let mut rewriter = rewrite::Rewriter::new(&names);
+            for mut item in items {
+                match &item {
+                    Item::Import(imp) => {
+                        if imp.path.first().is_some_and(|s| s.node == "std") {
+                            let full: Vec<String> = imp
+                                .path
+                                .iter()
+                                .chain(&imp.group)
+                                .map(|s| s.node.clone())
+                                .collect();
+                            let key = format!(
+                                "{}|{}",
+                                imp.path
+                                    .iter()
+                                    .map(|s| s.node.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("::"),
+                                imp.group
+                                    .iter()
+                                    .map(|s| s.node.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            );
+                            if let Some(last) = full.last() {
+                                if let Some(prev) = seen_std.get(last) {
+                                    if *prev != key && imp.group.is_empty() {
+                                        self.diags.push(Diagnostic::error(imp.span.clone(), format!("`{last}` is already imported from a different std path")));
+                                    }
+                                }
+                                seen_std.insert(last.clone(), key);
+                            }
+                            std_imports.push(item.clone());
+                        }
+                    }
+                    _ => {
+                        rewriter.item(&mut item);
+                        merged.items.push(item);
+                    }
+                }
+            }
+        }
+
+        let mut items = std_imports;
+        items.extend(merged.items);
+        Loaded {
+            program: Program { items },
+            map: self.map,
+            diagnostics: self.diags,
+        }
+    }
+}

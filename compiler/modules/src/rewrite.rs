@@ -1,0 +1,197 @@
+//! Renames module-level names inside a parsed module.
+//!
+//! Names are looked up scope-aware: a parameter, `let`, loop variable or closure parameter with
+//! the same name as an item shadows it, exactly as in the type checker.
+
+use std::collections::{HashMap, HashSet};
+
+use novar_ast::*;
+
+pub struct Rewriter<'a> {
+    /// Module-level name -> program-wide name.
+    names: &'a HashMap<String, String>,
+    scopes: Vec<HashSet<String>>,
+}
+
+impl<'a> Rewriter<'a> {
+    pub fn new(names: &'a HashMap<String, String>) -> Self {
+        Self {
+            names,
+            scopes: Vec::new(),
+        }
+    }
+
+    fn bound(&self, name: &str) -> bool {
+        self.scopes.iter().any(|s| s.contains(name))
+    }
+
+    fn bind(&mut self, name: &str) {
+        if let Some(s) = self.scopes.last_mut() {
+            s.insert(name.to_string());
+        }
+    }
+
+    fn rename(&self, id: &mut Ident) {
+        if let Some(new) = self.names.get(&id.node) {
+            id.node = new.clone();
+        }
+    }
+
+    pub fn item(&mut self, item: &mut Item) {
+        match item {
+            Item::Import(_) => {}
+            Item::Let(l) => {
+                self.scopes.push(HashSet::new());
+                self.let_decl(l, false);
+                self.scopes.pop();
+            }
+            Item::Struct(s) => {
+                self.rename(&mut s.name);
+                for f in &mut s.fields {
+                    self.ty(&mut f.ty);
+                }
+            }
+            Item::Fn(f) => self.function(f),
+        }
+    }
+
+    fn function(&mut self, f: &mut Fn) {
+        self.rename(&mut f.name);
+        self.scopes.push(HashSet::new());
+        for attr in &mut f.attrs {
+            for (_, value) in &mut attr.args {
+                self.expr(value);
+            }
+        }
+        for p in &mut f.params {
+            self.ty(&mut p.ty);
+            self.bind(&p.name.node);
+        }
+        if let Some(r) = &mut f.ret {
+            self.ty(r);
+        }
+        self.block(&mut f.body);
+        self.scopes.pop();
+    }
+
+    /// `declare`: whether the `let` binds its name in the current scope (false for globals,
+    /// whose name is an item).
+    fn let_decl(&mut self, l: &mut Let, declare: bool) {
+        if let Some(t) = &mut l.ty {
+            self.ty(t);
+        }
+        self.expr(&mut l.init);
+        if declare {
+            self.bind(&l.name.node);
+        } else {
+            self.rename(&mut l.name);
+        }
+    }
+
+    fn ty(&mut self, t: &mut Type) {
+        if t.path.len() == 1 {
+            self.rename(&mut t.path[0]);
+        }
+        for a in &mut t.args {
+            if let TypeArg::Type(inner) = a {
+                self.ty(inner);
+            }
+        }
+    }
+
+    fn block(&mut self, b: &mut Block) {
+        self.scopes.push(HashSet::new());
+        for s in &mut b.stmts {
+            match s {
+                Stmt::Let(l) => self.let_decl(l, true),
+                Stmt::Expr(e) => self.expr(e),
+            }
+        }
+        if let Some(t) = &mut b.tail {
+            self.expr(t);
+        }
+        self.scopes.pop();
+    }
+
+    fn expr(&mut self, e: &mut Expr) {
+        match &mut e.node {
+            ExprKind::Lit(_) | ExprKind::Error => {}
+            ExprKind::Path(p) => {
+                if p.len() == 1 && !self.bound(&p[0].node) {
+                    self.rename(&mut p[0]);
+                }
+            }
+            ExprKind::Call { callee, args } => {
+                self.expr(callee);
+                args.iter_mut().for_each(|a| self.expr(a));
+            }
+            ExprKind::Field { base, .. } => self.expr(base),
+            ExprKind::Unary { expr, .. } => self.expr(expr),
+            ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
+                self.expr(lhs);
+                self.expr(rhs);
+            }
+            ExprKind::Closure { params, body } => {
+                self.scopes
+                    .push(params.iter().map(|p| p.node.clone()).collect());
+                self.expr(body);
+                self.scopes.pop();
+            }
+            ExprKind::StructLit { path, fields } => {
+                if path.len() == 1 {
+                    self.rename(&mut path[0]);
+                }
+                fields.iter_mut().for_each(|(_, v)| self.expr(v));
+            }
+            ExprKind::If {
+                cond,
+                then,
+                otherwise,
+            } => {
+                self.expr(cond);
+                self.block(then);
+                if let Some(o) = otherwise {
+                    self.expr(o);
+                }
+            }
+            ExprKind::Block(b) => self.block(b),
+            ExprKind::Return(v) => {
+                if let Some(v) = v {
+                    self.expr(v);
+                }
+            }
+            ExprKind::FString(parts) => {
+                for p in parts {
+                    if let FPart::Expr(x) = p {
+                        self.expr(x);
+                    }
+                }
+            }
+            ExprKind::Assign { target, value } => {
+                self.expr(target);
+                self.expr(value);
+            }
+            ExprKind::While { cond, body } => {
+                self.expr(cond);
+                self.block(body);
+            }
+            ExprKind::For { var, iter, body } => {
+                match iter {
+                    ForIter::Range { start, end, .. } => {
+                        self.expr(start);
+                        self.expr(end);
+                    }
+                    ForIter::Expr(v) => self.expr(v),
+                }
+                self.scopes.push(HashSet::from([var.node.clone()]));
+                self.block(body);
+                self.scopes.pop();
+            }
+            ExprKind::Index { base, index } => {
+                self.expr(base);
+                self.expr(index);
+            }
+            ExprKind::Array(items) => items.iter_mut().for_each(|i| self.expr(i)),
+        }
+    }
+}

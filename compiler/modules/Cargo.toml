@@ -1,0 +1,21 @@
+[package]
+name = "novar_modules"
+description = "Novar: multi-file programs, module imports and package dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+novar_ast = { version = "0.1.0", path = "../ast" }
+novar_diagnostics = { version = "0.1.0", path = "../diagnostics" }
+novar_parser = { version = "0.1.0", path = "../parser" }
+
+[dev-dependencies]
+novar_hir = { version = "0.1.0", path = "../semantic" }
+novar_runtime = { version = "0.1.0", path = "../../runtime", default-features = false }

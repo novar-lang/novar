@@ -6,6 +6,7 @@ members = [
     "compiler/parser",
     "compiler/ast",
     "compiler/diagnostics",
+    "compiler/modules",
     "compiler/semantic",
     "compiler/ir",
     "compiler/codegen",
