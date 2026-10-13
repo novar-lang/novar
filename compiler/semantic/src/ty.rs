@@ -91,6 +91,8 @@ pub enum Ty {
     Prim(Prim),
     /// A user-declared struct.
     Struct(String),
+    /// Columnar table whose schema is the named struct (one column per field).
+    Table(String),
     /// An imported type whose definition is not known to the checker.
     Named(String),
     Vec(Box<Ty>),
@@ -131,7 +133,7 @@ impl Ty {
             (FloatVar(_), Prim(p)) | (Prim(p), FloatVar(_)) => p.is_float(),
             (Unit, Unit) => true,
             (Prim(a), Prim(b)) => a == b,
-            (Struct(a), Struct(b)) | (Named(a), Named(b)) => a == b,
+            (Struct(a), Struct(b)) | (Named(a), Named(b)) | (Table(a), Table(b)) => a == b,
             (Vec(a), Vec(b)) => a.accepts(b),
             (
                 Tensor {
@@ -176,6 +178,7 @@ impl fmt::Display for Ty {
             Ty::Unit => f.write_str("()"),
             Ty::Prim(p) => f.write_str(p.name()),
             Ty::Struct(n) | Ty::Named(n) => f.write_str(n),
+            Ty::Table(n) => write!(f, "Table<{n}>"),
             Ty::Vec(t) => write!(f, "Vec<{t}>"),
             Ty::Tensor { elem, shape } => {
                 let dims: Vec<_> = shape.iter().map(|d| d.to_string()).collect();

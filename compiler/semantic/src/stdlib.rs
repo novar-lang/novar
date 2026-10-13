@@ -16,7 +16,12 @@ pub struct Sig {
     pub check: Check,
     /// Expected type for argument `i` given the types of the previous ones (guides closures).
     pub hint: Hint,
+    /// For functions whose result type cannot be derived from the arguments (`zeros`,
+    /// `read_csv`, ...): maps the argument types and the type the context expects to the result.
+    pub from_expected: Option<FromExpected>,
 }
+
+type FromExpected = fn(&[Ty], &Ty) -> Result<Ty, String>;
 
 fn no_hint(_: usize, _: &[Ty]) -> Option<Ty> {
     None
@@ -32,6 +37,15 @@ const fn sig(check: Check) -> Sig {
     Sig {
         check,
         hint: no_hint,
+        from_expected: None,
+    }
+}
+
+const fn sig_expected(check: Check, from_expected: FromExpected) -> Sig {
+    Sig {
+        check,
+        hint: no_hint,
+        from_expected: Some(from_expected),
     }
 }
 
@@ -265,6 +279,352 @@ fn insert(args: &[Ty]) -> Result<Ty, String> {
     Ok(Ty::Unit)
 }
 
+// ---- tensors -----------------------------------------------------------------------------
+
+fn tensor_of(t: &Ty) -> Option<(Ty, Vec<Dim>)> {
+    match t {
+        Ty::Tensor { elem, shape } => Some(((**elem).clone(), shape.clone())),
+        _ => None,
+    }
+}
+
+fn is_dynamic(t: &Ty) -> bool {
+    matches!(t, Ty::Unknown | Ty::Never)
+}
+
+fn want_tensor(args: &[Ty], i: usize) -> Result<Option<(Ty, Vec<Dim>)>, String> {
+    if is_dynamic(&args[i]) {
+        return Ok(None);
+    }
+    tensor_of(&args[i])
+        .map(Some)
+        .ok_or_else(|| format!("argument {} must be a `Tensor`, found `{}`", i + 1, args[i]))
+}
+
+fn dims_match(a: &Dim, b: &Dim) -> bool {
+    match (a, b) {
+        (Dim::Lit(x), Dim::Lit(y)) => x == y,
+        _ => true,
+    }
+}
+
+/// Dimension to keep when two compatible dims meet: the concrete one wins.
+fn merge_dim(a: &Dim, b: &Dim) -> Dim {
+    match (a, b) {
+        (Dim::Named(_), other) => other.clone(),
+        (other, _) => other.clone(),
+    }
+}
+
+fn shape_str(shape: &[Dim]) -> String {
+    format!(
+        "[{}]",
+        shape
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// Result of an element-wise operation on two tensors of compatible shape.
+fn elementwise(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (Some((e1, s1)), Some((e2, s2))) = (want_tensor(args, 0)?, want_tensor(args, 1)?) else {
+        return Ok(if is_dynamic(&args[0]) {
+            args[1].clone()
+        } else {
+            args[0].clone()
+        });
+    };
+    if !e1.accepts(&e2) {
+        return Err(format!("tensor element types differ: `{e1}` and `{e2}`"));
+    }
+    if s1.len() != s2.len() || !s1.iter().zip(&s2).all(|(a, b)| dims_match(a, b)) {
+        return Err(format!(
+            "tensor shapes differ: {} and {}",
+            shape_str(&s1),
+            shape_str(&s2)
+        ));
+    }
+    let shape = s1.iter().zip(&s2).map(|(a, b)| merge_dim(a, b)).collect();
+    Ok(Ty::Tensor {
+        elem: Box::new(e1),
+        shape,
+    })
+}
+
+fn tensor_unary(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_tensor(args, 0)?;
+    Ok(args[0].clone())
+}
+
+fn tensor_scale(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_tensor(args, 0)?;
+    match &args[1] {
+        Ty::Prim(p) if p.is_float() => {}
+        Ty::FloatVar(_) | Ty::IntVar(_) | Ty::Unknown | Ty::Never => {}
+        other => return Err(format!("argument 2 must be a float, found `{other}`")),
+    }
+    Ok(args[0].clone())
+}
+
+fn tensor_reduce(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(match want_tensor(args, 0)? {
+        Some((elem, _)) => elem,
+        None => Ty::Unknown,
+    })
+}
+
+fn tensor_argmax(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_tensor(args, 0)?;
+    Ok(Ty::Prim(Prim::U64))
+}
+
+fn tensor_dot(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (Some((e1, s1)), Some((e2, s2))) = (want_tensor(args, 0)?, want_tensor(args, 1)?) else {
+        return Ok(Ty::Unknown);
+    };
+    if s1.len() != 1 || s2.len() != 1 {
+        return Err("`dot` needs two rank-1 tensors; use `matmul` for matrices".into());
+    }
+    if !dims_match(&s1[0], &s2[0]) {
+        return Err(format!(
+            "`dot` operands differ in length: {} and {}",
+            s1[0], s2[0]
+        ));
+    }
+    if !e1.accepts(&e2) {
+        return Err(format!("tensor element types differ: `{e1}` and `{e2}`"));
+    }
+    Ok(e1)
+}
+
+fn tensor_matmul(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (Some((e1, s1)), Some((e2, s2))) = (want_tensor(args, 0)?, want_tensor(args, 1)?) else {
+        return Ok(Ty::Unknown);
+    };
+    if !e1.accepts(&e2) {
+        return Err(format!("tensor element types differ: `{e1}` and `{e2}`"));
+    }
+    let inner_ok = |k1: &Dim, k2: &Dim| -> Result<(), String> {
+        if dims_match(k1, k2) {
+            Ok(())
+        } else {
+            Err(format!("`matmul` inner dimensions differ: {k1} and {k2}"))
+        }
+    };
+    match (s1.as_slice(), s2.as_slice()) {
+        ([m, k1], [k2, n]) => {
+            inner_ok(k1, k2)?;
+            Ok(Ty::Tensor {
+                elem: Box::new(e1),
+                shape: vec![m.clone(), n.clone()],
+            })
+        }
+        ([m, k1], [k2]) => {
+            inner_ok(k1, k2)?;
+            Ok(Ty::Tensor {
+                elem: Box::new(e1),
+                shape: vec![m.clone()],
+            })
+        }
+        _ => Err(format!(
+            "`matmul` needs shapes [M, K] x [K, N] or [M, K] x [K], found {} and {}",
+            shape_str(&s1),
+            shape_str(&s2)
+        )),
+    }
+}
+
+fn tensor_transpose(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    match want_tensor(args, 0)? {
+        None => Ok(Ty::Unknown),
+        Some((elem, s)) if s.len() == 2 => Ok(Ty::Tensor {
+            elem: Box::new(elem),
+            shape: vec![s[1].clone(), s[0].clone()],
+        }),
+        Some((_, s)) => Err(format!(
+            "`transpose` needs a rank-2 tensor, found {}",
+            shape_str(&s)
+        )),
+    }
+}
+
+fn static_count(shape: &[Dim]) -> Option<u64> {
+    shape.iter().try_fold(1u64, |acc, d| match d {
+        Dim::Lit(n) => acc.checked_mul(*n),
+        Dim::Named(_) => None,
+    })
+}
+
+fn expect_tensor(expected: &Ty, what: &str) -> Result<(Ty, Vec<Dim>), String> {
+    tensor_of(expected).ok_or_else(|| {
+        format!("cannot infer the tensor type of `{what}`; annotate it, e.g. `let t: Tensor<f32, [3]> = ...`")
+    })
+}
+
+fn zeros_check(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 0)?;
+    Ok(Ty::Unknown)
+}
+
+fn zeros_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    expect_tensor(expected, "std::tensor::zeros")?;
+    Ok(expected.clone())
+}
+
+fn from_vec_check(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    elem(args, 0)?;
+    Ok(Ty::Unknown)
+}
+
+fn from_vec_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    expect_tensor(expected, "std::tensor::from_vec")?;
+    Ok(expected.clone())
+}
+
+fn reshape_check(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_tensor(args, 0)?;
+    Ok(Ty::Unknown)
+}
+
+fn reshape_result(args: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    let (_, to) = expect_tensor(expected, "std::tensor::reshape")?;
+    if let Some((_, from)) = tensor_of(&args[0]) {
+        if let (Some(a), Some(b)) = (static_count(&from), static_count(&to)) {
+            if a != b {
+                return Err(format!(
+                    "cannot reshape {} ({a} elements) into {} ({b} elements)",
+                    shape_str(&from),
+                    shape_str(&to)
+                ));
+            }
+        }
+    }
+    Ok(expected.clone())
+}
+
+fn to_vec(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(match want_tensor(args, 0)? {
+        Some((elem, _)) => vec_of(elem),
+        None => vec_of(Ty::Unknown),
+    })
+}
+
+// ---- tables ------------------------------------------------------------------------------
+
+fn want_table(args: &[Ty], i: usize) -> Result<Option<String>, String> {
+    match &args[i] {
+        Ty::Table(s) => Ok(Some(s.clone())),
+        t if is_dynamic(t) => Ok(None),
+        other => Err(format!(
+            "argument {} must be a `Table`, found `{other}`",
+            i + 1
+        )),
+    }
+}
+
+fn expect_table(expected: &Ty, what: &str) -> Result<Ty, String> {
+    match expected {
+        Ty::Table(_) => Ok(expected.clone()),
+        _ => Err(format!(
+            "cannot infer the schema of `{what}`; annotate the result, e.g. `let t: Table<Row> = ...`"
+        )),
+    }
+}
+
+fn read_check(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Unknown)
+}
+
+fn read_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    expect_table(expected, "a table reader")
+}
+
+fn sql_check(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_table(args, 0)?;
+    want(args, 1, &s())?;
+    Ok(Ty::Unknown)
+}
+
+fn sql_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    expect_table(expected, "std::table::sql")
+}
+
+fn from_rows(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    match &args[0] {
+        Ty::Vec(t) => match &**t {
+            Ty::Struct(s) => Ok(Ty::Table(s.clone())),
+            Ty::Unknown => Ok(Ty::Unknown),
+            other => Err(format!(
+                "`from_rows` needs a `Vec` of structs, found `Vec<{other}>`"
+            )),
+        },
+        t if is_dynamic(t) => Ok(Ty::Unknown),
+        other => Err(format!(
+            "argument 1 must be a `Vec` of structs, found `{other}`"
+        )),
+    }
+}
+
+fn to_rows(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(match want_table(args, 0)? {
+        Some(s) => vec_of(Ty::Struct(s)),
+        None => vec_of(Ty::Unknown),
+    })
+}
+
+fn table_len(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_table(args, 0)?;
+    Ok(Ty::Prim(Prim::U64))
+}
+
+fn write_table(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_table(args, 0)?;
+    want(args, 1, &s())?;
+    Ok(Ty::Unit)
+}
+
+fn filter_rows_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Table(s))) => Some(Ty::Fn(vec![Ty::Struct(s.clone())], Box::new(Ty::bool()))),
+        _ => None,
+    }
+}
+
+fn filter_rows(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let schema = want_table(args, 0)?;
+    match &args[1] {
+        Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => {}
+        Ty::Unknown => {}
+        other => {
+            return Err(format!(
+                "argument 2 must be `fn(row) -> bool`, found `{other}`"
+            ));
+        }
+    }
+    Ok(schema.map_or(Ty::Unknown, Ty::Table))
+}
+
 const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::text::clean_whitespace", sig(str_to_str)),
     ("std::text::trim", sig(str_to_str)),
@@ -278,6 +638,7 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         Sig {
             check: map,
             hint: map_hint,
+            from_expected: None,
         },
     ),
     (
@@ -285,11 +646,61 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         Sig {
             check: filter,
             hint: filter_hint,
+            from_expected: None,
         },
     ),
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
     ("std::collect", sig(collect)),
+    (
+        "std::tensor::zeros",
+        sig_expected(zeros_check, zeros_result),
+    ),
+    (
+        "std::tensor::from_vec",
+        sig_expected(from_vec_check, from_vec_result),
+    ),
+    (
+        "std::tensor::reshape",
+        sig_expected(reshape_check, reshape_result),
+    ),
+    ("std::tensor::to_vec", sig(to_vec)),
+    ("std::tensor::add", sig(elementwise)),
+    ("std::tensor::sub", sig(elementwise)),
+    ("std::tensor::mul", sig(elementwise)),
+    ("std::tensor::div", sig(elementwise)),
+    ("std::tensor::scale", sig(tensor_scale)),
+    ("std::tensor::relu", sig(tensor_unary)),
+    ("std::tensor::sigmoid", sig(tensor_unary)),
+    ("std::tensor::softmax", sig(tensor_unary)),
+    ("std::tensor::sum", sig(tensor_reduce)),
+    ("std::tensor::mean", sig(tensor_reduce)),
+    ("std::tensor::argmax", sig(tensor_argmax)),
+    ("std::tensor::dot", sig(tensor_dot)),
+    ("std::tensor::matmul", sig(tensor_matmul)),
+    ("std::tensor::transpose", sig(tensor_transpose)),
+    (
+        "std::table::read_csv",
+        sig_expected(read_check, read_result),
+    ),
+    (
+        "std::table::read_parquet",
+        sig_expected(read_check, read_result),
+    ),
+    ("std::table::sql", sig_expected(sql_check, sql_result)),
+    ("std::table::from_rows", sig(from_rows)),
+    ("std::table::to_rows", sig(to_rows)),
+    ("std::table::len", sig(table_len)),
+    ("std::table::write_csv", sig(write_table)),
+    ("std::table::write_parquet", sig(write_table)),
+    (
+        "std::table::filter",
+        Sig {
+            check: filter_rows,
+            hint: filter_rows_hint,
+            from_expected: None,
+        },
+    ),
     ("std::io::print", sig(print)),
     ("std::io::println", sig(print)),
     ("std::http::Status::BadRequest", sig(status)),

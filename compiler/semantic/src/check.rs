@@ -25,6 +25,8 @@ pub(crate) struct Checker {
     endpoints: HashSet<(HttpMethod, String)>,
     /// Bindings of literal type variables (`Ty::IntVar`/`Ty::FloatVar`), indexed by id.
     subst: Vec<Option<Ty>>,
+    /// Set once every struct's fields are known (table schemas are validated from then on).
+    structs_resolved: bool,
 }
 
 pub(crate) fn lower(program: &ast::Program) -> (hir::Program, Vec<Diagnostic>) {
@@ -112,6 +114,8 @@ impl Checker {
                 });
             }
         }
+
+        self.structs_resolved = true;
 
         // Function signatures.
         let mut sig_done = HashSet::new();
@@ -213,6 +217,29 @@ impl Checker {
         }
         match name {
             "Tensor" => self.resolve_tensor(t),
+            "Table" => match type_args.as_slice() {
+                [inner] if t.args.len() == 1 => match self.resolve_type(inner) {
+                    Ty::Struct(sname) => {
+                        self.check_table_schema(&sname, &t.span);
+                        Ty::Table(sname)
+                    }
+                    Ty::Unknown => Ty::Unknown,
+                    other => {
+                        self.err(
+                            inner.span.clone(),
+                            format!("a table's schema must be a struct, found `{other}`"),
+                        );
+                        Ty::Unknown
+                    }
+                },
+                _ => {
+                    self.err(
+                        t.span.clone(),
+                        "`Table` takes one type argument: `Table<Row>`",
+                    );
+                    Ty::Unknown
+                }
+            },
             "Vec" | "Vector" => match type_args.as_slice() {
                 [] if t.args.is_empty() => Ty::Vec(Box::new(Ty::Unknown)),
                 [inner] if t.args.len() == 1 => Ty::Vec(Box::new(self.resolve_type(inner))),
@@ -248,6 +275,27 @@ impl Checker {
                     format!("cannot find type `{name}` in this scope"),
                 );
                 Ty::Unknown
+            }
+        }
+    }
+
+    /// Every column of a table must be a primitive (number, bool or string).
+    fn check_table_schema(&mut self, sname: &str, span: &Span) {
+        let Some(fields) = self.struct_fields.get(sname).cloned() else {
+            return;
+        };
+        if self.structs_resolved && fields.is_empty() {
+            self.err(
+                span.clone(),
+                format!("`{sname}` has no fields, so it cannot be a table schema"),
+            );
+        }
+        for (name, ty) in fields {
+            if !matches!(ty, Ty::Prim(_) | Ty::Unknown) {
+                self.err(
+                    span.clone(),
+                    format!("column `{name}` of `{sname}` has type `{ty}`; table columns must be numbers, bools or strings"),
+                );
             }
         }
     }
@@ -763,6 +811,7 @@ impl Checker {
                 }
                 let ty = match &base.ty {
                     Ty::Vec(t) => (**t).clone(),
+                    Ty::Table(s) => Ty::Struct(s.clone()),
                     Ty::Unknown | Ty::Never => Ty::Unknown,
                     other => {
                         let other = other.clone();
@@ -1156,6 +1205,7 @@ impl Checker {
                 let v = self.expr(v, None);
                 let ty = match &v.ty {
                     Ty::Vec(t) => (**t).clone(),
+                    Ty::Table(s) => Ty::Struct(s.clone()),
                     Ty::Unknown | Ty::Never => Ty::Unknown,
                     other => {
                         let other = other.clone();
@@ -1262,6 +1312,31 @@ impl Checker {
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 _ => Ty::Unknown,
             },
+            Ty::Table(s) => match n {
+                "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
+                "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
+                _ => {
+                    let column = self
+                        .struct_fields
+                        .get(s)
+                        .and_then(|f| f.iter().find(|(fname, _)| fname == n))
+                        .map(|(_, t)| t.clone());
+                    match column {
+                        // Numeric columns are tensors that share the table's Arrow buffer.
+                        Some(Ty::Prim(p)) if p.is_numeric() => Ty::Tensor {
+                            elem: Box::new(Ty::Prim(p)),
+                            shape: vec![Dim::Named("N".into())],
+                        },
+                        Some(Ty::Prim(p)) => Ty::Vec(Box::new(Ty::Prim(p))),
+                        Some(other) => other,
+                        None => {
+                            let ty = base.ty.clone();
+                            self.err(name.span.clone(), format!("no column `{n}` on type `{ty}`"));
+                            Ty::Unknown
+                        }
+                    }
+                }
+            },
             _ => Ty::Unknown,
         }
     }
@@ -1291,7 +1366,7 @@ impl Checker {
 
         let callee = self.expr(callee, None);
         if let Some(sig) = self.std_sig(&callee) {
-            return self.std_call(callee, sig, args, span);
+            return self.std_call(callee, sig, args, expected, span);
         }
         match callee.ty.clone() {
             Ty::Fn(params, ret) => {
@@ -1376,6 +1451,7 @@ impl Checker {
         callee: hir::Expr,
         sig: Sig,
         args: &[ast::Expr],
+        expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
         let mut checked: Vec<hir::Expr> = Vec::with_capacity(args.len());
@@ -1386,13 +1462,28 @@ impl Checker {
             tys.push(a.ty.clone());
             checked.push(a);
         }
-        let ty = match (sig.check)(&tys) {
+        let tys: Vec<Ty> = tys.iter().map(|t| self.resolve(t)).collect();
+        let mut ty = match (sig.check)(&tys) {
             Ok(t) => t,
             Err(msg) => {
                 self.err(span.clone(), msg);
                 Ty::Unknown
             }
         };
+        if let Some(from_expected) = sig.from_expected {
+            let want = expected.map(|e| self.resolve(e));
+            ty = match want {
+                // The context knows nothing about the type; the runtime checks the real shape.
+                Some(Ty::Unknown | Ty::Never) => Ty::Unknown,
+                other => match from_expected(&tys, &other.unwrap_or(Ty::Unknown)) {
+                    Ok(t) => t,
+                    Err(msg) => {
+                        self.err(span.clone(), msg);
+                        Ty::Unknown
+                    }
+                },
+            };
+        }
         Self::mk(
             hir::ExprKind::Call {
                 callee: Box::new(callee),

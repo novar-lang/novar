@@ -588,3 +588,136 @@ fn assignment_to_fields_and_elements() {
         "must be a variable, a field or an index",
     );
 }
+
+// ---- tensor operations ---------------------------------------------------------------------
+
+#[test]
+fn tensor_shapes_flow_through_operations() {
+    let ok = "
+        fn f(a: Tensor<f32, [2, 3]>, b: Tensor<f32, [3, 4]>, v: Tensor<f32, [3]>) -> Tensor<f32, [2, 4]> {
+            a |> std::tensor::matmul(b)
+        }
+        fn g(a: Tensor<f32, [2, 3]>, v: Tensor<f32, [3]>) -> Tensor<f32, [2]> { a |> std::tensor::matmul(v) }
+        fn h(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> f32 { std::tensor::dot(a, b) }
+        fn i(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> {
+            std::tensor::add(a, b) |> std::tensor::relu() |> std::tensor::scale(0.5) |> std::tensor::softmax()
+        }
+        fn t(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [3, 2]> { std::tensor::transpose(a) }
+        fn s(a: Tensor<f32, [2, 3]>) -> f32 { std::tensor::sum(a) + std::tensor::mean(a) }
+        fn am(a: Tensor<f32, [5]>) -> u64 { std::tensor::argmax(a) }
+        fn sym(a: Tensor<f32, [N]>, b: Tensor<f32, [8]>) -> Tensor<f32, [8]> { std::tensor::mul(a, b) }
+    ";
+    assert_clean(ok);
+}
+
+#[test]
+fn tensor_shape_mismatches_are_compile_errors() {
+    assert_err(
+        "fn f(a: Tensor<f32, [2, 3]>, b: Tensor<f32, [4, 5]>) { std::tensor::matmul(a, b); }",
+        "inner dimensions differ: 3 and 4",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [5]>) { std::tensor::add(a, b); }",
+        "tensor shapes differ: [4] and [5]",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [4]>, b: Tensor<f64, [4]>) { std::tensor::add(a, b); }",
+        "element types differ",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [2]> { std::tensor::softmax(a) }",
+        "expected `Tensor<f32, [2]>`",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) { std::tensor::dot(a, b); }",
+        "rank-1",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [4]>) { std::tensor::transpose(a); }",
+        "rank-2",
+    );
+    assert_err(
+        "fn f(a: i32) { std::tensor::relu(a); }",
+        "must be a `Tensor`",
+    );
+    assert_err(
+        "fn f(a: Tensor<f32, [2]>) { std::tensor::scale(a, \"x\"); }",
+        "must be a float",
+    );
+}
+
+#[test]
+fn tensor_constructors_need_a_known_result_type() {
+    assert_clean("fn f() -> Tensor<f32, [2, 3]> { std::tensor::zeros() }");
+    assert_clean("fn f(v: Vec<f32>) -> Tensor<f32, [3]> { std::tensor::from_vec(v) }");
+    assert_clean("fn f(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [6]> { std::tensor::reshape(a) }");
+    assert_err("fn f() { let t = std::tensor::zeros(); }", "annotate it");
+    assert_err(
+        "fn f(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [5]> { std::tensor::reshape(a) }",
+        "cannot reshape [2, 3] (6 elements) into [5] (5 elements)",
+    );
+    assert_clean("fn f(a: Tensor<f32, [4]>) -> Vec<f32> { std::tensor::to_vec(a) }");
+}
+
+// ---- tables --------------------------------------------------------------------------------
+
+const ROW: &str = "struct Row { id: i64, score: f32, name: String, ok: bool } ";
+
+#[test]
+fn tables_have_typed_columns() {
+    assert_clean(&format!(
+        "{ROW}
+        fn f(t: Table<Row>) -> Tensor<f32, [N]> {{ t.score }}
+        fn g(t: Table<Row>) -> Vec<String> {{ t.name }}
+        fn h(t: Table<Row>) -> u64 {{ t.len() }}
+        fn i(t: Table<Row>) -> Row {{ t[0] }}
+        fn j(t: Table<Row>) -> f32 {{ let mut s = 0.0; for r in t {{ s += r.score; }} s }}
+        fn k(t: Table<Row>) -> Tensor<i64, [N]> {{ t.id }}"
+    ));
+    assert_err(
+        &format!("{ROW}fn f(t: Table<Row>) {{ t.nope; }}"),
+        "no column `nope`",
+    );
+    assert_err(
+        &format!("{ROW}fn f(t: Table<Row>) -> Vec<String> {{ t.score }}"),
+        "expected `Vec<String>`",
+    );
+}
+
+#[test]
+fn table_schemas_must_be_flat_structs() {
+    assert_err(
+        "struct R { xs: Vec<i32> } fn f(t: Table<R>) {}",
+        "table columns must be",
+    );
+    assert_err("fn f(t: Table<i32>) {}", "must be a struct");
+    assert_err("fn f(t: Table) {}", "takes one type argument");
+    assert_err("struct E {} fn f(t: Table<E>) {}", "no fields");
+}
+
+#[test]
+fn table_functions() {
+    assert_clean(&format!(
+        "{ROW}
+        fn a() -> Table<Row> {{ std::table::read_csv(\"x.csv\") }}
+        fn b() -> Table<Row> {{ std::table::read_parquet(\"x.parquet\") }}
+        fn c(t: Table<Row>) -> Table<Row> {{ t |> std::table::sql(\"SELECT * FROM t WHERE score > 1\") }}
+        fn d(rows: Vec<Row>) -> Table<Row> {{ std::table::from_rows(rows) }}
+        fn e(t: Table<Row>) -> Vec<Row> {{ std::table::to_rows(t) }}
+        fn f(t: Table<Row>) -> Table<Row> {{ t |> std::table::filter(|r| r.score > 0.5) }}
+        fn g(t: Table<Row>) {{ std::table::write_csv(t, \"o.csv\"); std::table::write_parquet(t, \"o.parquet\"); }}
+        fn h(t: Table<Row>) -> u64 {{ std::table::len(t) }}"
+    ));
+    assert_err(
+        &format!("{ROW}fn f() {{ let t = std::table::read_csv(\"x\"); }}"),
+        "annotate the result",
+    );
+    assert_err(
+        &format!("{ROW}fn f(t: Table<Row>) -> Table<Row> {{ std::table::filter(t, |r| r.nope) }}"),
+        "no field `nope`",
+    );
+    assert_err(
+        &format!("{ROW}fn f(t: Table<Row>) {{ std::table::sql(t, 1); }}"),
+        "must be `String`",
+    );
+}
