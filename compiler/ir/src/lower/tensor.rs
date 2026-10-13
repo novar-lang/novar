@@ -70,7 +70,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
     }
 
     /// Rounds an `f64` back to the element type.
-    fn from_f64(&self, blk: BlockRef<'c, 'b>, x: Value<'c, 'b>, p: Prim) -> Value<'c, 'b> {
+    fn narrow(&self, blk: BlockRef<'c, 'b>, x: Value<'c, 'b>, p: Prim) -> Value<'c, 'b> {
         if p == Prim::F32 {
             self.push(blk, arith::truncf(x, self.et(p), self.loc))
         } else {
@@ -214,7 +214,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
             _ => arith::divf(x, y, self.loc),
         };
         let r = self.push(blk, r);
-        self.from_f64(blk, r, p)
+        self.narrow(blk, r, p)
     }
 
     pub(super) fn tensor_call(
@@ -287,7 +287,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                         let one = this.float_const(bb, this.f64t(), 1.0);
                         let den = this.push(bb, arith::addf(one, ex, this.loc));
                         let sig = this.push(bb, arith::divf(one, den, this.loc));
-                        this.from_f64(bb, sig, p)
+                        this.narrow(bb, sig, p)
                     };
                     this.store(bb, out, i, r);
                     Ok((bb, vec![]))
@@ -318,7 +318,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                     let denom = self.float_const(exit, self.f64t(), n.max(1) as f64);
                     total = self.push(exit, arith::divf(total, denom, self.loc));
                 }
-                let r = self.from_f64(exit, total, p);
+                let r = self.narrow(exit, total, p);
                 ok(exit, vec![r])
             }
             "argmax" => {
@@ -495,7 +495,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                 let nn = this.i64c(e2, n as i64);
                 let orow = this.push(e2, arith::muli(i, nn, this.loc));
                 let oidx = this.push(e2, arith::addi(orow, j, this.loc));
-                let r = this.from_f64(e2, acc[0], p);
+                let r = this.narrow(e2, acc[0], p);
                 this.store(e2, out, oidx, r);
                 Ok((e2, vec![]))
             })?;
