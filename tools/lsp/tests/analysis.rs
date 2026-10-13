@@ -173,7 +173,7 @@ fn complete_after_edit(before: &str, typed: &str) -> Vec<novar_lsp::analysis::Co
     );
     let offset = before.find("/*here*/").unwrap();
     let broken = before.replacen("/*here*/", typed, 1);
-    Snapshot::analyze_after(broken, Some(&good)).completions(offset + typed.len())
+    Snapshot::analyze_after(broken, None, Some(&good)).completions(offset + typed.len())
 }
 
 #[test]

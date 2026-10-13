@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::Path;
 
 use novar_diagnostics::Diagnostic;
 use novar_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
@@ -44,6 +45,8 @@ pub struct Snapshot {
     pub index: LineIndex,
     pub diagnostics: Vec<Diagnostic>,
     pub hir: Option<hir::Program>,
+    /// All files of the program (this document is the first); resolves names across modules.
+    pub map: novar_modules::SourceMap,
     nodes: Vec<Node>,
     locals: HashMap<LocalId, LocalInfo>,
     /// The program came from an earlier version of the text because the current one could not
@@ -123,33 +126,55 @@ pub fn signature(f: &hir::FnDef) -> String {
 impl Snapshot {
     /// Like [`Snapshot::analyze`], but when `text` cannot be analysed at all the types of `previous`
     /// are kept for completion.
-    pub fn analyze_after(text: String, previous: Option<&Snapshot>) -> Snapshot {
-        let mut snap = Snapshot::analyze(text);
+    pub fn analyze_after(
+        text: String,
+        path: Option<&Path>,
+        previous: Option<&Snapshot>,
+    ) -> Snapshot {
+        let mut snap = Snapshot::analyze_in(text, path);
         if snap.hir.is_none() {
             if let Some(prev) = previous.filter(|p| p.hir.is_some()) {
                 snap.hir = prev.hir.clone();
                 snap.nodes = prev.nodes.clone();
                 snap.locals = prev.locals.clone();
+                snap.map = prev.map.clone();
                 snap.stale = true;
             }
         }
         snap
     }
 
+    /// Analyses a standalone buffer (no other modules).
     pub fn analyze(text: String) -> Snapshot {
+        Snapshot::analyze_in(text, None)
+    }
+
+    /// Analyses the document at `path`, loading the modules it imports and the dependencies of its
+    /// project. Only diagnostics located in this document are kept.
+    pub fn analyze_in(text: String, path: Option<&Path>) -> Snapshot {
         let index = LineIndex::new(&text);
-        let (ast, mut diagnostics) = novar_parser::parse(&text);
+        let deps = path
+            .and_then(|p| novar_pkg::Project::discover(p).ok().flatten())
+            .and_then(|project| project.dependency_packages().ok())
+            .unwrap_or_default();
+        let name = path.map_or("<buffer>".to_string(), |p| p.display().to_string());
+        let loaded = novar_modules::load_text(&name, &text, path.and_then(Path::parent), &deps);
+        let mut diagnostics = loaded.diagnostics.clone();
         let mut hir = None;
-        if let Some(ast) = ast {
-            let (h, d) = novar_hir::lower(&ast);
+        if loaded.entry_parsed {
+            let (h, d) = novar_hir::lower(&loaded.program);
             diagnostics.extend(d);
             hir = Some(h);
         }
+        // Problems inside other modules are reported when those files are opened.
+        diagnostics.retain(|d| d.span.start <= text.len());
+        diagnostics.sort_by_key(|d| d.span.start);
         let mut snap = Snapshot {
             text,
             index,
             diagnostics,
             hir: None,
+            map: loaded.map,
             nodes: Vec::new(),
             locals: HashMap::new(),
             stale: false,
@@ -162,6 +187,13 @@ impl Snapshot {
         }
         snap.hir = hir;
         snap
+    }
+
+    /// Where `offset` is defined, possibly in another file: `(file name, byte range in that file)`.
+    pub fn definition_location(&self, offset: usize) -> Option<(String, Span)> {
+        let span = self.definition(offset)?;
+        let (file, local) = self.map.locate(span.start)?;
+        Some((file.name.clone(), local..local + span.len()))
     }
 
     /// The smallest indexed expression containing `offset`.
@@ -177,6 +209,11 @@ impl Snapshot {
     }
 
     pub fn hover(&self, offset: usize) -> Option<(String, Span)> {
+        self.hover_raw(offset)
+            .map(|(text, span)| (self.map.demangle(&text), span))
+    }
+
+    fn hover_raw(&self, offset: usize) -> Option<(String, Span)> {
         if self.stale {
             return None;
         }
@@ -299,6 +336,7 @@ impl Snapshot {
                 detail: g.ty.to_string(),
             });
         }
+        out.retain(|s| s.span.end <= self.text.len());
         out.sort_by_key(|s| s.span.start);
         out
     }
@@ -374,13 +412,14 @@ impl Snapshot {
             Some("standard library".into()),
         ));
         if let Some(prog) = self.program() {
-            for s in &prog.structs {
+            let own = |span: &Span| span.end <= self.text.len();
+            for s in prog.structs.iter().filter(|s| own(&s.name_span)) {
                 out.push(item(&s.name, CompletionKind::Struct, None));
             }
-            for f in &prog.fns {
+            for f in prog.fns.iter().filter(|f| own(&f.name_span)) {
                 out.push(item(&f.name, CompletionKind::Function, Some(signature(f))));
             }
-            for g in &prog.globals {
+            for g in prog.globals.iter().filter(|g| own(&g.span)) {
                 out.push(item(
                     &g.name,
                     CompletionKind::Variable,
@@ -390,6 +429,21 @@ impl Snapshot {
             for imp in &prog.imports {
                 if let Some(last) = imp.last() {
                     out.push(item(last, CompletionKind::Module, Some(imp.join("::"))));
+                }
+            }
+            // Items imported from other modules, under the names the user wrote.
+            for (mangled, shown) in &self.map.display_names {
+                let Some(name) = shown.rsplit("::").next() else {
+                    continue;
+                };
+                if let Some(f) = prog.fns.iter().find(|f| &f.name == mangled) {
+                    out.push(item(
+                        name,
+                        CompletionKind::Function,
+                        Some(self.map.demangle(&signature(f))),
+                    ));
+                } else if prog.structs.iter().any(|s| &s.name == mangled) {
+                    out.push(item(name, CompletionKind::Struct, Some(shown.clone())));
                 }
             }
         }

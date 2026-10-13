@@ -92,6 +92,8 @@ pub struct Loaded {
     pub map: SourceMap,
     /// Parse errors and module / import problems. Type errors come from checking `program`.
     pub diagnostics: Vec<Diagnostic>,
+    /// False when the entry file could not be parsed at all (not even with error recovery).
+    pub entry_parsed: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -104,6 +106,7 @@ struct ModKey {
 struct Module {
     key: ModKey,
     program: Program,
+    parsed: bool,
     /// `(local name, module index, item name, import span)`
     imports: Vec<(String, usize, String)>,
 }
@@ -194,6 +197,7 @@ impl Loader<'_> {
         let idx = self.modules.len();
         self.modules.push(Module {
             key: key.clone(),
+            parsed: program.is_some(),
             program: program.unwrap_or_default(),
             imports: Vec::new(),
         });
@@ -359,15 +363,20 @@ impl Loader<'_> {
         parts.join("__")
     }
 
+    /// The name as the user wrote it: `util::double`, `mathx::vec::dot`.
     fn display(&self, idx: usize, item: &str) -> String {
         let key = &self.modules[idx].key;
-        let mut parts = vec![self.package_name(key.pkg)];
+        let mut parts = Vec::new();
+        if key.pkg != 0 {
+            parts.push(self.package_name(key.pkg));
+        }
         parts.extend(key.path.iter().cloned());
         parts.push(item.to_string());
         parts.join("::")
     }
 
     fn link(mut self) -> Loaded {
+        let entry_parsed = self.modules[0].parsed;
         let order = std::mem::take(&mut self.order);
         let mut merged = Program::default();
         let mut std_imports: Vec<Item> = Vec::new();
@@ -463,6 +472,7 @@ impl Loader<'_> {
             program: Program { items },
             map: self.map,
             diagnostics: self.diags,
+            entry_parsed,
         }
     }
 }

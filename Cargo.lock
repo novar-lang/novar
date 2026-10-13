@@ -2490,7 +2490,9 @@ dependencies = [
  "lsp-types",
  "novar_diagnostics",
  "novar_hir",
+ "novar_modules",
  "novar_parser",
+ "novar_pkg",
  "serde",
  "serde_json",
 ]

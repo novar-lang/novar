@@ -101,7 +101,8 @@ fn handle_notification(conn: &Connection, state: &mut Documents, note: Notificat
         }
         _ => return Ok(()),
     };
-    let snap = Snapshot::analyze_after(text, state.docs.get(&uri));
+    let path = file_path(&uri);
+    let snap = Snapshot::analyze_after(text, path.as_deref(), state.docs.get(&uri));
     let diags = diagnostics(&snap, &uri);
     state.docs.insert(uri.clone(), snap);
     publish(conn, uri, diags)
@@ -118,6 +119,28 @@ fn publish(conn: &Connection, uri: Uri, diagnostics: Vec<lsp_types::Diagnostic>)
         params,
     )))?;
     Ok(())
+}
+
+/// The local path of a `file://` URI.
+fn file_path(uri: &Uri) -> Option<std::path::PathBuf> {
+    let rest = uri.as_str().strip_prefix("file://")?;
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&rest[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(std::path::PathBuf::from(
+        String::from_utf8_lossy(&out).into_owned(),
+    ))
 }
 
 pub fn diagnostics(snap: &Snapshot, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
@@ -205,12 +228,20 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 return unknown(id);
             };
             let target = snap
-                .definition(snap.index.offset(pos.position))
-                .map(|span| {
-                    GotoDefinitionResponse::Scalar(Location {
-                        uri: pos.text_document.uri.clone(),
-                        range: snap.index.range(&span),
-                    })
+                .definition_location(snap.index.offset(pos.position))
+                .and_then(|(file, span)| {
+                    let own = file_path(&pos.text_document.uri).map(|p| p.display().to_string());
+                    if own.as_deref() == Some(file.as_str()) || file == "<buffer>" {
+                        let uri = pos.text_document.uri.clone();
+                        return Some(GotoDefinitionResponse::Scalar(Location {
+                            uri,
+                            range: snap.index.range(&span),
+                        }));
+                    }
+                    let text = std::fs::read_to_string(&file).ok()?;
+                    let range = crate::position::LineIndex::new(&text).range(&span);
+                    let uri = format!("file://{file}").parse::<Uri>().ok()?;
+                    Some(GotoDefinitionResponse::Scalar(Location { uri, range }))
                 });
             reply(id, target)
         }
