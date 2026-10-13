@@ -2517,6 +2517,7 @@ dependencies = [
  "novar_hir",
  "novar_parser",
  "novar_runtime",
+ "serde",
 ]
 
 [[package]]
@@ -2558,6 +2559,7 @@ dependencies = [
  "parquet",
  "postgres",
  "serde_json",
+ "stacker",
  "tokio",
  "ureq",
 ]

@@ -26,6 +26,59 @@ use novar_diagnostics::Diagnostic;
 
 pub use source_map::{SourceFile, SourceMap};
 
+/// A whole program as plain data: every source file that went into it, so it can be rebuilt
+/// anywhere (inside a binary, on a worker machine) without the original source tree.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Image {
+    /// Path of the entry file, as it was loaded.
+    pub entry: String,
+    /// `(path, text)` of every module, entry first.
+    pub files: Vec<(String, String)>,
+    /// `(package name, source directory)` of every dependency.
+    pub deps: Vec<(String, String)>,
+}
+
+impl Image {
+    pub fn new(entry: &str, loaded: &Loaded, deps: &[Package]) -> Image {
+        Image {
+            entry: entry.to_string(),
+            files: loaded.sources(),
+            deps: deps
+                .iter()
+                .map(|d| (d.name.clone(), d.src_dir.display().to_string()))
+                .collect(),
+        }
+    }
+
+    pub fn packages(&self) -> Vec<Package> {
+        self.deps
+            .iter()
+            .map(|(name, dir)| Package {
+                name: name.clone(),
+                src_dir: PathBuf::from(dir),
+            })
+            .collect()
+    }
+
+    /// Loads the program from the stored files alone.
+    pub fn load(&self) -> Loaded {
+        let files = MemFiles(
+            self.files
+                .iter()
+                .map(|(p, t)| (PathBuf::from(p), t.clone()))
+                .collect(),
+        );
+        let entry_text = self.files.first().map_or("", |(_, t)| t.as_str());
+        load_in(
+            &files,
+            &self.entry,
+            entry_text,
+            Path::new(&self.entry).parent(),
+            &self.packages(),
+        )
+    }
+}
+
 impl Loaded {
     /// Every file that was read, as `(path, text)`, entry first. Enough to rebuild the program
     /// later with [`MemFiles`].

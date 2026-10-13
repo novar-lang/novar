@@ -15,6 +15,7 @@ workspace = true
 novar_ast = { version = "0.1.0", path = "../ast" }
 novar_diagnostics = { version = "0.1.0", path = "../diagnostics" }
 novar_parser = { version = "0.1.0", path = "../parser" }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 novar_hir = { version = "0.1.0", path = "../semantic" }

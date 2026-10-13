@@ -9,34 +9,11 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use crate::{CliError, failed};
 
-/// A whole program: every source file that went into it, so the binary needs no files at run time.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Bundle {
-    /// Path of the entry file, as it was loaded.
-    pub entry: String,
-    /// `(path, text)` of every module, entry first.
-    pub files: Vec<(String, String)>,
-    /// `(package name, source directory)` of every dependency.
-    pub deps: Vec<(String, String)>,
-}
-
-impl Bundle {
-    pub fn packages(&self) -> Vec<novar_modules::Package> {
-        self.deps
-            .iter()
-            .map(|(name, dir)| novar_modules::Package {
-                name: name.clone(),
-                src_dir: PathBuf::from(dir),
-            })
-            .collect()
-    }
-}
+pub use novar_modules::Image as Bundle;
 
 const MAGIC: &[u8; 8] = b"NOVARAPP";
 const FOOTER: u64 = 16;

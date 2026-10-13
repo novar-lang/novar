@@ -3,7 +3,7 @@ mod native;
 mod serve;
 
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use novar_diagnostics::Diagnostic;
@@ -77,21 +77,7 @@ fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError>
         }
     }
     opts.live |= std::env::var("NOVAR_LIVE").is_ok_and(|v| v == "1");
-    let files = novar_modules::MemFiles(
-        bundle
-            .files
-            .iter()
-            .map(|(p, t)| (PathBuf::from(p), t.clone()))
-            .collect(),
-    );
-    let entry_text = bundle.files.first().map(|(_, t)| t.as_str()).unwrap_or("");
-    let loaded = novar_modules::load_in(
-        &files,
-        &bundle.entry,
-        entry_text,
-        Path::new(&bundle.entry).parent(),
-        &bundle.packages(),
-    );
+    let loaded = bundle.load();
     serve::run(lower_loaded(&loaded)?.0, &opts)
 }
 
@@ -172,14 +158,7 @@ pub fn check_project(file: &str) -> Result<Checked, CliError> {
     let loaded = novar_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
     eprintln!("`{file}` ok");
-    let bundle = bundle::Bundle {
-        entry: file.to_string(),
-        files: loaded.sources(),
-        deps: deps
-            .iter()
-            .map(|d| (d.name.clone(), d.src_dir.display().to_string()))
-            .collect(),
-    };
+    let bundle = bundle::Bundle::new(file, &loaded, &deps);
     Ok(Checked { hir, bundle })
 }
 
