@@ -26,3 +26,4 @@ novar_mlir = { version = "0.1.0", path = "../ir", optional = true }
 
 [dev-dependencies]
 novar_parser = { version = "0.1.0", path = "../parser" }
+novar_runtime = { version = "0.1.0", path = "../../runtime" }

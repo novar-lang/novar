@@ -635,6 +635,7 @@ dependencies = [
  "novar_hir",
  "novar_mlir",
  "novar_parser",
+ "novar_runtime",
 ]
 
 [[package]]
