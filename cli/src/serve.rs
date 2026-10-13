@@ -16,6 +16,7 @@ pub struct Options {
     pub seed: Option<String>,
     pub live: bool,
     pub quantize: novar_hir::Quantization,
+    pub device: novar_runtime::Device,
 }
 
 impl Options {
@@ -27,6 +28,7 @@ impl Options {
             seed: None,
             live: false,
             quantize: novar_hir::Quantization::None,
+            device: novar_runtime::Device::Cpu,
         };
         let mut it = flags.iter();
         while let Some(flag) = it.next() {
@@ -38,6 +40,11 @@ impl Options {
                 let (q, _) =
                     crate::take_quantize(&["--quantize", it.next().copied().unwrap_or("")])?;
                 opts.quantize = q;
+                continue;
+            }
+            if *flag == "--device" {
+                let (d, _) = crate::take_device(&["--device", it.next().copied().unwrap_or("")])?;
+                opts.device = d;
                 continue;
             }
             match (*flag, it.next()) {
@@ -99,6 +106,7 @@ pub fn run(
     let interp =
         Arc::new(Interp::with_live(program, opts.live).or_else(|e| failed(e.to_string()))?);
     interp.set_quantization(opts.quantize);
+    interp.set_device(opts.device);
     if let Some((workers, image)) = cluster {
         crate::attach_cluster(&interp, workers, &image)?;
         eprintln!("std::dist::map runs on the cluster");

@@ -33,6 +33,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 novar_cluster = { version = "0.1.0", path = "../tools/cluster" }
 
 [features]
+# Run tensor operations on the GPU (`--device gpu`) through wgpu.
+gpu = ["novar_runtime/gpu"]
 # Native backend (MLIR + LLVM 22). Needs LLVM installed; see scripts/llvm-env.sh.
 llvm = ["dep:novar_codegen", "dep:novar_mlir", "novar_codegen/llvm", "novar_mlir/llvm"]
 

@@ -12,10 +12,10 @@ use novar_runtime::{Interp, Value};
 const USAGE: &str = "\
 usage:
   novar check <file.nv>
-  novar run <file.nv> <function> [args...] [--quantize int8]
+  novar run <file.nv> <function> [args...] [--quantize int8] [--device gpu]
   novar lsp                                                language server over stdio
   novar worker [--listen host:port] [--token T]            run calls for a coordinator
-  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8]
+  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8] [--device gpu]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
   novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir] [-O 0-3]   (needs --features llvm)";
@@ -137,6 +137,32 @@ pub fn attach_cluster(
     Ok(())
 }
 
+/// Splits `--device cpu|gpu` out of `args`.
+pub fn take_device<'a>(
+    args: &[&'a str],
+) -> Result<(novar_runtime::Device, Vec<&'a str>), CliError> {
+    let mut device = novar_runtime::Device::Cpu;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if *a == "--device" {
+            device = match it.next().copied() {
+                Some("gpu") => novar_runtime::Device::Gpu,
+                Some("cpu") => novar_runtime::Device::Cpu,
+                other => {
+                    return failed(format!(
+                        "--device takes `cpu` or `gpu`, not {}",
+                        other.unwrap_or("nothing")
+                    ));
+                }
+            };
+        } else {
+            rest.push(*a);
+        }
+    }
+    Ok((device, rest))
+}
+
 /// Splits `--quantize int8|none` out of `args`.
 pub fn take_quantize<'a>(
     args: &[&'a str],
@@ -237,10 +263,12 @@ fn parse_arg(raw: &str) -> Value {
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     let (quant, args) = take_quantize(args)?;
+    let (device, args) = take_device(&args)?;
     let (workers, args) = take_workers(&args);
     let checked = check_project(file)?;
     let interp = Interp::new(checked.hir).or_else(|e| failed(e.to_string()))?;
     interp.set_quantization(quant);
+    interp.set_device(device);
     if let Some(workers) = workers {
         attach_cluster(&interp, workers, &checked.bundle)?;
     }

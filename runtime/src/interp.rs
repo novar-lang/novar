@@ -11,6 +11,16 @@ use serde_json::Value as Json;
 use crate::std_impl;
 use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
 
+/// Where `std::tensor` operations on `f32` tensors run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Device {
+    #[default]
+    Cpu,
+    /// A GPU through `wgpu` (needs the `gpu` feature). Results agree with the CPU path to
+    /// single-precision tolerance, not bit for bit.
+    Gpu,
+}
+
 /// Runs `std::dist::map` somewhere other than the calling thread: other processes, other machines,
 /// a Ray cluster. Arguments and results travel as JSON, converted with the function's static types.
 pub trait Executor: Send + Sync {
@@ -85,6 +95,7 @@ pub struct Interp {
     fuel: std::sync::atomic::AtomicU64,
     quantization: std::sync::atomic::AtomicU8,
     executor: RwLock<Option<Arc<dyn Executor>>>,
+    device: std::sync::atomic::AtomicU8,
 }
 
 impl fmt::Debug for Interp {
@@ -126,6 +137,7 @@ impl Interp {
             fuel: std::sync::atomic::AtomicU64::new(u64::MAX),
             quantization: std::sync::atomic::AtomicU8::new(0),
             executor: RwLock::new(None),
+            device: std::sync::atomic::AtomicU8::new(0),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -247,6 +259,22 @@ impl Interp {
         match self.call(name, values).map_err(|e| e.to_string())? {
             Value::Err(e) => Err(format!("Err({e})")),
             v => Ok(v.to_json()),
+        }
+    }
+
+    /// Where tensor operations run (see [`Device`]).
+    pub fn set_device(&self, device: Device) {
+        let v = match device {
+            Device::Cpu => 0,
+            Device::Gpu => 1,
+        };
+        self.device.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn device(&self) -> Device {
+        match self.device.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => Device::Gpu,
+            _ => Device::Cpu,
         }
     }
 

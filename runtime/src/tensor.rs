@@ -209,7 +209,13 @@ pub(crate) fn call(
     args: &[Value],
     result: &Ty,
     quantization: novar_hir::Quantization,
+    device: crate::interp::Device,
 ) -> Res {
+    if device == crate::interp::Device::Gpu {
+        if let Some(r) = on_gpu(path, args, quantization) {
+            return r;
+        }
+    }
     let name = path.rsplit("::").next().unwrap_or(path);
     match name {
         "zeros" => {
@@ -451,4 +457,122 @@ pub(crate) fn qmatmul_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) ->
         }
     }
     out
+}
+
+/// Runs the operation on the GPU when it is one of the supported `f32` kernels; `None` means
+/// "not handled here", so the CPU implementation runs instead.
+#[cfg(feature = "gpu")]
+fn on_gpu(path: &str, args: &[Value], quantization: novar_hir::Quantization) -> Option<Res> {
+    use crate::gpu::{self, Elementwise};
+    let name = path.rsplit("::").next()?;
+    let f32_tensor = |v: &Value| match v {
+        Value::Tensor(t) if matches!(t.dtype(), DataType::Float32) => Some(t.clone()),
+        _ => None,
+    };
+    let a = f32_tensor(args.first()?)?;
+    let gpu = match gpu::global() {
+        Ok(g) => g,
+        Err(e) => return Some(err(e)),
+    };
+    let wrap = |r: Result<Vec<f32>, String>, shape: Vec<usize>| -> Option<Res> {
+        Some(
+            r.map_err(RuntimeError::new)
+                .map(|data| Value::Tensor(Arc::new(TensorVal::from_f32(shape, data)))),
+        )
+    };
+    let host = a.to_f32_vec();
+    match name {
+        "add" | "sub" | "mul" | "div" => {
+            let b = f32_tensor(args.get(1)?)?;
+            if a.shape != b.shape {
+                return Some(err(format!(
+                    "{path}: shapes differ: {:?} and {:?}",
+                    a.shape, b.shape
+                )));
+            }
+            let op = match name {
+                "add" => Elementwise::Add,
+                "sub" => Elementwise::Sub,
+                "mul" => Elementwise::Mul,
+                _ => Elementwise::Div,
+            };
+            wrap(
+                gpu.elementwise(op, &host, &b.to_f32_vec(), 0.0),
+                a.shape.clone(),
+            )
+        }
+        "scale" => {
+            let s = match args.get(1)? {
+                Value::Float(x) => *x as f32,
+                Value::Int(i) => *i as f32,
+                _ => return None,
+            };
+            wrap(
+                gpu.elementwise(Elementwise::Scale, &host, &[], s),
+                a.shape.clone(),
+            )
+        }
+        "relu" => wrap(
+            gpu.elementwise(Elementwise::Relu, &host, &[], 0.0),
+            a.shape.clone(),
+        ),
+        "sigmoid" => wrap(
+            gpu.elementwise(Elementwise::Sigmoid, &host, &[], 0.0),
+            a.shape.clone(),
+        ),
+        "softmax" => {
+            let cols = *a.shape.last()?;
+            wrap(
+                gpu.softmax(&host, host.len() / cols.max(1), cols),
+                a.shape.clone(),
+            )
+        }
+        "matmul" if quantization == novar_hir::Quantization::None => {
+            let b = f32_tensor(args.get(1)?)?;
+            let (m, k) = match a.shape[..] {
+                [m, k] => (m, k),
+                _ => return None,
+            };
+            let (k2, n, vector) = match b.shape[..] {
+                [k2, n] => (k2, n, false),
+                [k2] => (k2, 1, true),
+                _ => return None,
+            };
+            if k != k2 {
+                return Some(err(format!(
+                    "`matmul` inner dimensions differ: {k} and {k2}"
+                )));
+            }
+            wrap(
+                gpu.matmul(&host, &b.to_f32_vec(), m, k, n),
+                if vector { vec![m] } else { vec![m, n] },
+            )
+        }
+        "sum" => Some(
+            gpu.sum(&host)
+                .map_err(RuntimeError::new)
+                .map(|x| Value::Float(f64::from(x))),
+        ),
+        "mean" => Some(
+            gpu.sum(&host)
+                .map_err(RuntimeError::new)
+                .map(|x| Value::Float(f64::from(x / host.len().max(1) as f32))),
+        ),
+        "dot" => {
+            let b = f32_tensor(args.get(1)?)?;
+            Some(
+                gpu.dot(&host, &b.to_f32_vec())
+                    .map_err(RuntimeError::new)
+                    .map(|x| Value::Float(f64::from(x))),
+            )
+        }
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "gpu"))]
+fn on_gpu(_: &str, _: &[Value], _: novar_hir::Quantization) -> Option<Res> {
+    Some(err(
+        "this build has no GPU support (rebuild with the `gpu` feature)",
+    ))
 }
