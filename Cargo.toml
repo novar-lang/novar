@@ -4,6 +4,7 @@ members = [
     "compiler/lexer",
     "compiler/parser",
     "compiler/ast",
+    "compiler/diagnostics",
     "compiler/semantic",
     "compiler/ir",
     "compiler/codegen",
