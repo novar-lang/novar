@@ -10,3 +10,10 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+novar_hir = { version = "0.1.0", path = "../compiler/semantic" }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+novar_parser = { version = "0.1.0", path = "../compiler/parser" }
