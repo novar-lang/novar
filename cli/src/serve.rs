@@ -87,7 +87,11 @@ fn seed(interp: &Interp, path: &str) -> Result<usize, CliError> {
 }
 
 /// Serves the `@endpoint` functions of `program` until Ctrl-C / SIGTERM.
-pub fn run(program: hir::Program, opts: &Options) -> Result<(), CliError> {
+pub fn run(
+    program: hir::Program,
+    opts: &Options,
+    cluster: Option<(Vec<String>, crate::bundle::Bundle)>,
+) -> Result<(), CliError> {
     let routes = novar_server::routes(&program);
     if routes.is_empty() {
         return failed("no `@endpoint` functions found, nothing to serve");
@@ -95,6 +99,10 @@ pub fn run(program: hir::Program, opts: &Options) -> Result<(), CliError> {
     let interp =
         Arc::new(Interp::with_live(program, opts.live).or_else(|e| failed(e.to_string()))?);
     interp.set_quantization(opts.quantize);
+    if let Some((workers, image)) = cluster {
+        crate::attach_cluster(&interp, workers, &image)?;
+        eprintln!("std::dist::map runs on the cluster");
+    }
     if opts.live {
         eprintln!("live mode: using the real Ollama / OpenAI / PostgreSQL services");
     }

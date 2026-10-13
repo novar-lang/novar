@@ -14,6 +14,7 @@ usage:
   novar check <file.nv>
   novar run <file.nv> <function> [args...] [--quantize int8]
   novar lsp                                                language server over stdio
+  novar worker [--listen host:port] [--token T]            run calls for a coordinator
   novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
@@ -50,9 +51,12 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         ["check", file] => check(file).map(|_| ()),
         ["run", file, func, rest @ ..] => run(file, func, rest),
         ["serve", file, rest @ ..] => {
-            let opts = serve::Options::parse("127.0.0.1", rest)?;
-            serve::run(check(file)?, &opts)
+            let (workers, rest) = take_workers(rest);
+            let opts = serve::Options::parse("127.0.0.1", &rest)?;
+            let checked = check_project(file)?;
+            serve::run(checked.hir, &opts, workers.map(|w| (w, checked.bundle)))
         }
+        ["worker", rest @ ..] => worker(rest),
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
         ["lsp"] => novar_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
@@ -63,6 +67,21 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
 
 /// A binary produced by `novar build --serve`: serve the embedded program. Containers set
 /// `PORT` / `HOST`; flags win over the environment.
+/// `novar worker [--listen host:port] [--token T]`: runs calls sent by a coordinator.
+fn worker(flags: &[&str]) -> Result<(), CliError> {
+    let mut listen = "127.0.0.1:7077".to_string();
+    let mut token = std::env::var("NOVAR_CLUSTER_TOKEN").ok();
+    let mut it = flags.iter();
+    while let Some(f) = it.next() {
+        match (*f, it.next()) {
+            ("--listen", Some(a)) => listen = a.to_string(),
+            ("--token", Some(t)) => token = Some(t.to_string()),
+            _ => return Err(CliError::Usage),
+        }
+    }
+    novar_cluster::worker::serve(&listen, token).or_else(failed)
+}
+
 fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError> {
     let flags: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut opts = serve::Options::parse(
@@ -78,7 +97,44 @@ fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError>
     }
     opts.live |= std::env::var("NOVAR_LIVE").is_ok_and(|v| v == "1");
     let loaded = bundle.load();
-    serve::run(lower_loaded(&loaded)?.0, &opts)
+    serve::run(lower_loaded(&loaded)?.0, &opts, None)
+}
+
+/// Splits `--workers host:port,host:port` out of `args`; `NOVAR_WORKERS` is the default.
+pub fn take_workers<'a>(args: &[&'a str]) -> (Option<Vec<String>>, Vec<&'a str>) {
+    let mut workers = std::env::var("NOVAR_WORKERS")
+        .ok()
+        .filter(|w| !w.is_empty());
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if *a == "--workers" {
+            workers = it.next().map(|w| w.to_string());
+        } else {
+            rest.push(*a);
+        }
+    }
+    (
+        workers.map(|w| {
+            w.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect()
+        }),
+        rest,
+    )
+}
+
+/// Sends `std::dist::map` calls to `workers`.
+pub fn attach_cluster(
+    interp: &Interp,
+    workers: Vec<String>,
+    image: &bundle::Bundle,
+) -> Result<(), CliError> {
+    let token = std::env::var("NOVAR_CLUSTER_TOKEN").ok();
+    let exec = novar_cluster::ClusterExecutor::new(workers, image, token).or_else(failed)?;
+    interp.set_executor(std::sync::Arc::new(exec));
+    Ok(())
 }
 
 /// Splits `--quantize int8|none` out of `args`.
@@ -181,9 +237,13 @@ fn parse_arg(raw: &str) -> Value {
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     let (quant, args) = take_quantize(args)?;
-    let hir = check(file)?;
-    let interp = Interp::new(hir).or_else(|e| failed(e.to_string()))?;
+    let (workers, args) = take_workers(&args);
+    let checked = check_project(file)?;
+    let interp = Interp::new(checked.hir).or_else(|e| failed(e.to_string()))?;
     interp.set_quantization(quant);
+    if let Some(workers) = workers {
+        attach_cluster(&interp, workers, &checked.bundle)?;
+    }
     let value = interp
         .call(func, args.iter().map(|a| parse_arg(a)).collect())
         .or_else(|e| failed(e.to_string()))?;

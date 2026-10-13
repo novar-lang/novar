@@ -2429,6 +2429,7 @@ name = "novar_cli"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "novar_cluster",
  "novar_codegen",
  "novar_diagnostics",
  "novar_hir",

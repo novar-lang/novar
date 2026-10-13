@@ -30,6 +30,7 @@ novar_lsp = { version = "0.1.0", path = "../tools/lsp" }
 novar_pkg = { version = "0.1.0", path = "../tools/package-manager" }
 novar_modules = { version = "0.1.0", path = "../compiler/modules" }
 serde = { version = "1.0.229", features = ["derive"] }
+novar_cluster = { version = "0.1.0", path = "../tools/cluster" }
 
 [features]
 # Native backend (MLIR + LLVM 22). Needs LLVM installed; see scripts/llvm-env.sh.
