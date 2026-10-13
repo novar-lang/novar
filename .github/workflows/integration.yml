@@ -1,0 +1,91 @@
+name: Integration
+
+# Parts of the project that need more than `cargo test`: the Python bindings, the WebAssembly
+# playground, the VS Code extension and a real PostgreSQL with pgvector. None of these are
+# required checks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and install the extension
+        run: python -m venv .venv && . .venv/bin/activate && pip install maturin numpy pyarrow polars pytest ray && cd python && maturin develop
+      - name: Test
+        run: . .venv/bin/activate && cd python && python -m pytest tests -q
+
+  playground:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - run: scripts/build-playground.sh --node
+      - run: node --test playground/test
+
+  vscode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: npm run compile
+        working-directory: editors/vscode
+      - run: npm test
+        working-directory: editors/vscode
+
+  pgvector:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: novar
+          POSTGRES_DB: vectors
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Real pgvector round trip
+        env:
+          NOVAR_TEST_PG_URL: postgresql://postgres:novar@localhost:5432/vectors
+        run: cargo test -p novar_runtime --test live pgvector -- --nocapture
