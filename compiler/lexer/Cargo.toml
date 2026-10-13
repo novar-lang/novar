@@ -10,3 +10,6 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+logos = "0.16.1"
