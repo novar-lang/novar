@@ -15,3 +15,10 @@ spec/engineering-spec.md
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Python bindings build output
+python/target/
+*.so
+*.whl
+__pycache__/
+.pytest_cache/

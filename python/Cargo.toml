@@ -1,0 +1,31 @@
+[package]
+name = "novar_py"
+description = "Novar: Python bindings (PyO3) with zero-copy Arrow and CUDA array interchange"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ntsation/novar"
+rust-version = "1.85"
+publish = false
+
+# Built with maturin, on its own: the extension-module link flags do not suit `cargo test`
+# of the main workspace, so this crate is excluded from it and keeps its own lockfile.
+[workspace]
+
+[lib]
+name = "novar"
+crate-type = ["cdylib"]
+
+[dependencies]
+arrow = { version = "59", default-features = false, features = ["ffi"] }
+novar_diagnostics = { path = "../compiler/diagnostics" }
+novar_hir = { path = "../compiler/semantic" }
+novar_parser = { path = "../compiler/parser" }
+novar_runtime = { path = "../runtime" }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

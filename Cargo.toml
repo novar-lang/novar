@@ -1,5 +1,6 @@
 [workspace]
 resolver = "3"
+exclude = ["python"]
 members = [
     "compiler/lexer",
     "compiler/parser",
