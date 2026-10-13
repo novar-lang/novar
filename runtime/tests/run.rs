@@ -455,3 +455,22 @@ fn a_step_limit_stops_runaway_programs() {
         "a fresh budget runs normal code"
     );
 }
+
+#[test]
+fn deep_recursion_works_on_a_small_thread_stack_and_runaway_recursion_is_an_error() {
+    let src = "fn sum(n: i64) -> i64 { if n == 0 { 0 } else { n + sum(n - 1) } } fn forever(n: i64) -> i64 { forever(n + 1) }";
+    let i = std::sync::Arc::new(load(src));
+    let worker = i.clone();
+    // A 256 KiB thread would overflow after a few hundred native frames without stack growth.
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            let deep = worker.call("sum", vec![Value::Int(1500)]).unwrap();
+            let runaway = worker.call("forever", vec![Value::Int(0)]).unwrap_err();
+            (int(deep), runaway.message)
+        })
+        .unwrap();
+    let (deep, runaway) = handle.join().expect("no native stack overflow");
+    assert_eq!(deep, 1500 * 1501 / 2);
+    assert!(runaway.contains("stack overflow"), "{runaway}");
+}

@@ -11,8 +11,12 @@ use serde_json::Value as Json;
 use crate::std_impl;
 use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
 
-/// Maximum nesting of function calls before evaluation aborts.
-const MAX_DEPTH: usize = 128;
+/// Maximum nesting of function calls before evaluation aborts. The native stack grows on demand
+/// (see `stacker`), so this is a language limit, not a limit of the thread's stack.
+const MAX_DEPTH: usize = 2000;
+/// Free native stack kept before each call, and the size of each extra stack segment.
+const STACK_RED_ZONE: usize = 256 * 1024;
+const STACK_SEGMENT: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeError {
@@ -362,7 +366,9 @@ impl Interp {
             depth: depth + 1,
         };
         ctx.env.extend(c.params.iter().copied().zip(args));
-        self.eval(&c.body, &mut ctx)
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+            self.eval(&c.body, &mut ctx)
+        })
     }
 
     fn call_fn(&self, f: &hir::FnDef, args: Vec<Value>, depth: usize) -> Eval {
@@ -385,7 +391,10 @@ impl Interp {
             depth: depth + 1,
         };
         ctx.env.extend(f.params.iter().map(|p| p.id).zip(args));
-        match self.block(&f.body, &mut ctx) {
+        let result = stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+            self.block(&f.body, &mut ctx)
+        });
+        match result {
             Err(Ctrl::Return(v)) => Ok(v),
             other => other,
         }
@@ -559,13 +568,13 @@ impl Interp {
             | ExprKind::Array(_) => self.eval_mutation_and_loops(e, ctx),
             ExprKind::Lit(l) => Ok(match l {
                 Lit::Int(n) => match &e.ty {
-                    Ty::Prim(p) if p.is_float() => Value::Float(*n as f64),
+                    Ty::Prim(p) if p.is_float() => round_to(&e.ty, Value::Float(*n as f64)),
                     _ => Value::Int(
                         i64::try_from(*n)
                             .map_err(|_| RuntimeError::new("integer literal too large"))?,
                     ),
                 },
-                Lit::Float(x) => Value::Float(*x),
+                Lit::Float(x) => round_to(&e.ty, Value::Float(*x)),
                 Lit::Str(s) => Value::str(s.as_str()),
                 Lit::Bool(b) => Value::Bool(*b),
             }),
@@ -621,7 +630,7 @@ impl Interp {
                 (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
                 (op, v) => fail(format!("cannot apply {op:?} to {}", v.type_name())),
             },
-            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, ctx),
+            ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, &e.ty, ctx),
             ExprKind::Closure { params, body } => Ok(Value::Closure(Arc::new(Closure {
                 params: params.iter().map(|p| p.id).collect::<Vec<LocalId>>(),
                 body: (**body).clone(),
@@ -729,7 +738,13 @@ impl Interp {
         }
     }
 
-    fn binary(&self, op: BinOp, lhs: &hir::Expr, rhs: &hir::Expr, ctx: &mut Ctx) -> Eval {
+    #[inline(never)]
+    fn binary(&self, op: BinOp, lhs: &hir::Expr, rhs: &hir::Expr, ty: &Ty, ctx: &mut Ctx) -> Eval {
+        self.binary_exact(op, lhs, rhs, ctx)
+            .map(|v| round_to(ty, v))
+    }
+
+    fn binary_exact(&self, op: BinOp, lhs: &hir::Expr, rhs: &hir::Expr, ctx: &mut Ctx) -> Eval {
         let l = self.eval(lhs, ctx)?;
         // `&&` and `||` short-circuit.
         match (op, &l) {
@@ -805,6 +820,15 @@ fn update_place(current: Value, steps: &[Step], new: Value) -> Result<Value, Ctr
             Ok(Value::Vec(items))
         }
         (_, other) => fail(format!("cannot assign through a {}", other.type_name())),
+    }
+}
+
+/// `f32` values are stored as `f64`; rounding after every operation keeps `f32` arithmetic exactly
+/// what native code computes.
+fn round_to(ty: &Ty, v: Value) -> Value {
+    match (ty, &v) {
+        (Ty::Prim(novar_hir::Prim::F32), Value::Float(x)) => Value::Float(f64::from(*x as f32)),
+        _ => v,
     }
 }
 
