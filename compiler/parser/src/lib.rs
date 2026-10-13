@@ -989,12 +989,18 @@ mod tests {
         let (plain, _) = parse(src);
         let (shifted, errs) = parse_at(src, 1000);
         assert!(errs.is_empty());
-        let (Item::Fn(a), Item::Fn(b)) = (&plain.unwrap().items[0], &shifted.unwrap().items[0]) else { panic!() };
+        let (Item::Fn(a), Item::Fn(b)) = (&plain.unwrap().items[0], &shifted.unwrap().items[0])
+        else {
+            panic!()
+        };
         assert_eq!(b.name.span.start, a.name.span.start + 1000);
         assert_eq!(b.span.end, a.span.end + 1000);
         // Interpolations inside f-strings are shifted too.
         let (p, _) = parse_at("fn g() -> String { f\"{a + 1}\" }", 500);
-        assert!(format!("{p:?}").contains("span: 5"), "expected shifted spans");
+        assert!(
+            format!("{p:?}").contains("span: 5"),
+            "expected shifted spans"
+        );
     }
 
     #[test]
