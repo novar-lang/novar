@@ -2355,6 +2355,16 @@ name = "novar_ast"
 version = "0.1.0"
 
 [[package]]
+name = "novar_bench"
+version = "0.1.0"
+dependencies = [
+ "novar_hir",
+ "novar_parser",
+ "novar_runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "novar_cli"
 version = "0.1.0"
 dependencies = [
