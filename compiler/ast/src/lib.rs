@@ -163,6 +163,8 @@ pub enum ExprKind {
     Block(Block),
     Return(Option<Box<Expr>>),
     FString(Vec<FPart>),
+    /// Placeholder left by parser error recovery.
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq)]
