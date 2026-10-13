@@ -1,61 +1,85 @@
 # Novar
 
-Novar is an open source programming language. This project is in its early stages.
+Novar is a statically typed, compiled language for data processing, ML pipelines and AI serving.
+Tensor shapes are part of the type system, a pipeline operator (`|>`) composes stages, and a
+function marked `@endpoint` becomes an HTTP route with validation and JSON handling generated
+for it.
 
-## Layout
+```novar
+import std::ai::embeddings::OllamaEmbedder;
+import std::http::Status;
 
-| Directory      | Purpose                                              |
-|----------------|------------------------------------------------------|
-| `spec/`        | Formal language specification (grammar, semantics)   |
-| `compiler/`    | Lexer, parser, AST, semantic analysis, IR, codegen   |
-| `runtime/`     | Runtime support (memory, panics, intrinsics)         |
-| `stdlib/`      | Standard library written in Novar                    |
-| `cli/`         | The `novar` command-line entry point                 |
-| `tools/`       | Formatter, linter, LSP server, package manager       |
-| `editors/`     | Editor integrations and syntax highlighting          |
-| `examples/`    | Example programs                                     |
-| `tests/`       | Unit, integration and fixture tests                  |
-| `benchmarks/`  | Performance benchmarks                               |
-| `docs/`        | User guide, reference, design and contributor docs   |
-| `rfcs/`        | Proposals for language changes                       |
-| `scripts/`     | Build and release helper scripts                     |
+let embedder = OllamaEmbedder::new("nomic-embed-text");
 
-## Usage
+struct QueryPayload { query: String, top_k: i32 }
 
-```sh
-cargo build -p novar_cli            # the `novar` binary
-novar check examples/rag-service.nv # parse + type-check with rendered diagnostics
-novar run prog.nv fib 20            # interpret a function
-novar serve examples/rag-service.nv --port 8080 --seed docs.jsonl
+fn embed(text: String) -> Tensor<f32, [768]> {
+    text |> std::text::clean_whitespace() |> std::text::truncate(512) |> embedder.embed()
+}
+
+@endpoint(path = "/v1/embed", method = "POST")
+pub fn handle(payload: QueryPayload) -> Result<Tensor<f32, [768]>, Status> {
+    if payload.query.is_empty() { return Err(Status::BadRequest("empty query")); }
+    return Ok(embed(payload.query));
+}
 ```
 
-### Native backend (optional)
+The full RAG service from the specification is in [`examples/rag-service.nv`](examples/rag-service.nv).
 
-`novar jit` and `novar build` compile through MLIR and LLVM 22. Install LLVM
-(`brew install llvm@22`), then:
+## Quick start
 
 ```sh
-. scripts/llvm-env.sh
-cargo build -p novar_cli --features llvm
-novar build prog.nv -o prog          # needs `fn main() -> i32`; the result is the exit code
-novar jit prog.nv fib 30
+cargo build --release -p novar_cli          # target/release/novar
+novar check examples/rag-service.nv         # parse + type-check, diagnostics point at the exact span
+novar run examples/basics/primes.nv main    # interpret
+novar serve examples/rag-service.nv         # HTTP server on :8080 (offline model stand-ins)
+novar serve examples/rag-service.nv --live  # real Ollama / OpenAI / PostgreSQL+pgvector
+novar build --serve examples/rag-service.nv -o service --dockerfile   # one binary + Dockerfile
 ```
 
-The native subset covers integers, floats, booleans, `if`, `return`, calls, global
-constants, structs of supported types, `let mut` with `=`/`+=`/..., `while`, `for i in a..b`
-and `for x in vec`, arrays of numbers/bools (`[1, 2, 3]`, `v[i]`, `.len()`, bounds-checked),
-element/field assignment (`v[i] = x`, `p.a.b += 1`, `mut` parameters), and strings (literals, `+`, `==`, `.len()`, `.is_empty()`, f-strings with integers, booleans
-and strings, `std::io::print`/`println`). Closures, floats in f-strings, arrays of
-strings/structs, tensors and the rest of std still run only in the interpreter (`novar run`/`serve`). Strings built with `+` are
-never freed yet.
+Nightly Rust is required (`rust-toolchain.toml` selects it). More in [`docs/guide`](docs/guide/tour.md).
 
-### Value semantics
+## What is here
 
-Structs and strings are values: copying one and then changing the copy leaves the original
-alone. A `Vec` is a reference: `let b = a;` makes both names share the same elements, so
-`a[0] = 1` is visible through `b`, and a function taking `mut v: Vec<T>` can fill the caller's
-vector. Untyped number literals take their type from how they are used (`let mut n = 0;`
-becomes `u64` if you compare it with `v.len()`) and default to `i32` / `f64`.
+| Area | Where | Notes |
+|---|---|---|
+| Compiler front end | `compiler/{lexer,parser,ast,semantic}` | `logos` + `chumsky` with error recovery; typed HIR; literal type inference; tensor shapes checked statically |
+| Interpreter and runtime | `runtime/` | Arrow-backed tensors and tables, CSV / Parquet / SQL (DataFusion), real Ollama / OpenAI / pgvector clients |
+| Native backend | `compiler/{ir,codegen}` | MLIR (`melior`) and LLVM (`inkwell`) 22; JIT and executables; int8 quantization of `matmul`. Optional: `--features llvm` |
+| HTTP serving | `server/`, `cli/` | `@endpoint` becomes an Axum route; `novar build --serve` embeds the program in one binary |
+| Modules and packages | `compiler/modules`, `tools/package-manager` | `import` between files, `nvpm` with registries, a resolver and a lockfile |
+| Editor support | `tools/lsp`, `editors/vscode` | diagnostics, hover, completion, go to definition, inferred-type hints |
+| Web playground | `playground/` | the checker and interpreter compiled to WebAssembly |
+| Python | `python/` | PyO3 module; zero-copy Arrow, NumPy and CUDA-array interchange; Ray executor |
+| Distribution | `tools/cluster` | `novar worker` + `--workers` for `std::dist::map` |
+| Benchmarks | `benchmarks/` | alpha targets: RAG overhead, memory footprint, ingestion throughput |
+
+[`docs/design/status.md`](docs/design/status.md) maps every item of the original engineering
+specification to what exists, what was verified and how, and what is still open.
+
+## Language notes
+
+* **Values.** Structs and strings are values; a `Vec` is a reference (copies share elements).
+  Tensors are immutable values. Untyped number literals take their type from how they are used.
+* **Tensors.** `Tensor<f32, [2, 3]>` carries its shape: `std::tensor::matmul` of mismatched
+  shapes is a compile error. Symbolic dimensions (`[N]`) accept any size.
+* **Tables.** `Table<Row>` is an Arrow table whose columns are the fields of struct `Row`;
+  `t.score` is the column as a zero-copy tensor.
+* **Modules.** `import util::helper;`, `import crate::geometry::{Point, norm};`,
+  `import mathx::vec::dot;` (a dependency). Only `pub fn` and `pub struct` are importable.
+* **Native subset.** Integers, floats, bools, strings, structs, number vectors, static-shape
+  `f32`/`f64` tensors, loops and f-strings (ints, bools, strings). Closures, `Table`, SQL and most
+  of `std` run in the interpreter only.
+
+## Testing
+
+```sh
+cargo test --workspace                       # no LLVM needed
+. scripts/llvm-env.sh && cargo test --workspace --features llvm
+cd python && maturin develop && python -m pytest tests
+scripts/build-playground.sh --node && node --test playground/test
+cd editors/vscode && npm ci && npm test
+```
 
 ## License
 
