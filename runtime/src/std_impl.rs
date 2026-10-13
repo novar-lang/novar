@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::interp::{Interp, RuntimeError};
 use crate::value::{Db, Native, Query, StructVal, TensorVal, Value};
+use novar_hir::Ty;
 use novar_hir::stdlib::EMBEDDING_DIM;
 
 type Res = Result<Value, RuntimeError>;
@@ -61,17 +62,20 @@ pub fn embed_text(text: &str) -> Vec<f32> {
 }
 
 fn tensor(data: Vec<f32>) -> Value {
-    Value::Tensor(Arc::new(TensorVal {
-        shape: vec![data.len()],
-        data,
-    }))
+    Value::Tensor(Arc::new(TensorVal::from_f32(vec![data.len()], data)))
 }
 
 fn status(code: u16, args: &[Value]) -> Res {
     Ok(Value::Status(code, want_str(&args[0])?))
 }
 
-pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>) -> Res {
+pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, result: &Ty) -> Res {
+    if path.starts_with("std::tensor::") {
+        return crate::tensor::call(path, &args, result);
+    }
+    if path.starts_with("std::table::") {
+        return crate::table::call(interp, path, &args, result);
+    }
     match path {
         "std::text::clean_whitespace" => Ok(Value::str(
             want_str(&args[0])?
@@ -176,6 +180,11 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
             "to_uppercase" => Ok(Value::str(s.to_uppercase())),
             _ => err(format!("String has no method `{name}`")),
         },
+        Value::Table(t) => match name {
+            "len" => Ok(Value::Int(t.rows() as i64)),
+            "is_empty" => Ok(Value::Bool(t.rows() == 0)),
+            _ => err(format!("Table has no method `{name}`")),
+        },
         Value::Vec(v) => match name {
             "is_empty" => Ok(Value::Bool(v.is_empty())),
             "len" => Ok(Value::Int(v.len() as i64)),
@@ -212,7 +221,7 @@ fn db_method(db: &Arc<Db>, name: &str, args: Vec<Value>) -> Res {
         "with_vector" => {
             let mut q = want_query(&args[0])?;
             match &args[1] {
-                Value::Tensor(t) => q.vector = Some(t.data.clone()),
+                Value::Tensor(t) => q.vector = Some(t.to_f32_vec()),
                 other => return err(format!("expected a Tensor, found {}", other.type_name())),
             }
             Ok(Value::Native(Native::Query(Arc::new(q))))
@@ -231,7 +240,7 @@ fn db_method(db: &Arc<Db>, name: &str, args: Vec<Value>) -> Res {
                 &want_str(&args[0])?,
                 &want_str(&args[1])?,
                 &want_str(&args[2])?,
-                t.data.clone(),
+                t.to_f32_vec(),
             );
             Ok(Value::Unit)
         }

@@ -152,6 +152,10 @@ impl Interp {
             .collect()
     }
 
+    pub(crate) fn struct_fields(&self, name: &str) -> Option<&[(String, Ty)]> {
+        self.structs.get(name).map(Vec::as_slice)
+    }
+
     pub fn endpoint_names(&self) -> Vec<String> {
         let mut v: Vec<_> = self
             .fns
@@ -356,8 +360,16 @@ impl Interp {
                         }
                     }
                     hir::ForIter::Vec(v) => {
-                        let Value::Vec(items) = self.eval(v, ctx)? else {
-                            return fail("`for` needs a Vec");
+                        let items = match self.eval(v, ctx)? {
+                            Value::Vec(items) => items,
+                            Value::Table(t) => {
+                                for i in 0..t.rows() {
+                                    ctx.env.insert(var.id, t.row(i)?);
+                                    self.block(body, ctx)?;
+                                }
+                                return Ok(Value::Unit);
+                            }
+                            _ => return fail("`for` needs a Vec or a Table"),
                         };
                         // Live view: element assignments inside the loop are visible to later
                         // iterations. The length is fixed when the loop starts.
@@ -371,20 +383,26 @@ impl Interp {
                 Ok(Value::Unit)
             }
             ExprKind::Index { base, index } => {
-                let (Value::Vec(items), Value::Int(i)) =
-                    (self.eval(base, ctx)?, self.eval(index, ctx)?)
-                else {
-                    return fail("indexing needs a Vec and an integer");
+                let (base, i) = (self.eval(base, ctx)?, self.eval(index, ctx)?);
+                let Value::Int(i) = i else {
+                    return fail("indexing needs an integer index");
                 };
-                usize::try_from(i)
-                    .ok()
-                    .and_then(|i| items.get(i))
-                    .ok_or_else(|| {
-                        Ctrl::Fail(RuntimeError::new(format!(
-                            "index out of bounds: the length is {} but the index is {i}",
-                            items.len()
-                        )))
-                    })
+                let out_of_bounds = |len: usize| {
+                    Ctrl::Fail(RuntimeError::new(format!(
+                        "index out of bounds: the length is {len} but the index is {i}"
+                    )))
+                };
+                match base {
+                    Value::Vec(items) => usize::try_from(i)
+                        .ok()
+                        .and_then(|i| items.get(i))
+                        .ok_or_else(|| out_of_bounds(items.len())),
+                    Value::Table(t) => match usize::try_from(i) {
+                        Ok(i) if i < t.rows() => Ok(t.row(i)?),
+                        _ => Err(out_of_bounds(t.rows())),
+                    },
+                    _ => fail("indexing needs a Vec or a Table"),
+                }
             }
             ExprKind::Array(items) => {
                 let mut out = Vec::with_capacity(items.len());
@@ -449,6 +467,7 @@ impl Interp {
                 Ok(Value::str(out))
             }
             ExprKind::Field { base, name } => match self.eval(base, ctx)? {
+                Value::Table(t) => Ok(t.column(name)?),
                 Value::Struct(s) => s
                     .fields
                     .iter()
@@ -462,7 +481,7 @@ impl Interp {
                     }),
                 other => fail(format!("{} has no field `{name}`", other.type_name())),
             },
-            ExprKind::Call { callee, args } => self.call_expr(callee, args, ctx),
+            ExprKind::Call { callee, args } => self.call_expr(callee, args, &e.ty, ctx),
             ExprKind::Unary { op, expr } => match (op, self.eval(expr, ctx)?) {
                 (UnOp::Neg, Value::Int(i)) => i.checked_neg().map(Value::Int).ok_or_else(overflow),
                 (UnOp::Neg, Value::Float(x)) => Ok(Value::Float(-x)),
@@ -523,7 +542,13 @@ impl Interp {
         }
     }
 
-    fn call_expr(&self, callee: &hir::Expr, args: &[hir::Expr], ctx: &mut Ctx) -> Eval {
+    fn call_expr(
+        &self,
+        callee: &hir::Expr,
+        args: &[hir::Expr],
+        result: &Ty,
+        ctx: &mut Ctx,
+    ) -> Eval {
         // Evaluate arguments left to right, before dispatch.
         let eval_args = |this: &Self, ctx: &mut Ctx| {
             args.iter()
@@ -550,7 +575,12 @@ impl Interp {
                             Value::Err(v)
                         })
                     }
-                    _ => Ok(std_impl::call_function(self, &path.join("::"), args)?),
+                    _ => Ok(std_impl::call_function(
+                        self,
+                        &path.join("::"),
+                        args,
+                        result,
+                    )?),
                 }
             }
             ExprKind::Field { base, name } => {

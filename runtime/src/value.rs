@@ -58,11 +58,18 @@ impl VecVal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// A dense tensor: a flat Arrow array (row-major) plus its shape. Cloning shares the buffer.
+#[derive(Debug, Clone)]
 pub struct TensorVal {
     pub shape: Vec<usize>,
-    /// Row-major elements.
-    pub data: Vec<f32>,
+    pub array: arrow::array::ArrayRef,
+}
+
+/// A columnar table; its columns follow the fields of the struct named `schema`.
+#[derive(Debug, Clone)]
+pub struct TableVal {
+    pub schema: String,
+    pub batch: arrow::record_batch::RecordBatch,
 }
 
 #[derive(Debug)]
@@ -83,6 +90,7 @@ pub enum Value {
     Vec(Arc<VecVal>),
     Struct(Arc<StructVal>),
     Tensor(Arc<TensorVal>),
+    Table(Arc<TableVal>),
     Ok(Box<Value>),
     Err(Box<Value>),
     Status(u16, Arc<str>),
@@ -154,6 +162,7 @@ impl Value {
             Value::Vec(_) => "Vec",
             Value::Struct(_) => "struct",
             Value::Tensor(_) => "Tensor",
+            Value::Table(_) => "Table",
             Value::Ok(_) | Value::Err(_) => "Result",
             Value::Status(..) => "Status",
             Value::Closure(_) => "function",
@@ -183,6 +192,7 @@ impl Value {
                         .all(|((n1, v1), (n2, v2))| n1 == n2 && v1.equals(v2))
             }
             (Value::Tensor(a), Value::Tensor(b)) => a == b,
+            (Value::Table(a), Value::Table(b)) => a.schema == b.schema && a.batch == b.batch,
             (Value::Ok(a), Value::Ok(b)) | (Value::Err(a), Value::Err(b)) => a.equals(b),
             (Value::Status(a, m), Value::Status(b, n)) => a == b && m == n,
             _ => false,
@@ -204,7 +214,11 @@ impl Value {
                 }
                 Json::Object(m)
             }
-            Value::Tensor(t) => tensor_json(&t.shape, &t.data),
+            Value::Tensor(t) => {
+                let single = matches!(t.dtype(), arrow::datatypes::DataType::Float32);
+                tensor_json(&t.shape, &t.to_f64_vec(), single)
+            }
+            Value::Table(t) => t.to_json(),
             Value::Ok(v) => v.to_json(),
             Value::Err(v) => serde_json::json!({ "error": v.to_json() }),
             Value::Status(code, msg) => serde_json::json!({ "status": code, "message": &**msg }),
@@ -214,14 +228,23 @@ impl Value {
     }
 }
 
-fn tensor_json(shape: &[usize], data: &[f32]) -> Json {
+fn tensor_json(shape: &[usize], data: &[f64], single: bool) -> Json {
     match shape.split_first() {
-        None => Number::from_f64(f64::from(data[0])).map_or(Json::Null, Json::Number),
+        None => {
+            let x = data[0];
+            // f32 values print with their shortest decimal form, not widened f64 noise.
+            let x = if single {
+                format!("{}", x as f32).parse().unwrap_or(x)
+            } else {
+                x
+            };
+            Number::from_f64(x).map_or(Json::Null, Json::Number)
+        }
         Some((&n, rest)) => {
             let chunk: usize = rest.iter().product();
             Json::Array(
                 (0..n)
-                    .map(|i| tensor_json(rest, &data[i * chunk..(i + 1) * chunk]))
+                    .map(|i| tensor_json(rest, &data[i * chunk..(i + 1) * chunk], single))
                     .collect(),
             )
         }
@@ -257,6 +280,7 @@ impl fmt::Display for Value {
                 f.write_str(" }")
             }
             Value::Tensor(t) => write!(f, "Tensor{:?}", t.shape),
+            Value::Table(t) => write!(f, "Table[{} rows]", t.rows()),
             Value::Ok(v) => write!(f, "Ok({v})"),
             Value::Err(v) => write!(f, "Err({v})"),
             Value::Status(code, msg) => write!(f, "{code}: {msg}"),
@@ -292,11 +316,43 @@ pub fn from_json(
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::vec)
         }
-        Ty::Tensor { shape, .. } => {
+        Ty::Tensor { elem, shape } => {
             let mut dims = Vec::new();
             let mut data = Vec::new();
             flatten(json, shape.len(), 0, &mut dims, &mut data)?;
-            Ok(Value::Tensor(Arc::new(TensorVal { shape: dims, data })))
+            let array: arrow::array::ArrayRef = match &**elem {
+                Ty::Prim(Prim::F64) => Arc::new(arrow::array::Float64Array::from(data)),
+                Ty::Prim(Prim::I32) => Arc::new(arrow::array::Int32Array::from(
+                    data.iter().map(|x| *x as i32).collect::<Vec<_>>(),
+                )),
+                Ty::Prim(Prim::I64) => Arc::new(arrow::array::Int64Array::from(
+                    data.iter().map(|x| *x as i64).collect::<Vec<_>>(),
+                )),
+                _ => Arc::new(arrow::array::Float32Array::from(
+                    data.iter().map(|x| *x as f32).collect::<Vec<_>>(),
+                )),
+            };
+            TensorVal::from_array(dims, array)
+                .map(|t| Value::Tensor(Arc::new(t)))
+                .map_err(|e| e.message)
+        }
+        Ty::Table(name) => {
+            let fields = structs
+                .get(name)
+                .ok_or_else(|| format!("unknown struct `{name}`"))?;
+            let items = json.as_array().ok_or_else(|| bad("an array of rows"))?;
+            let rows = items
+                .iter()
+                .map(|j| from_json(&Ty::Struct(name.clone()), j, structs))
+                .collect::<Result<Vec<_>, _>>()?;
+            crate::table::rows_to_batch(fields, &rows)
+                .map(|batch| {
+                    Value::Table(Arc::new(TableVal {
+                        schema: name.clone(),
+                        batch,
+                    }))
+                })
+                .map_err(|e| e.message)
         }
         Ty::Struct(name) => {
             let fields = structs
@@ -327,13 +383,13 @@ fn flatten(
     rank: usize,
     depth: usize,
     dims: &mut Vec<usize>,
-    data: &mut Vec<f32>,
+    data: &mut Vec<f64>,
 ) -> Result<(), String> {
     if depth == rank {
         let x = json
             .as_f64()
             .ok_or_else(|| format!("expected a number, found {json}"))?;
-        data.push(x as f32);
+        data.push(x);
         return Ok(());
     }
     let items = json
