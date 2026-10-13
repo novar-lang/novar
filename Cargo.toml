@@ -10,6 +10,7 @@ members = [
     "compiler/semantic",
     "compiler/ir",
     "compiler/codegen",
+    "compiler/accel",
     "runtime",
     "server",
     "cli",

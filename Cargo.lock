@@ -2628,6 +2628,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "novar_accel"
+version = "0.1.0"
+dependencies = [
+ "inkwell",
+ "novar_diagnostics",
+ "novar_hir",
+ "novar_parser",
+]
+
+[[package]]
 name = "novar_ast"
 version = "0.1.0"
 
@@ -2646,6 +2656,7 @@ name = "novar_cli"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "novar_accel",
  "novar_cluster",
  "novar_codegen",
  "novar_diagnostics",
