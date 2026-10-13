@@ -22,9 +22,9 @@ fn want_str(v: &Value) -> Result<Arc<str>, RuntimeError> {
     }
 }
 
-fn want_vec(v: &Value) -> Result<Arc<Vec<Value>>, RuntimeError> {
+fn want_vec(v: &Value) -> Result<Vec<Value>, RuntimeError> {
     match v {
-        Value::Vec(items) => Ok(items.clone()),
+        Value::Vec(items) => Ok(items.snapshot()),
         other => err(format!("expected a Vec, found {}", other.type_name())),
     }
 }
@@ -137,6 +137,10 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>) -> Re
         }
         "std::iter::count" => Ok(Value::Int(want_vec(&args[0])?.len() as i64)),
         "std::collect" => Ok(args[0].clone()),
+        "std::io::print" => interp.write_out(&want_str(&args[0])?).map(|()| Value::Unit),
+        "std::io::println" => interp
+            .write_out(&format!("{}\n", want_str(&args[0])?))
+            .map(|()| Value::Unit),
         "std::http::Status::BadRequest" => status(400, &args),
         "std::http::Status::Unauthorized" => status(401, &args),
         "std::http::Status::Forbidden" => status(403, &args),

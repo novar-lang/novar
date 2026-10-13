@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use novar_hir::hir::{self, LocalId};
 use novar_hir::{Prim, Ty};
@@ -14,6 +14,48 @@ pub type Env = HashMap<LocalId, Value>;
 pub struct StructVal {
     pub name: String,
     pub fields: Vec<(String, Value)>,
+}
+
+/// Shared, mutable element storage of a `Vec`.
+#[derive(Debug, Default)]
+pub struct VecVal(RwLock<Vec<Value>>);
+
+impl VecVal {
+    pub fn new(items: Vec<Value>) -> Self {
+        Self(RwLock::new(items))
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Vec<Value>> {
+        self.0.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn len(&self) -> usize {
+        self.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.read().is_empty()
+    }
+
+    pub fn get(&self, i: usize) -> Option<Value> {
+        self.read().get(i).cloned()
+    }
+
+    /// Replaces element `i`; `false` when out of bounds.
+    pub fn set(&self, i: usize, v: Value) -> bool {
+        match self.0.write().unwrap_or_else(|e| e.into_inner()).get_mut(i) {
+            Some(slot) => {
+                *slot = v;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A copy of the current elements.
+    pub fn snapshot(&self) -> Vec<Value> {
+        self.read().clone()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,7 +79,8 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Str(Arc<str>),
-    Vec(Arc<Vec<Value>>),
+    /// Vectors are reference values: copies of a `Vec` share the same elements.
+    Vec(Arc<VecVal>),
     Struct(Arc<StructVal>),
     Tensor(Arc<TensorVal>),
     Ok(Box<Value>),
@@ -98,7 +141,7 @@ impl Value {
     }
 
     pub fn vec(items: Vec<Value>) -> Value {
-        Value::Vec(Arc::new(items))
+        Value::Vec(Arc::new(VecVal::new(items)))
     }
 
     pub fn type_name(&self) -> &'static str {
@@ -128,7 +171,8 @@ impl Value {
             (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => *a as f64 == *b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Vec(a), Value::Vec(b)) => {
-                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
+                let (a, b) = (a.snapshot(), b.snapshot());
+                a.len() == b.len() && a.iter().zip(&b).all(|(x, y)| x.equals(y))
             }
             (Value::Struct(a), Value::Struct(b)) => {
                 a.name == b.name
@@ -152,7 +196,7 @@ impl Value {
             Value::Int(i) => Json::from(*i),
             Value::Float(f) => Number::from_f64(*f).map_or(Json::Null, Json::Number),
             Value::Str(s) => Json::String(s.to_string()),
-            Value::Vec(items) => Json::Array(items.iter().map(Value::to_json).collect()),
+            Value::Vec(items) => Json::Array(items.snapshot().iter().map(Value::to_json).collect()),
             Value::Struct(s) => {
                 let mut m = Map::new();
                 for (k, v) in &s.fields {
@@ -194,7 +238,7 @@ impl fmt::Display for Value {
             Value::Str(s) => f.write_str(s),
             Value::Vec(items) => {
                 f.write_str("[")?;
-                for (i, v) in items.iter().enumerate() {
+                for (i, v) in items.snapshot().iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
                     }

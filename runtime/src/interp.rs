@@ -64,6 +64,7 @@ pub struct Interp {
     structs: HashMap<String, Vec<(String, Ty)>>,
     globals: RwLock<HashMap<String, Value>>,
     dbs: Mutex<HashMap<String, Arc<Db>>>,
+    out: Mutex<Box<dyn std::io::Write + Send>>,
 }
 
 impl fmt::Debug for Interp {
@@ -95,6 +96,7 @@ impl Interp {
                 .collect(),
             globals: RwLock::new(HashMap::new()),
             dbs: Mutex::new(HashMap::new()),
+            out: Mutex::new(Box::new(std::io::stdout())),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -112,6 +114,19 @@ impl Interp {
                 .insert(g.name.clone(), v);
         }
         Ok(interp)
+    }
+
+    /// Redirects `std::io::print`/`println` (stdout by default).
+    pub fn set_output(&self, writer: impl std::io::Write + Send + 'static) {
+        *self.out.lock().unwrap_or_else(|e| e.into_inner()) = Box::new(writer);
+    }
+
+    pub(crate) fn write_out(&self, text: &str) -> Result<(), RuntimeError> {
+        use std::io::Write;
+        let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
+        out.write_all(text.as_bytes())
+            .and_then(|()| out.flush())
+            .map_err(|e| RuntimeError::new(format!("cannot write output: {e}")))
     }
 
     /// The in-memory database behind `url`, created on first use. Lets embedders seed data.
@@ -270,9 +285,127 @@ impl Interp {
         }
     }
 
+    /// Assignment, loops and arrays. Kept out of `eval` so its stack frame stays small: the
+    /// evaluator recurses once per Novar call, and debug-build frames add up quickly.
+    #[inline(never)]
+    fn eval_mutation_and_loops(&self, e: &hir::Expr, ctx: &mut Ctx) -> Eval {
+        match &e.kind {
+            ExprKind::Assign { place, value } => {
+                // Order: the value, then the place's index expressions left to right.
+                let v = self.eval(value, ctx)?;
+                let mut steps = Vec::with_capacity(place.projs.len());
+                for pr in &place.projs {
+                    steps.push(match pr {
+                        hir::Proj::Field { name, .. } => Step::Field(name.as_str()),
+                        hir::Proj::Index(i) => match self.eval(i, ctx)? {
+                            Value::Int(i) => Step::Index(i),
+                            other => {
+                                return fail(format!(
+                                    "index is {}, not an integer",
+                                    other.type_name()
+                                ));
+                            }
+                        },
+                    });
+                }
+                let root = ctx.env.get(&place.local).cloned().ok_or_else(|| {
+                    Ctrl::Fail(RuntimeError::new(format!(
+                        "unbound variable `{}`",
+                        place.name
+                    )))
+                })?;
+                let updated = update_place(root, &steps, v)?;
+                ctx.env.insert(place.local, updated);
+                Ok(Value::Unit)
+            }
+            ExprKind::While { cond, body } => {
+                loop {
+                    match self.eval(cond, ctx)? {
+                        Value::Bool(true) => {
+                            self.block(body, ctx)?;
+                        }
+                        Value::Bool(false) => break,
+                        other => {
+                            return fail(format!(
+                                "`while` condition is {}, not bool",
+                                other.type_name()
+                            ));
+                        }
+                    }
+                }
+                Ok(Value::Unit)
+            }
+            ExprKind::For { var, iter, body } => {
+                match iter {
+                    hir::ForIter::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
+                        let (Value::Int(a), Value::Int(b)) =
+                            (self.eval(start, ctx)?, self.eval(end, ctx)?)
+                        else {
+                            return fail("range bounds must be integers");
+                        };
+                        // i128 so that `..=i64::MAX` cannot overflow the counter.
+                        let (mut i, last) = (i128::from(a), i128::from(b));
+                        while i < last || (*inclusive && i == last) {
+                            ctx.env.insert(var.id, Value::Int(i as i64));
+                            self.block(body, ctx)?;
+                            i += 1;
+                        }
+                    }
+                    hir::ForIter::Vec(v) => {
+                        let Value::Vec(items) = self.eval(v, ctx)? else {
+                            return fail("`for` needs a Vec");
+                        };
+                        // Live view: element assignments inside the loop are visible to later
+                        // iterations. The length is fixed when the loop starts.
+                        for i in 0..items.len() {
+                            let Some(item) = items.get(i) else { break };
+                            ctx.env.insert(var.id, item);
+                            self.block(body, ctx)?;
+                        }
+                    }
+                }
+                Ok(Value::Unit)
+            }
+            ExprKind::Index { base, index } => {
+                let (Value::Vec(items), Value::Int(i)) =
+                    (self.eval(base, ctx)?, self.eval(index, ctx)?)
+                else {
+                    return fail("indexing needs a Vec and an integer");
+                };
+                usize::try_from(i)
+                    .ok()
+                    .and_then(|i| items.get(i))
+                    .ok_or_else(|| {
+                        Ctrl::Fail(RuntimeError::new(format!(
+                            "index out of bounds: the length is {} but the index is {i}",
+                            items.len()
+                        )))
+                    })
+            }
+            ExprKind::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for it in items {
+                    out.push(self.eval(it, ctx)?);
+                }
+                Ok(Value::vec(out))
+            }
+
+            _ => unreachable!("only called for mutation, loops and arrays"),
+        }
+    }
+
     fn eval(&self, e: &hir::Expr, ctx: &mut Ctx) -> Eval {
         match &e.kind {
             ExprKind::Error => fail("cannot run code that failed to type-check"),
+            ExprKind::Assign { .. }
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Index { .. }
+            | ExprKind::Array(_) => self.eval_mutation_and_loops(e, ctx),
             ExprKind::Lit(l) => Ok(match l {
                 Lit::Int(n) => match &e.ty {
                     Ty::Prim(p) if p.is_float() => Value::Float(*n as f64),
@@ -464,6 +597,51 @@ impl Interp {
                 r.type_name()
             )),
         }
+    }
+}
+
+/// One resolved step of an assignment target.
+enum Step<'a> {
+    Field(&'a str),
+    Index(i64),
+}
+
+/// Returns `current` with the place described by `steps` replaced by `new`. Structs are values
+/// (rebuilt on the way back up); vectors are shared, so their elements are updated in place.
+fn update_place(current: Value, steps: &[Step], new: Value) -> Result<Value, Ctrl> {
+    let Some((step, rest)) = steps.split_first() else {
+        return Ok(new);
+    };
+    match (step, current) {
+        (Step::Field(name), Value::Struct(s)) => {
+            let mut fields = s.fields.clone();
+            let slot = fields.iter_mut().find(|(n, _)| n == name).ok_or_else(|| {
+                Ctrl::Fail(RuntimeError::new(format!(
+                    "{} has no field `{name}`",
+                    s.name
+                )))
+            })?;
+            let old = std::mem::replace(&mut slot.1, Value::Unit);
+            slot.1 = update_place(old, rest, new)?;
+            Ok(Value::Struct(Arc::new(StructVal {
+                name: s.name.clone(),
+                fields,
+            })))
+        }
+        (Step::Index(i), Value::Vec(items)) => {
+            let out_of_bounds = || {
+                Ctrl::Fail(RuntimeError::new(format!(
+                    "index out of bounds: the length is {} but the index is {i}",
+                    items.len()
+                )))
+            };
+            let idx = usize::try_from(*i).map_err(|_| out_of_bounds())?;
+            let old = items.get(idx).ok_or_else(out_of_bounds)?;
+            let updated = update_place(old, rest, new)?;
+            items.set(idx, updated);
+            Ok(Value::Vec(items))
+        }
+        (_, other) => fail(format!("cannot assign through a {}", other.type_name())),
     }
 }
 
