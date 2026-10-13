@@ -13,12 +13,12 @@ workspace = true
 
 [features]
 # Native backend through MLIR/LLVM 22 (needs LLVM installed; see scripts/llvm-env.sh).
-llvm = ["dep:melior"]
+llvm = ["dep:melior", "dep:novar_hir"]
 
 [dependencies]
 melior = { version = "0.27", optional = true }
 novar_diagnostics = { version = "0.1.0", path = "../diagnostics" }
-novar_hir = { version = "0.1.0", path = "../semantic" }
+novar_hir = { version = "0.1.0", path = "../semantic", optional = true }
 
 [dev-dependencies]
 novar_parser = { version = "0.1.0", path = "../parser" }
