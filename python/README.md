@@ -35,6 +35,12 @@ prog.call("best", pa.table({"id": [1, 2], "score": pa.array([1.0, 2.0], pa.float
   parameter rejects any other shape, and converts the element type (one copy) when it differs.
 * `Program.endpoint(name, payload)` runs an `@endpoint` on a dict; error statuses raise
   `novar.StatusError` with `.status`.
+* `Program.set_executor(callable)` sends `std::dist::map` calls to any scheduler.
+  `novar.ray.RayExecutor(source)` runs them as Ray tasks (tested against a local Ray cluster):
+
+  ```python
+  ray.init(); program.set_executor(novar.ray.RayExecutor(SOURCE)); program.call("process_all", items)
+  ```
 * `DeviceTensor` carries a GPU buffer through Novar by pointer and exposes
   `__cuda_array_interface__` again so the next framework adopts it as is. Novar has no GPU
   kernels yet, so device tensors cannot be passed to Novar functions (they raise a clear error).

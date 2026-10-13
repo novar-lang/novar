@@ -37,6 +37,30 @@ pub(crate) fn runtime_err(e: impl std::fmt::Display) -> PyErr {
     NovarError::new_err(e.to_string())
 }
 
+/// Runs `std::dist::map` through a Python callable.
+struct PyExecutor {
+    callable: Py<PyAny>,
+}
+
+impl novar_runtime::Executor for PyExecutor {
+    fn map(&self, function: &str, items: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>, String> {
+        Python::attach(|py| {
+            let texts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
+            let out = self
+                .callable
+                .call1(py, (function, texts))
+                .map_err(|e| format!("the executor failed: {e}"))?;
+            let results: Vec<String> = out
+                .extract(py)
+                .map_err(|e| format!("the executor must return a list of JSON strings: {e}"))?;
+            results
+                .iter()
+                .map(|t| serde_json::from_str(t).map_err(|e| format!("the executor returned invalid JSON: {e}")))
+                .collect()
+        })
+    }
+}
+
 /// A checked Novar program ready to run.
 #[pyclass(module = "novar")]
 struct Program {
@@ -53,6 +77,29 @@ impl Program {
     /// Names of the `@endpoint` functions.
     fn endpoints(&self) -> Vec<String> {
         self.interp.endpoint_names()
+    }
+
+    /// Routes `std::dist::map` calls through `executor(function, items)`, where `items` is a list
+    /// of JSON strings and the result is a list of JSON strings in the same order. This is how the
+    /// work is handed to Ray (see `novar.ray`) or any other scheduler.
+    fn set_executor(&self, executor: Py<PyAny>) {
+        self.interp.set_executor(Arc::new(PyExecutor { callable: executor }));
+    }
+
+    /// Calls `function` with its arguments as JSON strings and returns the result as JSON.
+    /// Workers use this to run one mapped item.
+    #[pyo3(signature = (function, *args))]
+    fn call_json(&self, py: Python<'_>, function: &str, args: &Bound<'_, PyTuple>) -> PyResult<String> {
+        let parsed = args
+            .iter()
+            .map(|a| {
+                let text: String = a.extract()?;
+                serde_json::from_str(&text).map_err(|e| NovarError::new_err(format!("invalid JSON argument: {e}")))
+            })
+            .collect::<PyResult<Vec<serde_json::Value>>>()?;
+        let interp = self.interp.clone();
+        let result = py.detach(move || interp.call_json(function, &parsed));
+        result.map(|v| v.to_string()).map_err(NovarError::new_err)
     }
 
     /// Calls function `name` with Python arguments converted by the function's parameter types.
@@ -141,7 +188,7 @@ fn version() -> &'static str {
 }
 
 #[pymodule]
-fn novar(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Program>()?;
     m.add_class::<tensor::Tensor>()?;
     m.add_class::<tables::Table>()?;

@@ -2071,6 +2071,7 @@ dependencies = [
  "parquet",
  "postgres",
  "serde_json",
+ "stacker",
  "tokio",
  "ureq",
 ]

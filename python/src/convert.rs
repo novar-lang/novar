@@ -192,7 +192,7 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
             d.set_item("message", msg.to_string())?;
             d.into_any().unbind()
         }
-        Value::Closure(_) | Value::Native(_) => return Err(NovarError::new_err("this value cannot be converted to Python")),
+        Value::Closure(_) | Value::Func(_) | Value::Native(_) => return Err(NovarError::new_err("this value cannot be converted to Python")),
     })
 }
 

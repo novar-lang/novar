@@ -274,3 +274,79 @@ def test_scalar_calls_cost_microseconds(prog):
     per_call_us = (time.perf_counter() - start) / n * 1e6
     print(f"\nscalar call overhead: {per_call_us:.2f} us/call")
     assert per_call_us < 100, "bridging a scalar call should take microseconds, not milliseconds"
+
+
+# ---- distributed execution -----------------------------------------------------------------
+
+DIST = """
+fn square(x: i64) -> i64 { x * x }
+fn collatz(n: i64) -> i64 {
+    let mut steps: i64 = 0;
+    let mut x = n;
+    while x != 1 { if x % 2 == 0 { x = x / 2; } else { x = 3 * x + 1; } steps += 1; }
+    steps
+}
+fn squares(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, square) }
+fn longest(v: Vec<i64>) -> i64 {
+    let mut best: i64 = 0;
+    for steps in std::dist::map(v, collatz) { if steps > best { best = steps; } }
+    best
+}
+"""
+
+
+def test_a_python_callable_can_execute_mapped_calls():
+    calls = []
+
+    def executor(function, items):
+        calls.append((function, len(items)))
+        prog = novar.compile(DIST)
+        return [prog.call_json(function, item) for item in items]
+
+    prog = novar.compile(DIST)
+    assert prog.call("squares", [1, 2, 3]) == [1, 4, 9], "without an executor it runs locally"
+    prog.set_executor(executor)
+    assert prog.call("squares", [4, 5, 6]) == [16, 25, 36]
+    assert calls == [("square", 3)]
+
+
+def test_executor_errors_surface_as_novar_errors():
+    prog = novar.compile(DIST)
+
+    def broken(function, items):
+        raise RuntimeError("cluster is down")
+
+    prog.set_executor(broken)
+    with pytest.raises(novar.NovarError, match="cluster is down"):
+        prog.call("squares", [1])
+
+    prog.set_executor(lambda f, items: ["not json"])
+    with pytest.raises(novar.NovarError, match="invalid JSON"):
+        prog.call("squares", [1])
+
+
+def test_call_json_runs_one_item():
+    prog = novar.compile(DIST)
+    assert prog.call_json("square", "12") == "144"
+    with pytest.raises(novar.NovarError, match="argument"):
+        prog.call_json("square", '"x"')
+
+
+def test_mapped_calls_run_as_ray_tasks():
+    ray = pytest.importorskip("ray")
+    import novar.ray as nray
+
+    ray.init(num_cpus=4, include_dashboard=False, ignore_reinit_error=True, log_to_driver=False)
+    try:
+        prog = novar.compile(DIST)
+        prog.set_executor(nray.RayExecutor(DIST))
+        assert prog.call("squares", list(range(50))) == [x * x for x in range(50)]
+        local = novar.compile(DIST)
+        items = list(range(1, 400))
+        assert prog.call("longest", items) == local.call("longest", items)
+        # Same answers with one task per item.
+        prog.set_executor(nray.RayExecutor(DIST, chunk=1))
+        assert prog.call("squares", [3, 4]) == [9, 16]
+        assert prog.call("squares", []) == []
+    finally:
+        ray.shutdown()

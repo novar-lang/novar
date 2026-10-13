@@ -13,7 +13,7 @@ publish = false
 [workspace]
 
 [lib]
-name = "novar"
+name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
