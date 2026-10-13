@@ -5,3 +5,13 @@ target/
 node_modules/
 *.o
 *.out
+
+# Private / local-only
+spec/engineering-spec.md
+.env
+.env.*
+*.pem
+*.key
+.idea/
+.vscode/*
+!.vscode/extensions.json

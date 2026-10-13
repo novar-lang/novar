@@ -1,0 +1,12 @@
+[package]
+name = "novar_lexer"
+description = "Novar: novar_lexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true

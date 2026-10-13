@@ -22,4 +22,4 @@ Novar is an open source programming language. This project is in its early stage
 
 ## License
 
-To be decided (see `LICENSE`).
+Dual-licensed under MIT (`LICENSE-MIT`) or Apache 2.0 (`LICENSE-APACHE`).
