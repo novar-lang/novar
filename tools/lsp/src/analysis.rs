@@ -153,10 +153,13 @@ impl Snapshot {
     /// project. Only diagnostics located in this document are kept.
     pub fn analyze_in(text: String, path: Option<&Path>) -> Snapshot {
         let index = LineIndex::new(&text);
+        #[cfg(feature = "project")]
         let deps = path
             .and_then(|p| novar_pkg::Project::discover(p).ok().flatten())
             .and_then(|project| project.dependency_packages().ok())
             .unwrap_or_default();
+        #[cfg(not(feature = "project"))]
+        let deps = Vec::new();
         let name = path.map_or("<buffer>".to_string(), |p| p.display().to_string());
         let loaded = novar_modules::load_text(&name, &text, path.and_then(Path::parent), &deps);
         let mut diagnostics = loaded.diagnostics.clone();

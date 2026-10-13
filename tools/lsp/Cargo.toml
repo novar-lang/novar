@@ -18,6 +18,12 @@ name = "novar_lsp"
 name = "novar-lsp"
 path = "src/main.rs"
 
+[features]
+default = ["project"]
+# Find a project's installed dependencies through `novar.toml` (needs the package manager, which
+# pulls in an HTTP client: off for the WebAssembly build).
+project = ["dep:novar_pkg"]
+
 [dependencies]
 lsp-server = "0.7"
 lsp-types = "0.97"
@@ -25,6 +31,6 @@ novar_diagnostics = { version = "0.1.0", path = "../../compiler/diagnostics" }
 novar_hir = { version = "0.1.0", path = "../../compiler/semantic" }
 novar_modules = { version = "0.1.0", path = "../../compiler/modules" }
 novar_parser = { version = "0.1.0", path = "../../compiler/parser" }
-novar_pkg = { version = "0.1.0", path = "../package-manager" }
+novar_pkg = { version = "0.1.0", path = "../package-manager", optional = true }
 serde = "1"
 serde_json = "1"

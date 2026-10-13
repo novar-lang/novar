@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 novar_diagnostics = { version = "0.1.0", path = "../compiler/diagnostics" }
 novar_hir = { version = "0.1.0", path = "../compiler/semantic" }
-novar_lsp = { version = "0.1.0", path = "../tools/lsp" }
+novar_lsp = { version = "0.1.0", path = "../tools/lsp", default-features = false }
 novar_parser = { version = "0.1.0", path = "../compiler/parser" }
 # No DataFusion or network clients in the browser.
 novar_runtime = { version = "0.1.0", path = "../runtime", default-features = false }
