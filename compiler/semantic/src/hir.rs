@@ -38,6 +38,7 @@ pub struct Local {
     pub id: LocalId,
     pub name: String,
     pub ty: Ty,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,7 +130,57 @@ pub enum ExprKind {
     Block(Block),
     Return(Option<Box<Expr>>),
     FString(Vec<FPart>),
+    /// Assignment to a place rooted in a mutable local; evaluates to unit. The value is
+    /// evaluated first, then the place's index expressions left to right.
+    Assign {
+        place: Place,
+        value: Box<Expr>,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    For {
+        var: Local,
+        iter: ForIter,
+        body: Block,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Array(Vec<Expr>),
     Error,
+}
+
+/// Assignable location: a `let mut` local (or `mut` parameter) followed by field / index steps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Place {
+    pub local: LocalId,
+    pub name: String,
+    pub projs: Vec<Proj>,
+    /// Type of the whole place (what the assigned value must have).
+    pub ty: Ty,
+    /// Type of the root local.
+    pub root_ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Proj {
+    Field { name: String, struct_name: String },
+    Index(Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForIter {
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
+    /// Iterates the elements of a `Vec`.
+    Vec(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

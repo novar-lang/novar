@@ -102,6 +102,11 @@ pub enum Ty {
     Fn(Vec<Ty>, Box<Ty>),
     /// Type of expressions that never produce a value (`return`).
     Never,
+    /// Type of an unsuffixed integer literal that is still waiting to be pinned down by its
+    /// uses; defaults to `i32`. Only exists while a function is being checked.
+    IntVar(u32),
+    /// Like `IntVar`, for float literals; defaults to `f64`.
+    FloatVar(u32),
     /// Not known (opaque std items) or already reported as an error; compatible with everything.
     #[default]
     Unknown,
@@ -121,6 +126,9 @@ impl Ty {
         use Ty::*;
         match (self, actual) {
             (Unknown, _) | (_, Unknown) | (_, Never) | (Never, _) => true,
+            (IntVar(_), IntVar(_)) | (FloatVar(_), FloatVar(_)) => true,
+            (IntVar(_), Prim(p)) | (Prim(p), IntVar(_)) => p.is_int(),
+            (FloatVar(_), Prim(p)) | (Prim(p), FloatVar(_)) => p.is_float(),
             (Unit, Unit) => true,
             (Prim(a), Prim(b)) => a == b,
             (Struct(a), Struct(b)) | (Named(a), Named(b)) => a == b,
@@ -178,6 +186,8 @@ impl fmt::Display for Ty {
                 let ps: Vec<_> = params.iter().map(|p| p.to_string()).collect();
                 write!(f, "fn({}) -> {ret}", ps.join(", "))
             }
+            Ty::IntVar(_) => f.write_str("{integer}"),
+            Ty::FloatVar(_) => f.write_str("{float}"),
             Ty::Never => f.write_str("!"),
             Ty::Unknown => f.write_str("_"),
         }

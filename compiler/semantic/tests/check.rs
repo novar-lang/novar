@@ -109,7 +109,7 @@ fn literals_adapt_to_context() {
     assert_clean("fn f() { let x: f32 = 1.5; let y: u8 = 3; let z: f64 = 2; }");
     assert_err(
         "fn f() { let x: i32 = 1.5; }",
-        "expected `i32`, found `f64`",
+        "expected `i32`, found `{float}`",
     );
     assert_err(
         "fn f() { let x: i32 = \"a\"; }",
@@ -171,7 +171,7 @@ fn returns_and_blocks() {
 
 #[test]
 fn conditions_and_operators() {
-    assert_err("fn f() { if 1 { } }", "expected `bool`, found `i32`");
+    assert_err("fn f() { if 1 { } }", "expected `bool`, found `{integer}`");
     assert_err(
         "fn f(c: bool) -> i32 { if c { 1 } else { \"s\" } }",
         "incompatible types",
@@ -194,7 +194,7 @@ fn result_constructors_follow_the_declared_type() {
     );
     assert_err(
         "fn f() -> Result<i32, String> { Err(1) }",
-        "expected `String`, found `i32`",
+        "expected `String`, found `{integer}`",
     );
     assert_err(
         "fn f() -> Result<i32, String> { Ok(1, 2) }",
@@ -394,5 +394,197 @@ fn status_constructors_flow_into_endpoint_results() {
     assert_err(
         "import std::http::Status; fn f() -> Result<String, Status> { Err(Status::Teapot(\"x\")) }",
         "cannot find `std::http::Status::Teapot`",
+    );
+}
+
+// ---- mutation, loops, arrays ---------------------------------------------------------------
+
+#[test]
+fn mutable_locals() {
+    assert_clean("fn f() -> i32 { let mut x = 1; x = x + 1; x += 3; x }");
+    assert_err(
+        "fn f() { let x = 1; x = 2; }",
+        "cannot assign to the immutable variable `x`",
+    );
+    assert_err("fn f(a: i32) { a = 2; }", "immutable variable `a`");
+    assert_err(
+        "fn f() { let mut x = 1; x = \"s\"; }",
+        "expected `{integer}`, found `String`",
+    );
+    assert_err(
+        "let g = 1; fn f() { g = 2; }",
+        "cannot assign to the global `g`",
+    );
+    assert_err("fn f() { y = 2; }", "cannot find `y`");
+    assert_err(
+        "fn f(p: i32) { let mut x = 1; 1 + 2 = 3; }",
+        "must be a variable",
+    );
+    assert_err(
+        "struct P { a: i32 } fn f(p: P) { p.a = 1; }",
+        "immutable variable `p`",
+    );
+}
+
+#[test]
+fn while_loops() {
+    assert_clean(
+        "fn f(n: i32) -> i32 { let mut i = 0; let mut s = 0; while i < n { s += i; i += 1; } s }",
+    );
+    assert_err(
+        "fn f() { while 1 { } }",
+        "expected `bool`, found `{integer}`",
+    );
+    assert_clean(
+        "fn f(n: i32) -> i32 { let mut i = 0; while true { if i > n { return i; } i += 1; } 0 }",
+    );
+}
+
+#[test]
+fn for_loops() {
+    assert_clean("fn f(n: i32) -> i32 { let mut s = 0; for i in 0..n { s += i; } s }");
+    assert_clean("fn f(n: u8) -> u8 { let mut s: u8 = 0; for i in 1..=n { s += i; } s }");
+    assert_clean("fn f(v: Vec<f64>) -> f64 { let mut s = 0.0; for x in v { s += x; } s }");
+    assert_err("fn f() { for i in 0..1.5 { } }", "range bounds");
+    assert_err(
+        "fn f(a: i32, b: i64) { for i in a..b { } }",
+        "different types",
+    );
+    assert_err("fn f(s: String) { for c in s { } }", "cannot iterate over");
+    assert_err(
+        "fn f() { for i in 0..3 { i = 1; } }",
+        "immutable variable `i`",
+    );
+    assert_err("fn f() { for i in 0..3 { } let y = i; }", "cannot find `i`");
+}
+
+#[test]
+fn arrays_and_indexing() {
+    assert_clean("fn f() -> Vec<i32> { [1, 2, 3] }");
+    assert_clean("fn f() -> Vec<f32> { [1, 2.5] }");
+    assert_clean("fn f() -> Vec<String> { [] }");
+    assert_err(
+        "fn f() { let v = [1, \"a\"]; }",
+        "expected `{integer}`, found `String`",
+    );
+    assert_err(
+        "fn f() -> Vec<String> { [1] }",
+        "expected `String`, found `{integer}`",
+    );
+    assert_clean("fn f(v: Vec<i32>, i: u8) -> i32 { v[i] + [4, 5][1] }");
+    assert_err(
+        "fn f(v: Vec<i32>) -> i32 { v[\"a\"] }",
+        "indices must be integers",
+    );
+    assert_err("fn f(s: String) -> i32 { s[0] }", "cannot index into");
+    assert_err(
+        "fn f(v: Vec<i32>) -> String { v[0] }",
+        "expected `String`, found `i32`",
+    );
+    assert_clean("fn f(v: Vec<Vec<i32>>) -> i32 { v[0][1] }");
+}
+
+// ---- literal type inference ----------------------------------------------------------------
+
+#[test]
+fn literals_are_pinned_by_their_uses() {
+    // `s` starts as a bare literal and becomes u8 through its uses.
+    assert_clean("fn f(n: u8) -> u8 { let mut s = 0; for i in 1..=n { s += i; } s }");
+    assert_clean(
+        "fn f(n: i64) -> i64 { let mut i = 0; let mut s = 0; while i < n { s += i; i += 1; } s }",
+    );
+    assert_clean("fn f(x: f32) -> f32 { let mut a = 0.5; a = a * x; a }");
+    assert_clean("fn take(a: i64) {} fn f() { let x = 5; take(x); }");
+    assert_clean("fn f() -> Vec<u8> { let v = [1, 2, 3]; v }");
+    assert_clean(
+        "fn f(c: bool) -> i64 { let a = 1; let b = 2; if c { a } else { b + 1_000_000_000_000 } }",
+    );
+    assert_clean("fn f() -> i32 { let a = 1; let b = a; let c = b; c }");
+}
+
+#[test]
+fn conflicting_literal_uses_are_still_errors() {
+    assert_err(
+        "fn f(a: u8, b: i64) { let x = 1; let y = a + x; let z = b + x; }",
+        "mismatched operand types",
+    );
+    assert_err(
+        "fn f() { let x = 1; let s: String = x; }",
+        "expected `String`, found `{integer}`",
+    );
+    assert_err(
+        "fn f() { let x = 1.5; let y: i32 = x; }",
+        "expected `i32`, found `{float}`",
+    );
+    assert_err(
+        "fn f(a: f64) { let x = 1; let y = a + x; }",
+        "mismatched operand types",
+    );
+    assert_err("fn f() -> bool { let x = 1; x }", "expected `bool`");
+}
+
+#[test]
+fn unconstrained_literals_default_and_leave_no_variables_behind() {
+    let (hir, errs) = check("fn f() -> i32 { let a = 1; let b = 2.5; let v = [3, 4]; a + v[0] }");
+    assert!(errs.is_empty(), "{errs:?}");
+    let dump = format!("{hir:?}");
+    assert!(
+        !dump.contains("IntVar") && !dump.contains("FloatVar"),
+        "{dump}"
+    );
+
+    let (hir, errs) = check(
+        "fn f() { let a = 1; let b = a + 2; let c = 1.5 * 2; for i in 0..10 { let d = i; } }",
+    );
+    assert!(errs.is_empty(), "{errs:?}");
+    let dump = format!("{hir:?}");
+    assert!(
+        !dump.contains("IntVar") && !dump.contains("FloatVar"),
+        "{dump}"
+    );
+}
+
+#[test]
+fn assignment_to_fields_and_elements() {
+    let decl = "struct P { x: i32, name: String, tags: Vec<i32> } struct W { p: P, n: u8 } ";
+    assert_clean(&format!(
+        "{decl}fn f() -> i32 {{ let mut p = P {{ x: 1, name: \"a\", tags: [1, 2] }}; p.x = 5; p.x += 1; p.tags[1] = p.x; p.name = p.name + \"!\"; p.x }}"
+    ));
+    assert_clean(&format!(
+        "{decl}fn f(mut w: W) -> u8 {{ w.n = 3; w.p.x = 1; w.p.tags[0] += 2; w.n }}"
+    ));
+    assert_clean("fn fill(mut v: Vec<i32>, x: i32) { v[0] = x; v[1] = x * 2; }");
+    assert_clean("fn f() { let mut grid = [[1, 2], [3, 4]]; grid[1][0] = 9; }");
+    assert_err(
+        &format!(
+            "{decl}fn f() {{ let mut p = P {{ x: 1, name: \"a\", tags: [] }}; p.x = \"s\"; }}"
+        ),
+        "expected `i32`, found `String`",
+    );
+    assert_err(
+        &format!("{decl}fn f() {{ let mut p = P {{ x: 1, name: \"a\", tags: [] }}; p.nope = 1; }}"),
+        "no field `nope`",
+    );
+    assert_err(
+        &format!("{decl}fn f() {{ let p = P {{ x: 1, name: \"a\", tags: [] }}; p.tags[0] = 1; }}"),
+        "immutable variable `p`",
+    );
+    assert_err(
+        "fn f() { let mut x = 1; x.y = 2; }",
+        "cannot assign to a field of",
+    );
+    assert_err("fn f() { let mut x = 1; x[0] = 2; }", "cannot index into");
+    assert_err("fn f(v: Vec<i32>) { v[0] = 1; }", "immutable variable `v`");
+    assert_err(
+        "fn f() { let mut v = [1, 2]; v[\"a\"] = 1; }",
+        "indices must be integers",
+    );
+    assert_err(
+        "fn f() { let mut v = [1, 2]; v[0] = \"s\"; }",
+        "expected `{integer}`, found `String`",
+    );
+    assert_err(
+        "fn f() { let mut v = [1, 2]; f()[0] = 1; }",
+        "must be a variable, a field or an index",
     );
 }

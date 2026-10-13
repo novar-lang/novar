@@ -58,7 +58,7 @@ fn want(args: &[Ty], i: usize, expected: &Ty) -> Result<(), String> {
 fn want_int(args: &[Ty], i: usize) -> Result<(), String> {
     match &args[i] {
         Ty::Prim(p) if p.is_int() => Ok(()),
-        Ty::Unknown | Ty::Never => Ok(()),
+        Ty::IntVar(_) | Ty::Unknown | Ty::Never => Ok(()),
         other => Err(format!(
             "argument {} must be an integer, found `{other}`",
             i + 1
@@ -177,6 +177,12 @@ fn collect(args: &[Ty]) -> Result<Ty, String> {
     Ok(vec_of(elem(args, 0)?))
 }
 
+fn print(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Unit)
+}
+
 fn status(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     want(args, 0, &s())?;
@@ -284,6 +290,8 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
     ("std::collect", sig(collect)),
+    ("std::io::print", sig(print)),
+    ("std::io::println", sig(print)),
     ("std::http::Status::BadRequest", sig(status)),
     ("std::http::Status::Unauthorized", sig(status)),
     ("std::http::Status::Forbidden", sig(status)),

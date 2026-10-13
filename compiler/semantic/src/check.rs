@@ -19,10 +19,12 @@ pub(crate) struct Checker {
     struct_fields: HashMap<String, Vec<(String, Ty)>>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
     globals: HashMap<String, Ty>,
-    scopes: Vec<HashMap<String, (LocalId, Ty)>>,
+    scopes: Vec<HashMap<String, (LocalId, Ty, bool)>>,
     next_local: u32,
     ret: Ty,
     endpoints: HashSet<(HttpMethod, String)>,
+    /// Bindings of literal type variables (`Ty::IntVar`/`Ty::FloatVar`), indexed by id.
+    subst: Vec<Option<Ty>>,
 }
 
 pub(crate) fn lower(program: &ast::Program) -> (hir::Program, Vec<Diagnostic>) {
@@ -140,6 +142,9 @@ impl Checker {
                     None => init,
                 };
                 let ty = annotated.unwrap_or_else(|| init.ty.clone());
+                let mut init = init;
+                self.finalize_expr(&mut init);
+                let ty = self.finalize_ty(&ty);
                 if self
                     .globals
                     .insert(l.name.node.clone(), ty.clone())
@@ -293,22 +298,216 @@ impl Checker {
         }
     }
 
+    // ---- literal type variables ----------------------------------------------------------
+
+    fn fresh(&mut self, float: bool) -> Ty {
+        self.subst.push(None);
+        let id = (self.subst.len() - 1) as u32;
+        if float {
+            Ty::FloatVar(id)
+        } else {
+            Ty::IntVar(id)
+        }
+    }
+
+    /// Replaces bound variables (recursively) by what they stand for.
+    fn resolve(&self, ty: &Ty) -> Ty {
+        match ty {
+            Ty::IntVar(v) | Ty::FloatVar(v) => match &self.subst[*v as usize] {
+                Some(t) => self.resolve(t),
+                None => ty.clone(),
+            },
+            Ty::Vec(t) => Ty::Vec(Box::new(self.resolve(t))),
+            Ty::Result(a, b) => Ty::Result(Box::new(self.resolve(a)), Box::new(self.resolve(b))),
+            Ty::Fn(ps, r) => Ty::Fn(
+                ps.iter().map(|p| self.resolve(p)).collect(),
+                Box::new(self.resolve(r)),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// Like `resolve`, but also pins still-free literal variables to their defaults.
+    fn finalize_ty(&mut self, ty: &Ty) -> Ty {
+        match self.resolve(ty) {
+            Ty::IntVar(v) => {
+                self.subst[v as usize] = Some(Ty::Prim(Prim::I32));
+                Ty::Prim(Prim::I32)
+            }
+            Ty::FloatVar(v) => {
+                self.subst[v as usize] = Some(Ty::Prim(Prim::F64));
+                Ty::Prim(Prim::F64)
+            }
+            Ty::Vec(t) => Ty::Vec(Box::new(self.finalize_ty(&t))),
+            Ty::Result(a, b) => Ty::Result(
+                Box::new(self.finalize_ty(&a)),
+                Box::new(self.finalize_ty(&b)),
+            ),
+            Ty::Fn(ps, r) => {
+                let ps = ps.iter().map(|p| self.finalize_ty(p)).collect();
+                Ty::Fn(ps, Box::new(self.finalize_ty(&r)))
+            }
+            other => other,
+        }
+    }
+
+    /// Whether `actual` can be used where `expected` is required, binding literal variables.
+    fn unify(&mut self, expected: &Ty, actual: &Ty) -> bool {
+        let (a, b) = (self.resolve(expected), self.resolve(actual));
+        match (&a, &b) {
+            (Ty::IntVar(x), Ty::IntVar(y)) | (Ty::FloatVar(x), Ty::FloatVar(y)) => {
+                if x != y {
+                    self.subst[*x as usize] = Some(b.clone());
+                }
+                true
+            }
+            (Ty::IntVar(x), Ty::Prim(p)) | (Ty::Prim(p), Ty::IntVar(x)) if p.is_int() => {
+                self.subst[*x as usize] = Some(Ty::Prim(*p));
+                true
+            }
+            (Ty::FloatVar(x), Ty::Prim(p)) | (Ty::Prim(p), Ty::FloatVar(x)) if p.is_float() => {
+                self.subst[*x as usize] = Some(Ty::Prim(*p));
+                true
+            }
+            (Ty::Vec(x), Ty::Vec(y)) => self.unify(x, y),
+            (Ty::Result(a1, b1), Ty::Result(a2, b2)) => {
+                let ok = self.unify(a1, a2);
+                self.unify(b1, b2) && ok
+            }
+            (Ty::Fn(p1, r1), Ty::Fn(p2, r2)) if p1.len() == p2.len() => {
+                let mut ok = true;
+                for (x, y) in p1.iter().zip(p2) {
+                    ok &= self.unify(x, y);
+                }
+                self.unify(r1, r2) && ok
+            }
+            _ => a.accepts(&b),
+        }
+    }
+
+    /// Rewrites every type in `e` to its final form, defaulting unconstrained literals.
+    fn finalize_expr(&mut self, e: &mut hir::Expr) {
+        e.ty = self.finalize_ty(&e.ty);
+        use hir::ExprKind as K;
+        match &mut e.kind {
+            K::Lit(_) | K::Local(_) | K::Global(_) | K::Fn(_) | K::Extern(_) | K::Error => {}
+            K::Call { callee, args } => {
+                self.finalize_expr(callee);
+                args.iter_mut().for_each(|a| self.finalize_expr(a));
+            }
+            K::Field { base, .. } => self.finalize_expr(base),
+            K::Unary { expr, .. } => self.finalize_expr(expr),
+            K::Binary { lhs, rhs, .. } => {
+                self.finalize_expr(lhs);
+                self.finalize_expr(rhs);
+            }
+            K::Closure { params, body } => {
+                for p in params {
+                    p.ty = self.finalize_ty(&p.ty);
+                }
+                self.finalize_expr(body);
+            }
+            K::StructLit { fields, .. } => {
+                fields.iter_mut().for_each(|(_, v)| self.finalize_expr(v))
+            }
+            K::If {
+                cond,
+                then,
+                otherwise,
+            } => {
+                self.finalize_expr(cond);
+                self.finalize_block(then);
+                if let Some(o) = otherwise {
+                    self.finalize_expr(o);
+                }
+            }
+            K::Block(b) => self.finalize_block(b),
+            K::Return(v) => {
+                if let Some(v) = v {
+                    self.finalize_expr(v);
+                }
+            }
+            K::FString(parts) => {
+                for p in parts {
+                    if let hir::FPart::Expr(x) = p {
+                        self.finalize_expr(x);
+                    }
+                }
+            }
+            K::Assign { place, value } => {
+                place.ty = self.finalize_ty(&place.ty);
+                place.root_ty = self.finalize_ty(&place.root_ty);
+                for pr in &mut place.projs {
+                    if let hir::Proj::Index(i) = pr {
+                        self.finalize_expr(i);
+                    }
+                }
+                self.finalize_expr(value);
+            }
+            K::While { cond, body } => {
+                self.finalize_expr(cond);
+                self.finalize_block(body);
+            }
+            K::For { var, iter, body } => {
+                var.ty = self.finalize_ty(&var.ty);
+                match iter {
+                    hir::ForIter::Range { start, end, .. } => {
+                        self.finalize_expr(start);
+                        self.finalize_expr(end);
+                    }
+                    hir::ForIter::Vec(v) => self.finalize_expr(v),
+                }
+                self.finalize_block(body);
+            }
+            K::Index { base, index } => {
+                self.finalize_expr(base);
+                self.finalize_expr(index);
+            }
+            K::Array(items) => items.iter_mut().for_each(|i| self.finalize_expr(i)),
+        }
+    }
+
+    fn finalize_block(&mut self, b: &mut hir::Block) {
+        b.ty = self.finalize_ty(&b.ty);
+        for s in &mut b.stmts {
+            match s {
+                hir::Stmt::Let { local, init } => {
+                    local.ty = self.finalize_ty(&local.ty);
+                    self.finalize_expr(init);
+                }
+                hir::Stmt::Expr(e) => self.finalize_expr(e),
+            }
+        }
+        if let Some(t) = &mut b.tail {
+            self.finalize_expr(t);
+        }
+    }
+
     // ---- scopes ------------------------------------------------------------------------
 
     fn declare(&mut self, name: &ast::Ident, ty: Ty) -> hir::Local {
+        self.declare_mut(name, ty, false)
+    }
+
+    fn declare_mut(&mut self, name: &ast::Ident, ty: Ty, mutable: bool) -> hir::Local {
         let id = LocalId(self.next_local);
         self.next_local += 1;
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.node.clone(), (id, ty.clone()));
+            scope.insert(name.node.clone(), (id, ty.clone(), mutable));
         }
         hir::Local {
             id,
             name: name.node.clone(),
             ty,
+            mutable,
         }
     }
 
     fn lookup_local(&self, name: &str) -> Option<(LocalId, Ty)> {
+        self.lookup_local_full(name).map(|(id, ty, _)| (id, ty))
+    }
+
+    fn lookup_local_full(&self, name: &str) -> Option<(LocalId, Ty, bool)> {
         self.scopes.iter().rev().find_map(|s| s.get(name).cloned())
     }
 
@@ -326,11 +525,11 @@ impl Checker {
                     format!("parameter `{}` is declared twice", p.name.node),
                 );
             }
-            params.push(self.declare(&p.name, ty));
+            params.push(self.declare_mut(&p.name, ty, p.mutable));
         }
 
-        let (body, body_ty) = self.block(&f.body, Some(&ret));
-        if !ret.accepts(&body_ty) {
+        let (mut body, body_ty) = self.block(&f.body, Some(&ret));
+        if !self.unify(&ret, &body_ty) {
             let span = body
                 .tail
                 .as_ref()
@@ -347,6 +546,7 @@ impl Checker {
             self.diags.push(d);
         }
 
+        self.finalize_block(&mut body);
         let endpoint = self.endpoint(f, &params, &ret);
         self.scopes.clear();
         hir::FnDef {
@@ -478,7 +678,7 @@ impl Checker {
                     };
                     let ty = annotated.unwrap_or_else(|| init.ty.clone());
                     // The binding is only visible after its initializer.
-                    let local = self.declare(&l.name, ty);
+                    let local = self.declare_mut(&l.name, ty, l.mutable);
                     stmts.push(hir::Stmt::Let { local, init });
                 }
                 ast::Stmt::Expr(e) => {
@@ -509,10 +709,11 @@ impl Checker {
 
     /// Reports a mismatch if `e` cannot be used as `expected`.
     fn coerce(&mut self, e: hir::Expr, expected: &Ty) -> hir::Expr {
-        if !expected.accepts(&e.ty) {
+        if !self.unify(expected, &e.ty) {
+            let (want, found) = (self.resolve(expected), self.resolve(&e.ty));
             self.err(
                 e.span.clone(),
-                format!("mismatched types: expected `{expected}`, found `{}`", e.ty),
+                format!("mismatched types: expected `{want}`, found `{found}`"),
             );
         }
         e
@@ -531,15 +732,88 @@ impl Checker {
         let span = &e.span;
         match &e.node {
             K::Error => Self::mk(hir::ExprKind::Error, Ty::Unknown, span),
-            K::Lit(l) => {
-                let ty = match l {
-                    ast::Lit::Int(_) => match expected {
-                        Some(Ty::Prim(p)) if p.is_numeric() => Ty::Prim(*p),
-                        _ => Ty::Prim(Prim::I32),
+            K::Assign { target, value } => self.assign(target, value, span),
+            K::While { cond, body } => {
+                let cond = self.expr(cond, Some(&Ty::bool()));
+                let cond = self.coerce(cond, &Ty::bool());
+                let (body, _) = self.block(body, None);
+                Self::mk(
+                    hir::ExprKind::While {
+                        cond: Box::new(cond),
+                        body,
                     },
-                    ast::Lit::Float(_) => match expected {
-                        Some(Ty::Prim(p)) if p.is_float() => Ty::Prim(*p),
-                        _ => Ty::Prim(Prim::F64),
+                    Ty::Unit,
+                    span,
+                )
+            }
+            K::For { var, iter, body } => self.for_loop(var, iter, body, span),
+            K::Index { base, index } => {
+                let base = self.expr(base, None);
+                let index = self.expr(index, None);
+                let index_ok = matches!(self.resolve(&index.ty), Ty::Prim(p) if p.is_int())
+                    || matches!(
+                        self.resolve(&index.ty),
+                        Ty::IntVar(_) | Ty::Unknown | Ty::Never
+                    );
+                if !index_ok {
+                    self.err(
+                        index.span.clone(),
+                        format!("indices must be integers, found `{}`", index.ty),
+                    );
+                }
+                let ty = match &base.ty {
+                    Ty::Vec(t) => (**t).clone(),
+                    Ty::Unknown | Ty::Never => Ty::Unknown,
+                    other => {
+                        let other = other.clone();
+                        self.err(
+                            base.span.clone(),
+                            format!("cannot index into a value of type `{other}`"),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                Self::mk(
+                    hir::ExprKind::Index {
+                        base: Box::new(base),
+                        index: Box::new(index),
+                    },
+                    ty,
+                    span,
+                )
+            }
+            K::Array(items) => {
+                let want = match expected {
+                    Some(Ty::Vec(t)) => Some((**t).clone()),
+                    _ => None,
+                };
+                let mut out: Vec<hir::Expr> = Vec::with_capacity(items.len());
+                for it in items {
+                    let hint = want.clone().or_else(|| out.first().map(|f| f.ty.clone()));
+                    let it = self.expr(it, hint.as_ref());
+                    let it = match &hint {
+                        Some(h) => self.coerce(it, h),
+                        None => it,
+                    };
+                    out.push(it);
+                }
+                let elem = want
+                    .or_else(|| out.first().map(|f| f.ty.clone()))
+                    .unwrap_or(Ty::Unknown);
+                Self::mk(hir::ExprKind::Array(out), Ty::Vec(Box::new(elem)), span)
+            }
+            K::Lit(l) => {
+                let want = expected.map(|t| self.resolve(t));
+                let ty = match l {
+                    ast::Lit::Int(_) => match want {
+                        Some(Ty::Prim(p)) if p.is_numeric() => Ty::Prim(p),
+                        Some(v @ (Ty::IntVar(_) | Ty::FloatVar(_))) => v,
+                        _ => self.fresh(false),
+                    },
+                    ast::Lit::Float(_) => match want {
+                        Some(Ty::Prim(p)) if p.is_float() => Ty::Prim(p),
+                        Some(v @ Ty::FloatVar(_)) => v,
+                        _ => self.fresh(true),
                     },
                     ast::Lit::Str(_) => Ty::str(),
                     ast::Lit::Bool(_) => Ty::bool(),
@@ -573,17 +847,16 @@ impl Checker {
             K::Pipe { lhs, rhs } => self.pipe(lhs, rhs, expected, span),
             K::Unary { op, expr } => {
                 let inner = self.expr(expr, expected);
-                let ok = match (op, &inner.ty) {
+                let shown = self.resolve(&inner.ty);
+                let ok = match (op, &shown) {
                     (_, Ty::Unknown) => true,
+                    (ast::UnOp::Neg, Ty::IntVar(_) | Ty::FloatVar(_)) => true,
                     (ast::UnOp::Neg, Ty::Prim(p)) => p.is_numeric(),
                     (ast::UnOp::Not, Ty::Prim(Prim::Bool)) => true,
                     _ => false,
                 };
                 if !ok {
-                    self.err(
-                        span.clone(),
-                        format!("cannot apply `{op:?}` to `{}`", inner.ty),
-                    );
+                    self.err(span.clone(), format!("cannot apply `{op:?}` to `{shown}`"));
                 }
                 let ty = inner.ty.clone();
                 Self::mk(
@@ -640,7 +913,7 @@ impl Checker {
                     None => (None, Ty::Unit),
                     Some(o) => {
                         let o = self.expr(o, expected);
-                        let ty = if then_ty.accepts(&o.ty) {
+                        let ty = if self.unify(&then_ty, &o.ty) {
                             if then_ty == Ty::Never {
                                 o.ty.clone()
                             } else {
@@ -693,6 +966,214 @@ impl Checker {
                 Self::mk(hir::ExprKind::Return(value), Ty::Never, span)
             }
         }
+    }
+
+    /// Resolves an assignment target (`x`, `x.f`, `x[i]`, and combinations) to a [`hir::Place`].
+    fn place(&mut self, target: &ast::Expr) -> Option<hir::Place> {
+        match &target.node {
+            ast::ExprKind::Path(p) if p.len() == 1 => {
+                let name = p[0].node.clone();
+                let Some((id, ty, mutable)) = self.lookup_local_full(&name) else {
+                    let msg = if self.globals.contains_key(&name) {
+                        format!("cannot assign to the global `{name}`")
+                    } else {
+                        format!("cannot find `{name}` in this scope")
+                    };
+                    self.err(target.span.clone(), msg);
+                    return None;
+                };
+                if !mutable {
+                    self.diags.push(
+                        Diagnostic::error(
+                            target.span.clone(),
+                            format!("cannot assign to the immutable variable `{name}`"),
+                        )
+                        .with_note(format!(
+                            "declare it with `let mut {name}` (or `mut {name}: T` for a parameter)"
+                        )),
+                    );
+                }
+                Some(hir::Place {
+                    local: id,
+                    name,
+                    projs: vec![],
+                    ty: ty.clone(),
+                    root_ty: ty,
+                    span: target.span.clone(),
+                })
+            }
+            ast::ExprKind::Field { base, name } => {
+                let mut place = self.place(base)?;
+                match self.resolve(&place.ty) {
+                    Ty::Struct(sname) => {
+                        let found = self
+                            .struct_fields
+                            .get(&sname)
+                            .and_then(|f| f.iter().find(|(n, _)| *n == name.node))
+                            .map(|(_, t)| t.clone());
+                        match found {
+                            Some(t) => {
+                                place.projs.push(hir::Proj::Field {
+                                    name: name.node.clone(),
+                                    struct_name: sname,
+                                });
+                                place.ty = t;
+                                place.span = target.span.clone();
+                                Some(place)
+                            }
+                            None => {
+                                self.err(
+                                    name.span.clone(),
+                                    format!("no field `{}` on type `{sname}`", name.node),
+                                );
+                                None
+                            }
+                        }
+                    }
+                    other => {
+                        self.err(
+                            target.span.clone(),
+                            format!("cannot assign to a field of `{other}`"),
+                        );
+                        None
+                    }
+                }
+            }
+            ast::ExprKind::Index { base, index } => {
+                let mut place = self.place(base)?;
+                let index = self.expr(index, None);
+                let shown = self.resolve(&index.ty);
+                if !(matches!(shown, Ty::Prim(p) if p.is_int())
+                    || matches!(shown, Ty::IntVar(_) | Ty::Unknown | Ty::Never))
+                {
+                    self.err(
+                        index.span.clone(),
+                        format!("indices must be integers, found `{shown}`"),
+                    );
+                }
+                match self.resolve(&place.ty) {
+                    Ty::Vec(elem) => {
+                        place.projs.push(hir::Proj::Index(Box::new(index)));
+                        place.ty = *elem;
+                        place.span = target.span.clone();
+                        Some(place)
+                    }
+                    other => {
+                        self.err(
+                            target.span.clone(),
+                            format!("cannot index into a value of type `{other}`"),
+                        );
+                        None
+                    }
+                }
+            }
+            _ => {
+                self.err(
+                    target.span.clone(),
+                    "the left side of `=` must be a variable, a field or an index",
+                );
+                None
+            }
+        }
+    }
+
+    fn assign(&mut self, target: &ast::Expr, value: &ast::Expr, span: &Span) -> hir::Expr {
+        let Some(place) = self.place(target) else {
+            let _ = self.expr(value, None);
+            return Self::mk(hir::ExprKind::Error, Ty::Unit, span);
+        };
+        let ty = place.ty.clone();
+        let v = self.expr(value, Some(&ty));
+        let v = self.coerce(v, &ty);
+        Self::mk(
+            hir::ExprKind::Assign {
+                place,
+                value: Box::new(v),
+            },
+            Ty::Unit,
+            span,
+        )
+    }
+
+    fn for_loop(
+        &mut self,
+        var: &ast::Ident,
+        iter: &ast::ForIter,
+        body: &ast::Block,
+        span: &Span,
+    ) -> hir::Expr {
+        let is_int = |t: &Ty| {
+            matches!(t, Ty::Prim(p) if p.is_int())
+                || matches!(t, Ty::IntVar(_) | Ty::Unknown | Ty::Never)
+        };
+        let (iter, var_ty) = match iter {
+            ast::ForIter::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                let mut s = self.expr(start, None);
+                let e = self.expr(end, Some(&s.ty));
+                // An untyped literal start adopts the type of the end bound.
+                if matches!(start.node, ast::ExprKind::Lit(_))
+                    && s.ty != e.ty
+                    && e.ty != Ty::Unknown
+                {
+                    s = self.expr(start, Some(&e.ty));
+                }
+                for b in [&s, &e] {
+                    if !is_int(&self.resolve(&b.ty)) {
+                        self.err(
+                            b.span.clone(),
+                            format!("range bounds must be integers, found `{}`", b.ty),
+                        );
+                    }
+                }
+                if !self.unify(&s.ty, &e.ty) {
+                    self.err(
+                        e.span.clone(),
+                        format!(
+                            "range bounds have different types: `{}` and `{}`",
+                            s.ty, e.ty
+                        ),
+                    );
+                }
+                let ty = if s.ty == Ty::Unknown {
+                    e.ty.clone()
+                } else {
+                    s.ty.clone()
+                };
+                (
+                    hir::ForIter::Range {
+                        start: Box::new(s),
+                        end: Box::new(e),
+                        inclusive: *inclusive,
+                    },
+                    ty,
+                )
+            }
+            ast::ForIter::Expr(v) => {
+                let v = self.expr(v, None);
+                let ty = match &v.ty {
+                    Ty::Vec(t) => (**t).clone(),
+                    Ty::Unknown | Ty::Never => Ty::Unknown,
+                    other => {
+                        let other = other.clone();
+                        self.err(
+                            v.span.clone(),
+                            format!("cannot iterate over a value of type `{other}`"),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                (hir::ForIter::Vec(Box::new(v)), ty)
+            }
+        };
+        self.scopes.push(HashMap::new());
+        let var = self.declare(var, var_ty);
+        let (body, _) = self.block(body, None);
+        self.scopes.pop();
+        Self::mk(hir::ExprKind::For { var, iter, body }, Ty::Unit, span)
     }
 
     fn path(&mut self, p: &[ast::Ident], span: &Span) -> hir::Expr {
@@ -1025,18 +1506,22 @@ impl Checker {
         } else {
             l
         };
-        let compatible = l.ty.accepts(&r.ty) && r.ty.accepts(&l.ty);
+        let compatible = self.unify(&l.ty, &r.ty);
         if !compatible {
+            let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
             self.diags.push(
                 Diagnostic::error(
                     span.clone(),
-                    format!("mismatched operand types: `{}` and `{}`", l.ty, r.ty),
+                    format!("mismatched operand types: `{lt}` and `{rt}`"),
                 )
-                .with_label(l.span.clone(), format!("this is `{}`", l.ty))
-                .with_label(r.span.clone(), format!("this is `{}`", r.ty)),
+                .with_label(l.span.clone(), format!("this is `{lt}`"))
+                .with_label(r.span.clone(), format!("this is `{rt}`")),
             );
         }
-        let is_num = |t: &Ty| matches!(t, Ty::Prim(p) if p.is_numeric()) || *t == Ty::Unknown;
+        let is_num = |t: &Ty| {
+            matches!(t, Ty::Prim(p) if p.is_numeric())
+                || matches!(t, Ty::IntVar(_) | Ty::FloatVar(_) | Ty::Unknown)
+        };
         let ty = match op {
             Add | Sub | Mul | Div | Rem => {
                 let string_concat = op == Add && l.ty == Ty::str();
