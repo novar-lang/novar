@@ -23,7 +23,9 @@ use melior::utility::{
 use melior::{Context, ExecutionEngine};
 use novar_diagnostics::Diagnostic;
 use novar_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
-use novar_hir::{Prim, Ty};
+use novar_hir::{Prim, Quantization, Ty};
+
+mod tensor;
 
 type Span = std::ops::Range<usize>;
 
@@ -99,6 +101,7 @@ struct Cx<'c, 'p> {
     ctx: &'c Context,
     program: &'p hir::Program,
     state: &'p ModuleState,
+    quant: Quantization,
 }
 
 impl<'c, 'p> Cx<'c, 'p> {
@@ -146,6 +149,8 @@ impl<'c, 'p> Cx<'c, 'p> {
                 }
                 out
             }
+            Ty::Tensor { .. } if tensor::tensor_info(ty).is_some() => vec![self.ptr()],
+            Ty::Tensor { .. } if tensor::tensor_info(ty).is_some() => vec![self.ptr()],
             Ty::Vec(elem) if matches!(&**elem, Ty::Prim(p) if *p != Prim::Str) => {
                 vec![self.ptr(), self.i(64)]
             }
@@ -166,12 +171,22 @@ impl<'c, 'p> Cx<'c, 'p> {
 
 /// Lowers every function of `program` to a verified MLIR module.
 pub fn lower<'c>(ctx: &'c Context, program: &hir::Program) -> Result<Module<'c>, Vec<Diagnostic>> {
+    lower_with(ctx, program, Quantization::None)
+}
+
+/// Like [`lower`], with `f32` matrix products at the given precision.
+pub fn lower_with<'c>(
+    ctx: &'c Context,
+    program: &hir::Program,
+    quant: Quantization,
+) -> Result<Module<'c>, Vec<Diagnostic>> {
     let module = Module::new(Location::unknown(ctx));
     let state = ModuleState::default();
     let cx = Cx {
         ctx,
         program,
         state: &state,
+        quant,
     };
     let mut diags = Vec::new();
     for f in &program.fns {
@@ -945,6 +960,9 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
         blk: BlockRef<'c, 'b>,
         env: &mut Env<'c, 'b>,
     ) -> Out<'c, 'b> {
+        if matches!(base.ty, Ty::Tensor { .. }) {
+            return self.tensor_index(e, base, index, blk, env);
+        }
         let ctx = self.cx.ctx;
         self.flat(&base.ty, &base.span)?;
         let elem = self.flat(&e.ty, &e.span)?[0];
@@ -1280,6 +1298,12 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                     self.call_libc(cur, Libc::Write, &[fd, nl[0], nl[1]], self.cx.i(64));
                 }
                 Ok((cur, Flow::Value(vec![])))
+            }
+            ExprKind::Extern(path)
+                if path.starts_with(&["std".to_string(), "tensor".to_string()]) =>
+            {
+                let name = path.last().cloned().unwrap_or_default();
+                self.tensor_call(&name, e, args, &vals, cur)
             }
             ExprKind::Extern(path) if path.join("::") == "std::iter::count" => {
                 Ok((cur, Flow::Value(vec![vals[1]])))
@@ -1637,7 +1661,7 @@ pub fn lower_to_llvm_dialect(ctx: &Context, module: &mut Module) -> Result<(), S
     let pm = PassManager::new(ctx);
     parse_pass_pipeline(
         pm.as_operation_pass_manager(),
-        "builtin.module(convert-cf-to-llvm,convert-arith-to-llvm,convert-func-to-llvm,reconcile-unrealized-casts)",
+        "builtin.module(convert-cf-to-llvm,convert-math-to-llvm,convert-arith-to-llvm,convert-func-to-llvm,reconcile-unrealized-casts)",
     )
     .map_err(|e| e.to_string())?;
     pm.run(module)
@@ -1655,6 +1679,16 @@ pub enum JitValue {
 
 /// Compiles `program` and calls `name` through MLIR's execution engine.
 pub fn jit_call(program: &hir::Program, name: &str, args: &[JitValue]) -> Result<JitValue, String> {
+    jit_call_with(program, name, args, Quantization::None)
+}
+
+/// Like [`jit_call`], with `f32` matrix products at the given precision.
+pub fn jit_call_with(
+    program: &hir::Program,
+    name: &str,
+    args: &[JitValue],
+    quant: Quantization,
+) -> Result<JitValue, String> {
     let f = program
         .fns
         .iter()
@@ -1668,7 +1702,7 @@ pub fn jit_call(program: &hir::Program, name: &str, args: &[JitValue]) -> Result
         ));
     }
     let ctx = context();
-    let mut module = lower(&ctx, program).map_err(|d| {
+    let mut module = lower_with(&ctx, program, quant).map_err(|d| {
         d.into_iter()
             .map(|d| d.message)
             .collect::<Vec<_>>()
@@ -1774,8 +1808,17 @@ pub fn jit_call(program: &hir::Program, name: &str, args: &[JitValue]) -> Result
 
 /// Textual MLIR for `program`; `llvm_dialect` selects the form after lowering.
 pub fn emit_mlir(program: &hir::Program, llvm_dialect: bool) -> Result<String, Vec<Diagnostic>> {
+    emit_mlir_with(program, llvm_dialect, Quantization::None)
+}
+
+/// Like [`emit_mlir`], with `f32` matrix products at the given precision.
+pub fn emit_mlir_with(
+    program: &hir::Program,
+    llvm_dialect: bool,
+    quant: Quantization,
+) -> Result<String, Vec<Diagnostic>> {
     let ctx = context();
-    let mut module = lower(&ctx, program)?;
+    let mut module = lower_with(&ctx, program, quant)?;
     if llvm_dialect {
         lower_to_llvm_dialect(&ctx, &mut module).map_err(|e| vec![Diagnostic::error(0..0, e)])?;
     }

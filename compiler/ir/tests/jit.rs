@@ -1,6 +1,6 @@
 #![cfg(feature = "llvm")]
 
-use novar_mlir::{JitValue, emit_mlir, jit_call, lower};
+use novar_mlir::{JitValue, emit_mlir, jit_call, jit_call_with, lower};
 
 fn hir(src: &str) -> novar_hir::hir::Program {
     let (ast, perrs) = novar_parser::parse(src);
@@ -606,4 +606,186 @@ fn bubble_sort_sorts() {
     assert_eq!(jit(PLACES, "bubble", &[]), JitValue::Int(12579));
     assert_eq!(jit(PLACES, "reference_semantics", &[]), JitValue::Int(50));
     assert_eq!(jit(PLACES, "value_semantics", &[]), JitValue::Int(1));
+}
+
+// ---- native tensors and quantization ---------------------------------------------------------
+
+const TENSORS: &str = r#"
+    fn a23() -> Tensor<f32, [2, 3]> { std::tensor::from_vec([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) }
+    fn b32() -> Tensor<f32, [3, 2]> { std::tensor::from_vec([7.0, 8.0, 9.0, 10.0, 11.0, 12.0]) }
+    fn mm_sum() -> f32 { std::tensor::sum(std::tensor::matmul(a23(), b32())) }
+    fn mm_at(i: i32, j: i32) -> f32 { std::tensor::matmul(a23(), b32())[i][j] }
+    fn transposed() -> f32 { std::tensor::transpose(a23())[2][1] }
+    fn vec_mm() -> f32 {
+        let v: Tensor<f32, [3]> = std::tensor::from_vec([1.0, 0.0, -1.0]);
+        std::tensor::matmul(a23(), v)[1]
+    }
+    fn elementwise() -> f32 {
+        let x = a23();
+        let y = std::tensor::scale(x, 0.5);
+        std::tensor::sum(std::tensor::sub(std::tensor::add(x, y), std::tensor::mul(y, y)))
+    }
+    fn divide() -> f32 { std::tensor::sum(std::tensor::div(a23(), std::tensor::scale(a23(), 2.0))) }
+    fn activations() -> f32 {
+        let t: Tensor<f32, [4]> = std::tensor::from_vec([-2.0, -0.5, 0.5, 2.0]);
+        std::tensor::sum(std::tensor::relu(t)) + std::tensor::sum(std::tensor::sigmoid(t))
+    }
+    fn reductions() -> f32 {
+        let t: Tensor<f32, [4]> = std::tensor::from_vec([3.0, 9.0, 2.0, 9.0]);
+        std::tensor::mean(t) + std::tensor::dot(t, t)
+    }
+    fn best() -> u64 { let t: Tensor<f32, [5]> = std::tensor::from_vec([1.0, 7.0, 3.0, 7.0, 0.0]); std::tensor::argmax(t) }
+    fn zeros_sum() -> f32 { let z: Tensor<f32, [2, 2]> = std::tensor::zeros(); std::tensor::sum(z) + 1.0 }
+    fn reshaped() -> f32 { let r: Tensor<f32, [3, 2]> = std::tensor::reshape(a23()); r[2][1] }
+    fn round_trip() -> u64 { std::iter::count(std::tensor::to_vec(a23())) }
+    fn f64_math() -> f64 {
+        let t: Tensor<f64, [3]> = std::tensor::from_vec([0.1, 0.2, 0.3]);
+        std::tensor::dot(t, t)
+    }
+    fn oob(i: i32) -> f32 { a23()[i][0] }
+"#;
+
+#[test]
+fn native_tensors_match_the_interpreter_bit_for_bit() {
+    let h = hir(TENSORS);
+    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    for f in [
+        "mm_sum",
+        "transposed",
+        "vec_mm",
+        "elementwise",
+        "divide",
+        "activations",
+        "reductions",
+        "zeros_sum",
+        "reshaped",
+        "f64_math",
+    ] {
+        let novar_runtime::Value::Float(want) = interp.call(f, vec![]).unwrap() else {
+            panic!("{f}")
+        };
+        let JitValue::Float(got) = jit_call(&h, f, &[]).unwrap() else {
+            panic!("{f}")
+        };
+        assert_eq!(
+            got.to_bits(),
+            want.to_bits(),
+            "{f}: native {got} vs interpreted {want}"
+        );
+    }
+    for f in ["best", "round_trip"] {
+        let novar_runtime::Value::Int(want) = interp.call(f, vec![]).unwrap() else {
+            panic!("{f}")
+        };
+        assert_eq!(jit_call(&h, f, &[]).unwrap(), JitValue::Int(want), "{f}");
+    }
+    for (i, j) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let novar_runtime::Value::Float(want) = interp
+            .call(
+                "mm_at",
+                vec![novar_runtime::Value::Int(i), novar_runtime::Value::Int(j)],
+            )
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(
+            jit_call(&h, "mm_at", &[JitValue::Int(i), JitValue::Int(j)]).unwrap(),
+            JitValue::Float(want)
+        );
+    }
+    assert_eq!(
+        jit_call(&h, "mm_at", &[JitValue::Int(1), JitValue::Int(1)]).unwrap(),
+        JitValue::Float(154.0)
+    );
+}
+
+#[test]
+fn quantized_native_matmul_matches_the_quantized_interpreter() {
+    use novar_hir::Quantization;
+    let src = r#"
+        fn a() -> Tensor<f32, [4, 8]> {
+            let mut v = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            let mut x = -2.25;
+            for i in 0..32 { v[i] = x; x += 0.7; if x > 2.5 { x -= 4.9; } }
+            std::tensor::from_vec(v)
+        }
+        fn b() -> Tensor<f32, [8, 3]> {
+            let mut v = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            let mut x = 1.6;
+            for i in 0..24 { v[i] = x; x -= 0.45; if x < -1.7 { x += 3.3; } }
+            std::tensor::from_vec(v)
+        }
+        fn checksum() -> f32 {
+            let c = std::tensor::matmul(a(), b());
+            let mut s = 0.0;
+            let mut w = 1.0;
+            for i in 0..4 { for j in 0..3 { s += c[i][j] * w; w += 1.0; } }
+            s
+        }
+    "#;
+    let h = hir(src);
+    let run = |q: Quantization| {
+        let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+        interp.set_quantization(q);
+        let novar_runtime::Value::Float(x) = interp.call("checksum", vec![]).unwrap() else {
+            panic!()
+        };
+        let native = jit_call_with(&h, "checksum", &[], q).unwrap();
+        (x, native)
+    };
+    let (exact_i, exact_n) = run(Quantization::None);
+    let (quant_i, quant_n) = run(Quantization::Int8);
+    assert_eq!(exact_n, JitValue::Float(exact_i), "float path agrees");
+    assert_eq!(
+        quant_n,
+        JitValue::Float(quant_i),
+        "int8 path agrees bit for bit"
+    );
+    assert_ne!(exact_i, quant_i, "quantization changes the numbers");
+    assert!(
+        ((exact_i - quant_i) / exact_i).abs() < 0.05,
+        "{exact_i} vs {quant_i}"
+    );
+
+    let text = novar_mlir::emit_mlir_with(&h, false, Quantization::Int8).unwrap();
+    assert!(
+        text.contains("arith.extsi") && text.contains("math.round") && text.contains("i8"),
+        "the int8 kernel is in the IR"
+    );
+    let plain = novar_mlir::emit_mlir_with(&h, false, Quantization::None).unwrap();
+    assert!(
+        !plain.contains("math.round"),
+        "the float build has no quantization code"
+    );
+}
+
+#[test]
+fn native_tensor_indexing_is_bounds_checked_and_symbolic_shapes_are_rejected() {
+    let ctx = novar_mlir::context();
+    for (src, needle) in [
+        (
+            "fn f(t: Tensor<f32, [N]>) -> f32 { 1.0 }",
+            "`Tensor<f32, [N]>`",
+        ),
+        (
+            "fn f(t: Tensor<i32, [2]>) -> i32 { 1 }",
+            "`Tensor<i32, [2]>`",
+        ),
+        (
+            "fn f(t: Tensor<f32, [4]>) -> Tensor<f32, [4]> { std::tensor::softmax(t) }",
+            "std::tensor::softmax",
+        ),
+    ] {
+        let h = hir(src);
+        let errs = lower(&ctx, &h)
+            .err()
+            .unwrap_or_else(|| panic!("expected an error for {src}"));
+        assert!(
+            errs.iter().any(|d| d.message.contains(needle)),
+            "{src}: {errs:?}"
+        );
+    }
 }
