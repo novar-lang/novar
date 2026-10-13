@@ -18,7 +18,8 @@ usage:
   novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8] [--device gpu]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
-  novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir] [-O 0-3]   (needs --features llvm)";
+  novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
+                                                    (all but stablehlo need --features llvm)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

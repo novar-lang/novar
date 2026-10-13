@@ -107,4 +107,60 @@ mod imp {
     }
 }
 
-pub use imp::{build, jit};
+pub use imp::jit;
+
+use crate::{CliError, failed};
+
+/// `novar build`; `--emit stablehlo|ptx` are handled here, the rest by the native backend.
+pub fn build(file: &str, flags: &[&str]) -> Result<(), CliError> {
+    let kind = flags
+        .iter()
+        .position(|f| *f == "--emit")
+        .and_then(|i| flags.get(i + 1).copied());
+    match kind {
+        Some("stablehlo") => stablehlo(file),
+        Some("ptx") => ptx(file, flags),
+        _ => imp::build(file, flags),
+    }
+}
+
+fn stablehlo(file: &str) -> Result<(), crate::CliError> {
+    let checked = crate::check_project(file)?;
+    let out = novar_accel::stablehlo(&checked.hir).map_err(|d| {
+        CliError::Failed(
+            d.iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    print!("{}", out.text);
+    for (name, why) in &out.skipped {
+        eprintln!("skipped `{name}`: {why}");
+    }
+    if out.emitted.is_empty() {
+        return failed("no function could be translated to StableHLO");
+    }
+    Ok(())
+}
+
+#[cfg(feature = "llvm")]
+fn ptx(file: &str, flags: &[&str]) -> Result<(), CliError> {
+    let sm = flags
+        .iter()
+        .position(|f| *f == "--sm")
+        .and_then(|i| flags.get(i + 1).copied())
+        .unwrap_or("sm_80");
+    let checked = crate::check_project(file)?;
+    let out = novar_accel::ptx(&checked.hir, sm).or_else(failed)?;
+    print!("{}", out.text);
+    for op in &out.unsupported {
+        eprintln!("no PTX kernel for `std::tensor::{op}`");
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "llvm"))]
+fn ptx(_: &str, _: &[&str]) -> Result<(), CliError> {
+    failed("PTX generation needs LLVM; rebuild with `--features llvm` (see scripts/llvm-env.sh)")
+}
