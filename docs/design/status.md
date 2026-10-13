@@ -34,7 +34,9 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 | PyO3 bridge, NumPy / PyTorch | done: NumPy `__array_interface__`, PyTorch through NumPy, pointer equality checked (tested with real NumPy, PyTorch, Polars) |
 | `cuda_array_interface` | protocol implemented (`DeviceTensor` adopts and re-exports a GPU buffer by pointer) and tested **with stand-in objects only**. It has not run against a physical GPU, and Novar has no GPU kernels: device tensors cannot be passed to Novar functions |
 | Scalar bridging overhead | measured: 0.3-0.6 microseconds per call |
-| CPU / GPU / TPU targets | **CPU only.** There is no GPU or TPU lowering |
+| GPU execution (Metal / Vulkan / DX12) | done and **run on real hardware** (Apple M4 over Metal): `--device gpu` runs `f32` `add sub mul div scale relu sigmoid softmax matmul sum mean dot` as WGSL kernels through `wgpu` (`runtime` feature `gpu`). Tests compare against the CPU path within `f32` tolerance; other operations, other dtypes and int8 matmul stay on the CPU. Each call copies its inputs to the device and the result back, so it pays off for large matrices, not small ones |
+| NVIDIA GPUs (PTX) | `novar build --emit ptx [--sm sm_80]` compiles kernels for the `std::tensor` operations a program uses (same set as above) with LLVM's NVPTX backend. The LLVM verifier accepts them and the PTX text is checked, but **it has never been executed on an NVIDIA GPU** (none available) and there is no CUDA host launcher |
+| TPUs (StableHLO) | `novar build --emit stablehlo` translates straight-line tensor functions (let bindings, `std::tensor` calls, `+ - * /`, calls between such functions) to StableHLO text; functions with loops, branches or other types are reported as skipped. The output is **not run through XLA/PJRT or on a TPU** |
 
 ## 4. MLOps and deployment
 
@@ -75,4 +77,4 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 * The native backend supports a subset (see the README); tables, SQL, closures and most of `std` are interpreter-only.
 * Strings, vectors and tensors allocated by native code are never freed.
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `novar build`).
-* No GPU/TPU code generation, no formatter or linter, no `break`/`continue`, no enums.
+* PTX and StableHLO output have not been executed on NVIDIA or TPU hardware; no formatter or linter, no `break`/`continue`, no enums.

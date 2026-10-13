@@ -34,6 +34,8 @@ novar check examples/rag-service.nv         # parse + type-check, diagnostics po
 novar run examples/basics/primes.nv main    # interpret
 novar serve examples/rag-service.nv         # HTTP server on :8080 (offline model stand-ins)
 novar serve examples/rag-service.nv --live  # real Ollama / OpenAI / PostgreSQL+pgvector
+novar run model.nv infer --device gpu       # tensor ops on the GPU (build with --features gpu)
+novar build model.nv --emit stablehlo       # StableHLO for XLA / TPUs (--emit ptx for NVIDIA)
 novar build --serve examples/rag-service.nv -o service --dockerfile   # one binary + Dockerfile
 ```
 
@@ -50,6 +52,7 @@ Nightly Rust is required (`rust-toolchain.toml` selects it). More in [`docs/guid
 | Modules and packages | `compiler/modules`, `tools/package-manager` | `import` between files, `nvpm` with registries, a resolver and a lockfile |
 | Editor support | `tools/lsp`, `editors/vscode` | diagnostics, hover, completion, go to definition, inferred-type hints |
 | Web playground | `playground/` | the checker and interpreter compiled to WebAssembly |
+| Accelerators | `compiler/accel/` | StableHLO and PTX generators (not run on TPU / NVIDIA hardware); GPU execution lives in `runtime` (`gpu` feature) |
 | Python | `python/` | PyO3 module; zero-copy Arrow, NumPy and CUDA-array interchange; Ray executor |
 | Distribution | `tools/cluster` | `novar worker` + `--workers` for `std::dist::map` |
 | Benchmarks | `benchmarks/` | alpha targets: RAG overhead, memory footprint, ingestion throughput |

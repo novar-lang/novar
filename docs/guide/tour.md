@@ -86,3 +86,11 @@ fn all(jobs: Vec<Job>) -> Vec<Done> { std::dist::map(jobs, work) }
 `--quantize int8` (on `run`, `serve`, `jit`, `build`) makes `f32` matrix products use symmetric
 per-tensor int8 arithmetic with `i32` accumulation. The interpreter and the native backend give
 identical results.
+
+## Accelerators
+
+* `--device gpu` (on `run` and `serve`, needs `cargo build --features gpu`) runs `f32` tensor operations on the GPU through `wgpu`: Metal on macOS, Vulkan on Linux, DX12 on Windows.
+* `novar build file.nv --emit stablehlo` prints StableHLO for the tensor functions in the file, for XLA / PJRT.
+* `novar build file.nv --emit ptx [--sm sm_80]` prints PTX kernels for the tensor operations the file uses (needs `--features llvm`).
+
+PTX and StableHLO are generated and checked, not executed: see `docs/design/status.md`.
