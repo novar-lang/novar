@@ -13,6 +13,7 @@ members = [
     "server",
     "cli",
     "benchmarks",
+    "tools/lsp",
 ]
 
 [workspace.package]

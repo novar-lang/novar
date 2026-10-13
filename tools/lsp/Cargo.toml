@@ -1,0 +1,28 @@
+[package]
+name = "novar_lsp"
+description = "Novar: language server (diagnostics, hover, completion, go to definition, inlay hints)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "novar_lsp"
+
+[[bin]]
+name = "novar-lsp"
+path = "src/main.rs"
+
+[dependencies]
+lsp-server = "0.7"
+lsp-types = "0.97"
+novar_diagnostics = { version = "0.1.0", path = "../../compiler/diagnostics" }
+novar_hir = { version = "0.1.0", path = "../../compiler/semantic" }
+novar_parser = { version = "0.1.0", path = "../../compiler/parser" }
+serde = "1"
+serde_json = "1"

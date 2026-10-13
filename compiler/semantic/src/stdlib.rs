@@ -798,7 +798,9 @@ pub fn children(prefix: &str) -> Vec<(String, ItemKind)> {
     let start = format!("{prefix}::");
     let mut out: Vec<(String, ItemKind)> = Vec::new();
     let mut add = |path: &str, leaf: ItemKind| {
-        let Some(rest) = path.strip_prefix(&start) else { return };
+        let Some(rest) = path.strip_prefix(&start) else {
+            return;
+        };
         let (name, kind) = match rest.split_once("::") {
             Some((head, _)) => (head, ItemKind::Module),
             None => (rest, leaf),
@@ -819,5 +821,9 @@ pub fn children(prefix: &str) -> Vec<(String, ItemKind)> {
 
 /// Methods available on the std type `ty`, with their names.
 pub fn methods_of(ty: &str) -> Vec<&'static str> {
-    METHODS.iter().filter(|(t, _, _)| *t == ty).map(|(_, n, _)| *n).collect()
+    METHODS
+        .iter()
+        .filter(|(t, _, _)| *t == ty)
+        .map(|(_, n, _)| *n)
+        .collect()
 }

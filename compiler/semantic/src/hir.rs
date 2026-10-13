@@ -188,6 +188,7 @@ pub enum ForIter {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum FPart {
     Text(String),
     Expr(Expr),

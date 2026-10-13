@@ -740,8 +740,14 @@ fn std_registry_can_be_browsed() {
     assert!(top.contains(&("text".to_string(), ItemKind::Module)));
     assert!(top.contains(&("collect".to_string(), ItemKind::Function)));
     let text = children("std::text");
-    assert!(text.iter().any(|(n, k)| n == "trim" && *k == ItemKind::Function));
+    assert!(
+        text.iter()
+            .any(|(n, k)| n == "trim" && *k == ItemKind::Function)
+    );
     let http = children("std::http");
-    assert!(http.contains(&("Status".to_string(), ItemKind::Type)) || http.contains(&("Status".to_string(), ItemKind::Module)));
+    assert!(
+        http.contains(&("Status".to_string(), ItemKind::Type))
+            || http.contains(&("Status".to_string(), ItemKind::Module))
+    );
     assert!(methods_of("PgVectorClient").contains(&"with_vector"));
 }
