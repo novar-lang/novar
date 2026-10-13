@@ -1,0 +1,80 @@
+{
+  "name": "novar",
+  "displayName": "Novar",
+  "description": "Language support for Novar: syntax highlighting, diagnostics, hover, completion, go to definition and inferred-type hints.",
+  "version": "0.1.0",
+  "publisher": "novar-lang",
+  "license": "MIT OR Apache-2.0",
+  "repository": { "type": "git", "url": "https://github.com/ntsation/novar" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["novar", "tensor", "mlops", "pipeline"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onLanguage:novar"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "novar",
+        "aliases": ["Novar", "novar"],
+        "extensions": [".nv"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "novar",
+        "scopeName": "source.novar",
+        "path": "./syntaxes/novar.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Novar",
+      "properties": {
+        "novar.server.path": {
+          "type": "string",
+          "default": "novar",
+          "markdownDescription": "Path to the `novar` executable. The extension starts it as `novar lsp`."
+        },
+        "novar.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["lsp"],
+          "markdownDescription": "Arguments that make the executable speak the language server protocol."
+        },
+        "novar.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    },
+    "commands": [
+      { "command": "novar.restartServer", "title": "Novar: Restart Language Server" }
+    ],
+    "configurationDefaults": {
+      "[novar]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.inlayHints.enabled": "on"
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "node --test test/",
+    "package": "vsce package --no-dependencies=false"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.1.0"
+  }
+}

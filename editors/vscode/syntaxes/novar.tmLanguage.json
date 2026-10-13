@@ -1,0 +1,151 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Novar",
+  "scopeName": "source.novar",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#attribute" },
+    { "include": "#fstring" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#keyword" },
+    { "include": "#constant" },
+    { "include": "#declaration" },
+    { "include": "#path" },
+    { "include": "#type" },
+    { "include": "#call" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.novar",
+      "match": "//.*$"
+    },
+    "attribute": {
+      "name": "meta.attribute.novar",
+      "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.attribute.novar" },
+        "2": { "name": "entity.name.function.decorator.novar" }
+      }
+    },
+    "escape": {
+      "name": "constant.character.escape.novar",
+      "match": "\\\\."
+    },
+    "string": {
+      "name": "string.quoted.double.novar",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "include": "#escape" }]
+    },
+    "fstring": {
+      "name": "string.quoted.double.interpolated.novar",
+      "begin": "\\bf\"",
+      "end": "\"",
+      "patterns": [
+        { "include": "#escape" },
+        {
+          "name": "meta.interpolation.novar",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.novar" } },
+          "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.novar" } },
+          "patterns": [{ "include": "$self" }]
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.novar",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?\\b"
+        },
+        { "name": "constant.numeric.integer.novar", "match": "\\b[0-9][0-9_]*\\b" }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.novar",
+          "match": "\\b(?:if|else|for|while|in|return)\\b"
+        },
+        {
+          "name": "storage.modifier.novar",
+          "match": "\\b(?:pub|mut)\\b"
+        },
+        {
+          "name": "keyword.control.import.novar",
+          "match": "\\bimport\\b"
+        }
+      ]
+    },
+    "constant": {
+      "name": "constant.language.boolean.novar",
+      "match": "\\b(?:true|false)\\b"
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.function.novar" },
+            "2": { "name": "entity.name.function.novar" }
+          }
+        },
+        {
+          "match": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.struct.novar" },
+            "2": { "name": "entity.name.type.struct.novar" }
+          }
+        },
+        { "name": "storage.type.novar", "match": "\\blet\\b" }
+      ]
+    },
+    "path": {
+      "patterns": [
+        {
+          "match": "\\b(std)(?=::)",
+          "name": "support.module.std.novar"
+        },
+        {
+          "match": "\\b([a-z_][A-Za-z0-9_]*)(?=::)",
+          "name": "entity.name.namespace.novar"
+        }
+      ]
+    },
+    "type": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.novar",
+          "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String)\\b"
+        },
+        {
+          "name": "support.type.builtin.novar",
+          "match": "\\b(?:Vec|Vector|Tensor|Table|Result)\\b"
+        },
+        {
+          "name": "entity.name.type.novar",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "call": {
+      "name": "entity.name.function.call.novar",
+      "match": "\\b[a-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.pipe.novar", "match": "\\|>" },
+        { "name": "keyword.operator.range.novar", "match": "\\.\\.=?" },
+        { "name": "keyword.operator.arrow.novar", "match": "->|=>" },
+        { "name": "keyword.operator.assignment.novar", "match": "[-+*/]?=(?!=)" },
+        { "name": "keyword.operator.comparison.novar", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.logical.novar", "match": "&&|\\|\\||!" },
+        { "name": "keyword.operator.arithmetic.novar", "match": "[-+*/%]" },
+        { "name": "punctuation.separator.path.novar", "match": "::" }
+      ]
+    }
+  }
+}
