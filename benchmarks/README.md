@@ -17,8 +17,8 @@ retrieval over the corpus, JSON). A live Ollama / OpenAI / PostgreSQL adds their
 
 | Alpha target | Result (2000 documents) |
 |---|---|
-| p99 overhead < 15 ms | 0.83 ms with 1 connection, 5.9 ms with 8 concurrent connections |
-| Base RSS < 30 MB | 17.5 MB idle, 19.2 MB after 7,000 requests |
+| p99 overhead < 15 ms | 0.88 ms with 1 connection, 6.0 ms with 8 concurrent connections |
+| Base RSS < 30 MB | 17.8 MB idle, 19.5 MB after 7,000 requests |
 
 Retrieval scans the in-memory store linearly, so latency grows with the corpus: ~0.1 ms for 3
 documents, ~0.8 ms for 2,000.
