@@ -15,6 +15,7 @@ pub struct Options {
     pub port: u16,
     pub seed: Option<String>,
     pub live: bool,
+    pub quantize: novar_hir::Quantization,
 }
 
 impl Options {
@@ -25,11 +26,18 @@ impl Options {
             port: 8080,
             seed: None,
             live: false,
+            quantize: novar_hir::Quantization::None,
         };
         let mut it = flags.iter();
         while let Some(flag) = it.next() {
             if *flag == "--live" {
                 opts.live = true;
+                continue;
+            }
+            if *flag == "--quantize" {
+                let (q, _) =
+                    crate::take_quantize(&["--quantize", it.next().copied().unwrap_or("")])?;
+                opts.quantize = q;
                 continue;
             }
             match (*flag, it.next()) {
@@ -86,6 +94,7 @@ pub fn run(program: hir::Program, opts: &Options) -> Result<(), CliError> {
     }
     let interp =
         Arc::new(Interp::with_live(program, opts.live).or_else(|e| failed(e.to_string()))?);
+    interp.set_quantization(opts.quantize);
     if opts.live {
         eprintln!("live mode: using the real Ollama / OpenAI / PostgreSQL services");
     }

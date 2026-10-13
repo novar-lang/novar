@@ -12,9 +12,9 @@ use novar_runtime::{Interp, Value};
 const USAGE: &str = "\
 usage:
   novar check <file.nv>
-  novar run <file.nv> <function> [args...]
+  novar run <file.nv> <function> [args...] [--quantize int8]
   novar lsp                                                language server over stdio
-  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live]
+  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
   novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir] [-O 0-3]   (needs --features llvm)";
@@ -93,6 +93,32 @@ fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError>
         &bundle.packages(),
     );
     serve::run(lower_loaded(&loaded)?.0, &opts)
+}
+
+/// Splits `--quantize int8|none` out of `args`.
+pub fn take_quantize<'a>(
+    args: &[&'a str],
+) -> Result<(novar_hir::Quantization, Vec<&'a str>), CliError> {
+    let mut quant = novar_hir::Quantization::None;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if *a == "--quantize" {
+            quant = match it.next().copied() {
+                Some("int8") => novar_hir::Quantization::Int8,
+                Some("none") => novar_hir::Quantization::None,
+                other => {
+                    return failed(format!(
+                        "--quantize takes `int8` or `none`, not {}",
+                        other.unwrap_or("nothing")
+                    ));
+                }
+            };
+        } else {
+            rest.push(*a);
+        }
+    }
+    Ok((quant, rest))
 }
 
 #[derive(Debug)]
@@ -175,8 +201,10 @@ fn parse_arg(raw: &str) -> Value {
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
+    let (quant, args) = take_quantize(args)?;
     let hir = check(file)?;
     let interp = Interp::new(hir).or_else(|e| failed(e.to_string()))?;
+    interp.set_quantization(quant);
     let value = interp
         .call(func, args.iter().map(|a| parse_arg(a)).collect())
         .or_else(|e| failed(e.to_string()))?;

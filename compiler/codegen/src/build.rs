@@ -11,8 +11,8 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use novar_diagnostics::Diagnostic;
-use novar_hir::Ty;
 use novar_hir::hir;
+use novar_hir::{Quantization, Ty};
 
 #[derive(Debug)]
 pub enum BuildError {
@@ -48,8 +48,14 @@ fn tool<T, E: fmt::Display>(r: Result<T, E>) -> Result<T, BuildError> {
 
 /// Textual LLVM IR for every function in `program`.
 pub fn llvm_ir(program: &hir::Program) -> Result<String, BuildError> {
+    llvm_ir_with(program, Quantization::None)
+}
+
+/// Like [`llvm_ir`], with `f32` matrix products at the given precision.
+pub fn llvm_ir_with(program: &hir::Program, quant: Quantization) -> Result<String, BuildError> {
     let ctx = novar_mlir::context();
-    let mut module = novar_mlir::lower(&ctx, program).map_err(BuildError::Diagnostics)?;
+    let mut module =
+        novar_mlir::lower_with(&ctx, program, quant).map_err(BuildError::Diagnostics)?;
     tool(novar_mlir::lower_to_llvm_dialect(&ctx, &mut module))?;
     // SAFETY: `module` is a live LLVM-dialect module; the returned buffer is malloc'ed and owned by us.
     unsafe {
@@ -130,7 +136,17 @@ fn parse_and_optimize<'c>(
 
 /// Compiles `program` to a native object file at `path`.
 pub fn build_object(program: &hir::Program, opt: OptLevel, path: &Path) -> Result<(), BuildError> {
-    let ir = llvm_ir(program)?;
+    build_object_with(program, opt, Quantization::None, path)
+}
+
+/// Like [`build_object`], with `f32` matrix products at the given precision.
+pub fn build_object_with(
+    program: &hir::Program,
+    opt: OptLevel,
+    quant: Quantization,
+    path: &Path,
+) -> Result<(), BuildError> {
+    let ir = llvm_ir_with(program, quant)?;
     let (module, tm) = parse_and_optimize(&ir, opt)?;
     tool(tm.write_to_file(&module, FileType::Object, path))
 }
@@ -159,9 +175,19 @@ pub fn build_executable(
     opt: OptLevel,
     out: &Path,
 ) -> Result<(), BuildError> {
+    build_executable_with(program, opt, Quantization::None, out)
+}
+
+/// Like [`build_executable`], with `f32` matrix products at the given precision.
+pub fn build_executable_with(
+    program: &hir::Program,
+    opt: OptLevel,
+    quant: Quantization,
+    out: &Path,
+) -> Result<(), BuildError> {
     check_entry_point(program)?;
     let obj = out.with_extension("o");
-    build_object(program, opt, &obj)?;
+    build_object_with(program, opt, quant, &obj)?;
     let status = Command::new("cc").arg(&obj).arg("-o").arg(out).status();
     let _ = std::fs::remove_file(&obj);
     match status {

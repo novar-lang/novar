@@ -3,7 +3,9 @@
 #[cfg(feature = "llvm")]
 mod imp {
     use crate::{CliError, check, failed};
-    use novar_codegen::{OptLevel, build_executable, build_object, llvm_ir, optimize_ir};
+    use novar_codegen::{
+        OptLevel, build_executable_with, build_object_with, llvm_ir_with, optimize_ir,
+    };
     use novar_mlir::JitValue;
     use std::path::Path;
 
@@ -26,9 +28,10 @@ mod imp {
     }
 
     pub fn jit(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
+        let (quant, args) = crate::take_quantize(args)?;
         let hir = check(file)?;
         let args: Vec<_> = args.iter().map(|a| jit_arg(a)).collect();
-        match novar_mlir::jit_call(&hir, func, &args) {
+        match novar_mlir::jit_call_with(&hir, func, &args, quant) {
             Ok(JitValue::Int(i)) => println!("{i}"),
             Ok(JitValue::Float(x)) => println!("{x}"),
             Ok(JitValue::Bool(b)) => println!("{b}"),
@@ -39,6 +42,7 @@ mod imp {
     }
 
     pub fn build(file: &str, flags: &[&str]) -> Result<(), CliError> {
+        let (quant, flags) = crate::take_quantize(flags)?;
         let (mut out, mut emit, mut opt) = (None, "exe", 2u8);
         let mut it = flags.iter();
         while let Some(flag) = it.next() {
@@ -62,22 +66,24 @@ mod imp {
         let wrote = |p: &str| eprintln!("wrote {p}");
         match emit {
             "mlir" => {
-                let text = novar_mlir::emit_mlir(&hir, false)
+                let text = novar_mlir::emit_mlir_with(&hir, false, quant)
                     .map_err(|d| report(novar_codegen::BuildError::Diagnostics(d), file))?;
                 print!("{text}");
             }
             "llvm-ir" => {
-                let ir = llvm_ir(&hir).map_err(|e| report(e, file))?;
+                let ir = llvm_ir_with(&hir, quant).map_err(|e| report(e, file))?;
                 print!("{}", optimize_ir(&ir, opt).map_err(|e| report(e, file))?);
             }
             "obj" => {
                 let path = out.map_or_else(|| format!("{stem}.o"), str::to_string);
-                build_object(&hir, opt, Path::new(&path)).map_err(|e| report(e, file))?;
+                build_object_with(&hir, opt, quant, Path::new(&path))
+                    .map_err(|e| report(e, file))?;
                 wrote(&path);
             }
             "exe" => {
                 let path = out.map_or_else(|| stem.to_string(), str::to_string);
-                build_executable(&hir, opt, Path::new(&path)).map_err(|e| report(e, file))?;
+                build_executable_with(&hir, opt, quant, Path::new(&path))
+                    .map_err(|e| report(e, file))?;
                 wrote(&path);
             }
             other => return failed(format!("unknown --emit kind `{other}`")),
