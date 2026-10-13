@@ -439,3 +439,19 @@ fn assignment_bounds_errors() {
     );
     assert!(i.call("f", vec![Value::Int(1)]).is_ok());
 }
+
+#[test]
+fn a_step_limit_stops_runaway_programs() {
+    let i = load(
+        "fn spin() -> i32 { let mut n = 0; while true { n += 1; } n } fn quick() -> i32 { 1 + 1 }",
+    );
+    i.set_step_limit(10_000);
+    let e = i.call("spin", vec![]).unwrap_err();
+    assert!(e.message.contains("step limit"), "{e}");
+    i.set_step_limit(10_000);
+    assert_eq!(
+        int(i.call("quick", vec![]).unwrap()),
+        2,
+        "a fresh budget runs normal code"
+    );
+}

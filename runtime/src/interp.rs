@@ -66,6 +66,8 @@ pub struct Interp {
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     out: Mutex<Box<dyn std::io::Write + Send>>,
     live: std::sync::atomic::AtomicBool,
+    /// Remaining evaluation steps; `u64::MAX` means unlimited.
+    fuel: std::sync::atomic::AtomicU64,
 }
 
 impl fmt::Debug for Interp {
@@ -104,6 +106,7 @@ impl Interp {
             dbs: Mutex::new(HashMap::new()),
             out: Mutex::new(Box::new(std::io::stdout())),
             live: std::sync::atomic::AtomicBool::new(live),
+            fuel: std::sync::atomic::AtomicU64::new(u64::MAX),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -161,6 +164,17 @@ impl Interp {
         Ok(crate::std_impl::embed_text(text))
     }
 
+    /// Stops execution with an error after `steps` more evaluation steps (for untrusted code, e.g.
+    /// a web playground). Unlimited by default.
+    pub fn set_step_limit(&self, steps: u64) {
+        self.fuel.store(steps, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Converts request-style JSON into a value of static type `ty`.
+    pub fn value_from_json(&self, ty: &Ty, json: &Json) -> Result<Value, String> {
+        from_json(ty, json, &self.structs)
+    }
+
     pub fn is_live(&self) -> bool {
         self.live.load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -210,7 +224,10 @@ impl Interp {
     pub fn signature(&self, name: &str) -> Option<(Vec<(String, Ty)>, Ty)> {
         self.fns.get(name).map(|f| {
             (
-                f.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect(),
+                f.params
+                    .iter()
+                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .collect(),
                 f.ret.clone(),
             )
         })
@@ -224,13 +241,20 @@ impl Interp {
 
     /// Wraps an Arrow batch as a `Table<schema>`, matching columns to the struct's fields by name
     /// (casting where needed).
-    pub fn table_from_batch(&self, schema: &str, batch: &arrow::record_batch::RecordBatch) -> Result<Value, RuntimeError> {
+    pub fn table_from_batch(
+        &self,
+        schema: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<Value, RuntimeError> {
         let fields = self
             .structs
             .get(schema)
             .ok_or_else(|| RuntimeError::new(format!("unknown struct `{schema}`")))?;
         let batch = crate::table::conform(batch, fields)?;
-        Ok(Value::Table(Arc::new(crate::value::TableVal { schema: schema.to_string(), batch })))
+        Ok(Value::Table(Arc::new(crate::value::TableVal {
+            schema: schema.to_string(),
+            batch,
+        })))
     }
 
     pub fn endpoint_names(&self) -> Vec<String> {
@@ -499,6 +523,14 @@ impl Interp {
     }
 
     fn eval(&self, e: &hir::Expr, ctx: &mut Ctx) -> Eval {
+        use std::sync::atomic::Ordering::Relaxed;
+        let fuel = self.fuel.load(Relaxed);
+        if fuel != u64::MAX {
+            if fuel == 0 {
+                return fail("execution step limit exceeded");
+            }
+            self.fuel.store(fuel - 1, Relaxed);
+        }
         match &e.kind {
             ExprKind::Error => fail("cannot run code that failed to type-check"),
             ExprKind::Assign { .. }
