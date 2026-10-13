@@ -201,8 +201,36 @@ impl Interp {
             .collect()
     }
 
-    pub(crate) fn struct_fields(&self, name: &str) -> Option<&[(String, Ty)]> {
+    /// The fields of struct `name`, in declaration order.
+    pub fn struct_fields(&self, name: &str) -> Option<&[(String, Ty)]> {
         self.structs.get(name).map(Vec::as_slice)
+    }
+
+    /// Parameter names / types and the return type of function `name`.
+    pub fn signature(&self, name: &str) -> Option<(Vec<(String, Ty)>, Ty)> {
+        self.fns.get(name).map(|f| {
+            (
+                f.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect(),
+                f.ret.clone(),
+            )
+        })
+    }
+
+    pub fn function_names(&self) -> Vec<String> {
+        let mut v: Vec<_> = self.fns.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// Wraps an Arrow batch as a `Table<schema>`, matching columns to the struct's fields by name
+    /// (casting where needed).
+    pub fn table_from_batch(&self, schema: &str, batch: &arrow::record_batch::RecordBatch) -> Result<Value, RuntimeError> {
+        let fields = self
+            .structs
+            .get(schema)
+            .ok_or_else(|| RuntimeError::new(format!("unknown struct `{schema}`")))?;
+        let batch = crate::table::conform(batch, fields)?;
+        Ok(Value::Table(Arc::new(crate::value::TableVal { schema: schema.to_string(), batch })))
     }
 
     pub fn endpoint_names(&self) -> Vec<String> {
