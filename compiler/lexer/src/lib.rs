@@ -63,6 +63,18 @@ pub enum Token<'src> {
     // Operators
     #[token("|>")]
     Pipe,
+    #[token("..=")]
+    DotDotEq,
+    #[token("..")]
+    DotDot,
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
     #[token("::")]
     PathSep,
     #[token("->")]
@@ -148,6 +160,12 @@ impl std::fmt::Display for Token<'_> {
             False => "false",
             Ident(s) | Int(s) | Float(s) | Str(s) | FStr(s) => s,
             Pipe => "|>",
+            DotDotEq => "..=",
+            DotDot => "..",
+            PlusEq => "+=",
+            MinusEq => "-=",
+            StarEq => "*=",
+            SlashEq => "/=",
             PathSep => "::",
             Arrow => "->",
             FatArrow => "=>",
@@ -282,6 +300,38 @@ mod tests {
         assert_eq!(
             kinds("1_000 3.14 2.5e-3"),
             [Int("1_000"), Float("3.14"), Float("2.5e-3")]
+        );
+    }
+
+    #[test]
+    fn ranges_and_compound_assignment() {
+        assert_eq!(kinds("0..n"), [Int("0"), DotDot, Ident("n")]);
+        assert_eq!(kinds("0..=9"), [Int("0"), DotDotEq, Int("9")]);
+        assert_eq!(kinds("1.5..2.5"), [Float("1.5"), DotDot, Float("2.5")]);
+        assert_eq!(
+            kinds("a += 1; b -= 2; c *= 3; d /= 4"),
+            [
+                Ident("a"),
+                PlusEq,
+                Int("1"),
+                Semi,
+                Ident("b"),
+                MinusEq,
+                Int("2"),
+                Semi,
+                Ident("c"),
+                StarEq,
+                Int("3"),
+                Semi,
+                Ident("d"),
+                SlashEq,
+                Int("4"),
+            ]
+        );
+        assert_eq!(kinds("x.y"), [Ident("x"), Dot, Ident("y")]);
+        assert_eq!(
+            kinds("a -> b - c"),
+            [Ident("a"), Arrow, Ident("b"), Minus, Ident("c")]
         );
     }
 
