@@ -16,4 +16,4 @@ novar_ast = { version = "0.1.0", path = "../ast" }
 novar_diagnostics = { version = "0.1.0", path = "../diagnostics" }
 
 [dev-dependencies]
-novar_parser = { path = "../parser" }
+novar_parser = { version = "0.1.0", path = "../parser" }

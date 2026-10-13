@@ -1,1 +1,616 @@
-//! novar_server
+//! Embedded HTTP layer: turns the `@endpoint` functions of a checked program into an Axum
+//! router with routing, request validation and JSON (de)serialization.
+
+use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use axum::Json;
+use axum::Router;
+use axum::body::Bytes;
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use novar_hir::hir::{self, HttpMethod};
+use novar_hir::{Dim, Prim, Ty};
+use serde_json::{Value, json};
+
+// ---- schemas -------------------------------------------------------------------------------
+
+/// What a JSON value must look like to be accepted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Kind {
+    Int(Prim),
+    Float,
+    Bool,
+    Str,
+    Array(Box<Kind>),
+    /// Nested arrays; `None` dimensions accept any length.
+    Tensor {
+        elem: Box<Kind>,
+        shape: Vec<Option<u64>>,
+    },
+    Object(Schema),
+    /// Not statically known; accepted as-is.
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Schema {
+    pub fields: Vec<(String, Kind)>,
+}
+
+/// One HTTP route generated from an `@endpoint` function.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Route {
+    pub name: String,
+    pub method: HttpMethod,
+    pub path: String,
+    /// Request payload; `None` for endpoints without parameters.
+    pub payload: Option<Schema>,
+}
+
+/// Builds the routing table for every endpoint in `program`.
+pub fn routes(program: &hir::Program) -> Vec<Route> {
+    let structs: HashMap<&str, &hir::StructDef> = program
+        .structs
+        .iter()
+        .map(|s| (s.name.as_str(), s))
+        .collect();
+    program
+        .fns
+        .iter()
+        .filter_map(|f| {
+            let ep = f.endpoint.as_ref()?;
+            let payload =
+                f.params
+                    .first()
+                    .map(|p| match kind_of(&p.ty, &structs, &mut Vec::new()) {
+                        Kind::Object(s) => s,
+                        _ => Schema::default(),
+                    });
+            Some(Route {
+                name: f.name.clone(),
+                method: ep.method,
+                path: ep.path.clone(),
+                payload,
+            })
+        })
+        .collect()
+}
+
+fn kind_of(ty: &Ty, structs: &HashMap<&str, &hir::StructDef>, stack: &mut Vec<String>) -> Kind {
+    match ty {
+        Ty::Prim(Prim::Bool) => Kind::Bool,
+        Ty::Prim(Prim::Str) => Kind::Str,
+        Ty::Prim(p) if p.is_float() => Kind::Float,
+        Ty::Prim(p) => Kind::Int(*p),
+        Ty::Vec(inner) => Kind::Array(Box::new(kind_of(inner, structs, stack))),
+        Ty::Tensor { elem, shape } => Kind::Tensor {
+            elem: Box::new(kind_of(elem, structs, stack)),
+            shape: shape
+                .iter()
+                .map(|d| match d {
+                    Dim::Lit(n) => Some(*n),
+                    Dim::Named(_) => None,
+                })
+                .collect(),
+        },
+        Ty::Struct(name) => match structs.get(name.as_str()) {
+            // Recursive structs cannot be described by a finite schema.
+            Some(def) if !stack.contains(name) => {
+                stack.push(name.clone());
+                let fields = def
+                    .fields
+                    .iter()
+                    .map(|(n, t)| (n.clone(), kind_of(t, structs, stack)))
+                    .collect();
+                stack.pop();
+                Kind::Object(Schema { fields })
+            }
+            _ => Kind::Any,
+        },
+        _ => Kind::Any,
+    }
+}
+
+// ---- validation ----------------------------------------------------------------------------
+
+/// Checks `value` against `schema`, returning one message per problem (empty when valid).
+pub fn validate(schema: &Schema, value: &Value) -> Vec<String> {
+    let mut errors = Vec::new();
+    check_object(schema, value, "payload", &mut errors);
+    errors
+}
+
+fn check_object(schema: &Schema, value: &Value, path: &str, errors: &mut Vec<String>) {
+    let Some(obj) = value.as_object() else {
+        errors.push(format!(
+            "{path}: expected an object, found {}",
+            describe(value)
+        ));
+        return;
+    };
+    for (name, kind) in &schema.fields {
+        match obj.get(name) {
+            Some(v) => check(kind, v, &format!("{path}.{name}"), errors),
+            None => errors.push(format!("{path}.{name}: missing required field")),
+        }
+    }
+    for name in obj.keys() {
+        if !schema.fields.iter().any(|(n, _)| n == name) {
+            errors.push(format!("{path}.{name}: unknown field"));
+        }
+    }
+}
+
+fn check(kind: &Kind, v: &Value, path: &str, errors: &mut Vec<String>) {
+    match kind {
+        Kind::Any => {}
+        Kind::Bool if v.is_boolean() => {}
+        Kind::Str if v.is_string() => {}
+        Kind::Float if v.is_number() => {}
+        Kind::Int(p) => match v {
+            Value::Number(n) if n.is_i64() || n.is_u64() => {
+                if !fits(*p, n) {
+                    errors.push(format!("{path}: {n} is out of range for {}", p.name()));
+                }
+            }
+            _ => errors.push(format!(
+                "{path}: expected {}, found {}",
+                p.name(),
+                describe(v)
+            )),
+        },
+        Kind::Array(inner) => match v.as_array() {
+            Some(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    check(inner, item, &format!("{path}[{i}]"), errors);
+                }
+            }
+            None => errors.push(format!("{path}: expected an array, found {}", describe(v))),
+        },
+        Kind::Tensor { elem, shape } => check_tensor(elem, shape, v, path, errors),
+        Kind::Object(schema) => check_object(schema, v, path, errors),
+        Kind::Bool => errors.push(format!("{path}: expected bool, found {}", describe(v))),
+        Kind::Str => errors.push(format!("{path}: expected String, found {}", describe(v))),
+        Kind::Float => errors.push(format!("{path}: expected a number, found {}", describe(v))),
+    }
+}
+
+fn check_tensor(
+    elem: &Kind,
+    shape: &[Option<u64>],
+    v: &Value,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    let Some((dim, rest)) = shape.split_first() else {
+        return check(elem, v, path, errors);
+    };
+    let Some(items) = v.as_array() else {
+        return errors.push(format!("{path}: expected an array, found {}", describe(v)));
+    };
+    if let Some(n) = dim {
+        if items.len() as u64 != *n {
+            errors.push(format!(
+                "{path}: expected {n} element(s), found {}",
+                items.len()
+            ));
+            return;
+        }
+    }
+    for (i, item) in items.iter().enumerate() {
+        check_tensor(elem, rest, item, &format!("{path}[{i}]"), errors);
+    }
+}
+
+fn fits(p: Prim, n: &serde_json::Number) -> bool {
+    let (lo, hi): (i128, i128) = match p {
+        Prim::I8 => (i8::MIN.into(), i8::MAX.into()),
+        Prim::I16 => (i16::MIN.into(), i16::MAX.into()),
+        Prim::I32 => (i32::MIN.into(), i32::MAX.into()),
+        Prim::I64 => (i64::MIN.into(), i64::MAX.into()),
+        Prim::U8 => (0, u8::MAX.into()),
+        Prim::U16 => (0, u16::MAX.into()),
+        Prim::U32 => (0, u32::MAX.into()),
+        _ => (0, u64::MAX.into()),
+    };
+    let v = n
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| n.as_u64().map(i128::from));
+    v.is_some_and(|v| (lo..=hi).contains(&v))
+}
+
+fn describe(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
+/// Query-string values are strings; convert them to the JSON type the schema asks for.
+fn coerce_query(schema: &Schema, query: HashMap<String, String>) -> Value {
+    let mut out = serde_json::Map::new();
+    for (k, raw) in query {
+        let kind = schema.fields.iter().find(|(n, _)| *n == k).map(|(_, k)| k);
+        let v = match kind {
+            Some(Kind::Int(_)) => raw
+                .parse::<i64>()
+                .map(Value::from)
+                .or_else(|_| raw.parse::<u64>().map(Value::from))
+                .ok(),
+            Some(Kind::Float) => raw.parse::<f64>().map(Value::from).ok(),
+            Some(Kind::Bool) => raw.parse::<bool>().map(Value::from).ok(),
+            _ => Some(Value::String(raw.clone())),
+        };
+        out.insert(k, v.unwrap_or(Value::String(raw)));
+    }
+    Value::Object(out)
+}
+
+// ---- router --------------------------------------------------------------------------------
+
+/// An error a handler can return; becomes `{"error": message}` with `status`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HandlerError {
+    pub status: u16,
+    pub message: String,
+}
+
+impl HandlerError {
+    pub fn new(status: u16, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+}
+
+type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+
+/// Receives the validated request payload and produces the JSON response body.
+pub type Handler = Arc<dyn Fn(Value) -> BoxFuture<Result<Value, HandlerError>> + Send + Sync>;
+
+/// Wraps an async closure as a [`Handler`].
+pub fn handler<F, Fut>(f: F) -> Handler
+where
+    F: Fn(Value) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Value, HandlerError>> + Send + 'static,
+{
+    Arc::new(move |v| Box::pin(f(v)))
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RouterError {
+    /// A route has no registered handler, keyed by function name.
+    MissingHandler(String),
+    /// Two routes share a method and path.
+    Duplicate(String),
+}
+
+impl std::fmt::Display for RouterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RouterError::MissingHandler(n) => write!(f, "no handler registered for endpoint `{n}`"),
+            RouterError::Duplicate(r) => write!(f, "duplicate route {r}"),
+        }
+    }
+}
+
+impl std::error::Error for RouterError {}
+
+fn error_response(status: StatusCode, body: Value) -> Response {
+    (status, Json(body)).into_response()
+}
+
+async fn run(route: &Route, handlers: &Handler, payload: Value) -> Response {
+    if let Some(schema) = &route.payload {
+        let errors = validate(schema, &payload);
+        if !errors.is_empty() {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                json!({ "error": "invalid request", "details": errors }),
+            );
+        }
+    }
+    match handlers(payload).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => {
+            let status =
+                StatusCode::from_u16(e.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            error_response(status, json!({ "error": e.message }))
+        }
+    }
+}
+
+/// Builds the router. Every route needs a handler keyed by the endpoint function's name.
+/// `GET`/`DELETE` read the payload from the query string; other methods from a JSON body.
+pub fn router(
+    routes: &[Route],
+    mut handlers: BTreeMap<String, Handler>,
+) -> Result<Router, RouterError> {
+    let mut by_path: BTreeMap<String, axum::routing::MethodRouter> = BTreeMap::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for route in routes {
+        if !seen.insert((route.method, route.path.clone())) {
+            return Err(RouterError::Duplicate(format!(
+                "{:?} {}",
+                route.method, route.path
+            )));
+        }
+        let h = handlers
+            .remove(&route.name)
+            .ok_or_else(|| RouterError::MissingHandler(route.name.clone()))?;
+        let route = Arc::new(route.clone());
+
+        let mr = by_path.remove(&route.path).unwrap_or_default();
+        let mr = match route.method {
+            HttpMethod::Get | HttpMethod::Delete => {
+                let r = route.clone();
+                let f = move |Query(q): Query<HashMap<String, String>>| {
+                    let (r, h) = (r.clone(), h.clone());
+                    async move {
+                        let payload = match &r.payload {
+                            Some(s) => coerce_query(s, q),
+                            None => Value::Null,
+                        };
+                        run(&r, &h, payload).await
+                    }
+                };
+                if route.method == HttpMethod::Get {
+                    mr.get(f)
+                } else {
+                    mr.delete(f)
+                }
+            }
+            HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch => {
+                let r = route.clone();
+                let f = move |body: Bytes| {
+                    let (r, h) = (r.clone(), h.clone());
+                    async move {
+                        match serde_json::from_slice::<Value>(&body) {
+                            Ok(v) => run(&r, &h, v).await,
+                            Err(e) => error_response(
+                                StatusCode::BAD_REQUEST,
+                                json!({ "error": format!("invalid JSON: {e}") }),
+                            ),
+                        }
+                    }
+                };
+                match route.method {
+                    HttpMethod::Post => mr.post(f),
+                    HttpMethod::Put => mr.put(f),
+                    _ => mr.patch(f),
+                }
+            }
+        };
+        by_path.insert(route.path.clone(), mr);
+    }
+
+    let mut app = Router::new().route("/healthz", get(|| async { "ok" }));
+    for (path, mr) in by_path {
+        app = app.route(&path, mr);
+    }
+    Ok(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn program(src: &str) -> hir::Program {
+        let (ast, errs) = novar_parser_for_tests(src);
+        assert!(errs.is_empty(), "{errs:?}");
+        ast
+    }
+
+    fn novar_parser_for_tests(src: &str) -> (hir::Program, Vec<String>) {
+        let (ast, perrs) = novar_parser::parse(src);
+        assert!(perrs.is_empty(), "{perrs:?}");
+        let (hir, diags) = novar_hir::lower(&ast.unwrap());
+        (hir, diags.into_iter().map(|d| d.message).collect())
+    }
+
+    const SRC: &str = r#"
+        struct QueryPayload { query: String, top_k: i32 }
+        struct Embed { v: Tensor<f32, [3]>, tags: Vec<String>, small: u8 }
+        @endpoint(path = "/v1/rag/query", method = "POST")
+        pub fn handle_rag(p: QueryPayload) -> Result<QueryPayload, String> { Ok(p) }
+        @endpoint(path = "/v1/embed", method = "PUT")
+        fn embed(p: Embed) -> Result<Embed, String> { Ok(p) }
+        @endpoint(path = "/v1/search")
+        fn search(p: QueryPayload) -> Result<QueryPayload, String> { Ok(p) }
+        @endpoint(path = "/v1/ping")
+        fn ping() -> Result<String, String> { Ok("pong") }
+        fn helper() {}
+    "#;
+
+    fn app() -> Router {
+        let hir = program(SRC);
+        let echo = || handler(|v| async move { Ok(v) });
+        let mut hs = BTreeMap::new();
+        hs.insert("handle_rag".to_string(), echo());
+        hs.insert("embed".to_string(), echo());
+        hs.insert(
+            "search".to_string(),
+            handler(|v| async move {
+                if v["top_k"] == 0 {
+                    Err(HandlerError::new(422, "top_k must be positive"))
+                } else {
+                    Ok(v)
+                }
+            }),
+        );
+        hs.insert("ping".to_string(), handler(|_| async { Ok(json!("pong")) }));
+        router(&routes(&hir), hs).unwrap()
+    }
+
+    async fn call(app: &Router, method: &str, uri: &str, body: &str) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[test]
+    fn routing_table_comes_from_endpoints_only() {
+        let rs = routes(&program(SRC));
+        let names: Vec<_> = rs.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["handle_rag", "embed", "search", "ping"]);
+        assert_eq!(rs[0].method, HttpMethod::Post);
+        assert_eq!(
+            rs[0].payload.as_ref().unwrap().fields,
+            [
+                ("query".to_string(), Kind::Str),
+                ("top_k".to_string(), Kind::Int(Prim::I32))
+            ]
+        );
+        assert!(rs[3].payload.is_none());
+    }
+
+    #[test]
+    fn rag_example_routes() {
+        let src = include_str!("../../examples/rag-service.nv");
+        let rs = routes(&program(src));
+        assert_eq!(rs.len(), 1);
+        assert_eq!(rs[0].path, "/v1/rag/query");
+    }
+
+    #[tokio::test]
+    async fn valid_post_reaches_handler() {
+        let (s, v) = call(
+            &app(),
+            "POST",
+            "/v1/rag/query",
+            r#"{"query":"hi","top_k":3}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v, json!({"query": "hi", "top_k": 3}));
+    }
+
+    #[tokio::test]
+    async fn invalid_payloads_are_rejected_with_details() {
+        let a = app();
+        let (s, v) = call(&a, "POST", "/v1/rag/query", r#"{"query":1,"extra":true}"#).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let details = v["details"].to_string();
+        assert!(
+            details.contains("payload.query: expected String"),
+            "{details}"
+        );
+        assert!(
+            details.contains("payload.top_k: missing required field"),
+            "{details}"
+        );
+        assert!(
+            details.contains("payload.extra: unknown field"),
+            "{details}"
+        );
+
+        let (s, v) = call(&a, "POST", "/v1/rag/query", "not json").await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        assert!(v["error"].as_str().unwrap().starts_with("invalid JSON"));
+
+        let (s, _) = call(
+            &a,
+            "POST",
+            "/v1/rag/query",
+            r#"{"query":"a","top_k":99999999999}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let (s, _) = call(&a, "POST", "/v1/rag/query", r#"{"query":"a","top_k":1.5}"#).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn tensor_shape_and_nested_types_are_validated() {
+        let a = app();
+        let ok = r#"{"v":[1,2.5,3],"tags":["a"],"small":255}"#;
+        assert_eq!(call(&a, "PUT", "/v1/embed", ok).await.0, StatusCode::OK);
+        let (s, v) = call(
+            &a,
+            "PUT",
+            "/v1/embed",
+            r#"{"v":[1,2],"tags":[1],"small":256}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let d = v["details"].to_string();
+        assert!(
+            d.contains("payload.v: expected 3 element(s), found 2"),
+            "{d}"
+        );
+        assert!(d.contains("payload.tags[0]: expected String"), "{d}");
+        assert!(d.contains("256 is out of range for u8"), "{d}");
+    }
+
+    #[tokio::test]
+    async fn get_reads_the_query_string() {
+        let a = app();
+        let (s, v) = call(&a, "GET", "/v1/search?query=rust&top_k=5", "").await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(v, json!({"query": "rust", "top_k": 5}));
+        let (s, _) = call(&a, "GET", "/v1/search?query=rust&top_k=abc", "").await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+        let (s, _) = call(&a, "GET", "/v1/search?query=rust", "").await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn handler_errors_map_to_their_status() {
+        let (s, v) = call(&app(), "GET", "/v1/search?query=x&top_k=0", "").await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(v, json!({"error": "top_k must be positive"}));
+    }
+
+    #[tokio::test]
+    async fn payloadless_endpoint_health_and_unknown_routes() {
+        let a = app();
+        assert_eq!(
+            call(&a, "GET", "/v1/ping", "").await,
+            (StatusCode::OK, json!("pong"))
+        );
+        assert_eq!(call(&a, "GET", "/healthz", "").await.0, StatusCode::OK);
+        assert_eq!(call(&a, "GET", "/nope", "").await.0, StatusCode::NOT_FOUND);
+        assert_eq!(
+            call(&a, "GET", "/v1/rag/query", "").await.0,
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
+
+    #[test]
+    fn router_construction_errors() {
+        let rs = routes(&program(SRC));
+        let err = router(&rs, BTreeMap::new()).unwrap_err();
+        assert_eq!(err, RouterError::MissingHandler("handle_rag".into()));
+
+        let dup = vec![rs[3].clone(), rs[3].clone()];
+        let mut hs = BTreeMap::new();
+        hs.insert("ping".to_string(), handler(|_| async { Ok(json!("pong")) }));
+        assert!(matches!(router(&dup, hs), Err(RouterError::Duplicate(_))));
+    }
+}
