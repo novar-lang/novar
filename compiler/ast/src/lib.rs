@@ -81,6 +81,8 @@ pub struct Fn {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
+    /// `mut x: T` allows assigning to the parameter inside the function.
+    pub mutable: bool,
     pub name: Ident,
     pub ty: Type,
 }
@@ -163,8 +165,41 @@ pub enum ExprKind {
     Block(Block),
     Return(Option<Box<Expr>>),
     FString(Vec<FPart>),
+    /// `target = value`; compound forms (`+=`, ...) are desugared by the parser.
+    Assign {
+        target: Box<Expr>,
+        value: Box<Expr>,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Block,
+    },
+    For {
+        var: Ident,
+        iter: ForIter,
+        body: Block,
+    },
+    /// `base[index]`
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// `[a, b, c]`
+    Array(Vec<Expr>),
     /// Placeholder left by parser error recovery.
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForIter {
+    /// `start..end` or `start..=end`
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
+    /// Any expression producing a `Vec`.
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

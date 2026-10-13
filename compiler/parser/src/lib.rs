@@ -203,7 +203,10 @@ enum BlockItem {
 }
 
 fn is_block_like(e: &Expr) -> bool {
-    matches!(e.node, ExprKind::If { .. } | ExprKind::Block(_))
+    matches!(
+        e.node,
+        ExprKind::If { .. } | ExprKind::Block(_) | ExprKind::While { .. } | ExprKind::For { .. }
+    )
 }
 
 fn let_stmt<'a, 's: 'a, I>(
@@ -333,6 +336,54 @@ where
                 |_| ExprKind::Error,
             )));
 
+        let while_ = just(Token::While)
+            .ignore_then(expr.clone())
+            .then(block.clone())
+            .map_with(|(cond, body), e| {
+                spanned(
+                    ExprKind::While {
+                        cond: Box::new(cond),
+                        body,
+                    },
+                    e.span(),
+                )
+            });
+
+        let for_iter = expr
+            .clone()
+            .then(
+                choice((
+                    just(Token::DotDot).to(false),
+                    just(Token::DotDotEq).to(true),
+                ))
+                .then(expr.clone())
+                .or_not(),
+            )
+            .map(|(first, range)| match range {
+                Some((inclusive, end)) => ForIter::Range {
+                    start: Box::new(first),
+                    end: Box::new(end),
+                    inclusive,
+                },
+                None => ForIter::Expr(Box::new(first)),
+            });
+        let for_ = just(Token::For)
+            .ignore_then(ident())
+            .then_ignore(just(Token::In))
+            .then(for_iter)
+            .then(block.clone())
+            .map_with(|((var, iter), body), e| {
+                spanned(ExprKind::For { var, iter, body }, e.span())
+            });
+
+        let array = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(ExprKind::Array);
+
         let primary = choice((
             float,
             int,
@@ -344,14 +395,18 @@ where
             struct_lit,
             path().map(ExprKind::Path),
             paren,
+            array,
         ))
         .map_with(|k, e| spanned(k, e.span()))
         .or(if_)
+        .or(while_)
+        .or(for_)
         .or(block.map_with(|b, e| spanned(ExprKind::Block(b), e.span())));
 
         enum Postfix {
             Call(Vec<Expr>),
             Field(Ident),
+            Index(Expr),
         }
         let call = expr
             .clone()
@@ -370,8 +425,16 @@ where
                 |_| Postfix::Call(Vec::new()),
             )));
         let field = just(Token::Dot).ignore_then(ident()).map(Postfix::Field);
-        let postfix = primary.foldl_with(call.or(field).repeated(), |base, op, e| {
+        let index = expr
+            .clone()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(Postfix::Index);
+        let postfix = primary.foldl_with(call.or(field).or(index).repeated(), |base, op, e| {
             let kind = match op {
+                Postfix::Index(index) => ExprKind::Index {
+                    base: Box::new(base),
+                    index: Box::new(index),
+                },
                 Postfix::Call(args) => ExprKind::Call {
                     callee: Box::new(base),
                     args,
@@ -437,7 +500,7 @@ where
         let and = binary(eq, select! { Token::AndAnd => BinOp::And }.boxed());
         let or = binary(and, select! { Token::OrOr => BinOp::Or }.boxed());
 
-        or.clone().foldl_with(
+        let pipe = or.clone().foldl_with(
             just(Token::Pipe).ignore_then(or).repeated(),
             |lhs, rhs, e| {
                 spanned(
@@ -448,7 +511,40 @@ where
                     e.span(),
                 )
             },
-        )
+        );
+
+        // `target = value` and the compound forms, which desugar to `target = target op value`.
+        let assign_op = select! {
+            Token::Eq => None,
+            Token::PlusEq => Some(BinOp::Add),
+            Token::MinusEq => Some(BinOp::Sub),
+            Token::StarEq => Some(BinOp::Mul),
+            Token::SlashEq => Some(BinOp::Div),
+        };
+        pipe.then(assign_op.then(expr.clone()).or_not())
+            .map_with(|(target, rest), e| match rest {
+                None => target,
+                Some((op, value)) => {
+                    let value = match op {
+                        None => value,
+                        Some(op) => spanned(
+                            ExprKind::Binary {
+                                op,
+                                lhs: Box::new(target.clone()),
+                                rhs: Box::new(value.clone()),
+                            },
+                            (target.span.start..value.span.end).into(),
+                        ),
+                    };
+                    spanned(
+                        ExprKind::Assign {
+                            target: Box::new(target),
+                            value: Box::new(value),
+                        },
+                        e.span(),
+                    )
+                }
+            })
     })
 }
 
@@ -579,10 +675,16 @@ where
             span: rng(e.span()),
         });
 
-    let param = ident()
+    let param = just(Token::Mut)
+        .or_not()
+        .then(ident())
         .then_ignore(just(Token::Colon))
         .then(type_())
-        .map(|(name, ty)| Param { name, ty });
+        .map(|((m, name), ty)| Param {
+            mutable: m.is_some(),
+            name,
+            ty,
+        });
 
     let func = attr
         .repeated()
@@ -787,6 +889,89 @@ mod tests {
         let (p, errs) = parse("fn f() { g(1, ; 2) } fn h() {}");
         assert!(!errs.is_empty());
         assert!(p.is_some());
+    }
+
+    #[test]
+    fn loops_assignment_arrays_and_indexing() {
+        let src = "fn f(v: Vec<i32>, n: i32) -> i32 {
+            let mut total = 0;
+            let mut i = 0;
+            while i < n { total += v[i] * 2; i = i + 1; }
+            for x in v { total -= x; }
+            for k in 0..n { total += k; }
+            for k in 1..=3 { total *= k; }
+            let xs = [1, 2, 3,];
+            total + xs[0]
+        }";
+        let (p, errs) = parse(src);
+        assert!(errs.is_empty(), "{errs:?}");
+        let Item::Fn(f) = &p.unwrap().items[0] else {
+            panic!()
+        };
+        assert_eq!(f.body.stmts.len(), 7);
+        let kinds: Vec<_> = f
+            .body
+            .stmts
+            .iter()
+            .map(|s| match s {
+                Stmt::Let(_) => "let",
+                Stmt::Expr(e) => match e.node {
+                    ExprKind::While { .. } => "while",
+                    ExprKind::For {
+                        iter:
+                            ForIter::Range {
+                                inclusive: true, ..
+                            },
+                        ..
+                    } => "for..=",
+                    ExprKind::For {
+                        iter: ForIter::Range { .. },
+                        ..
+                    } => "for..",
+                    ExprKind::For { .. } => "for-in",
+                    _ => "expr",
+                },
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["let", "let", "while", "for-in", "for..", "for..=", "let"]
+        );
+    }
+
+    #[test]
+    fn assignment_targets_and_mut_params() {
+        let (p, errs) = parse("fn f(mut v: Vec<i32>, n: i32) { v[0] = n; v[1] += 2; }");
+        assert!(errs.is_empty(), "{errs:?}");
+        let Item::Fn(f) = &p.unwrap().items[0] else {
+            panic!()
+        };
+        assert!(f.params[0].mutable && !f.params[1].mutable);
+        assert!(matches!(ok_expr("p.a.b = 1"), ExprKind::Assign { .. }));
+        assert!(matches!(
+            ok_expr("p.items[i].x = 1"),
+            ExprKind::Assign { .. }
+        ));
+    }
+
+    #[test]
+    fn compound_assignment_desugars() {
+        let ExprKind::Assign { target, value } = ok_expr("x += 2 * y") else {
+            panic!()
+        };
+        assert_eq!(show(&target), "x");
+        assert_eq!(show(&value), "(Add x (Mul 2 y))");
+        assert!(matches!(ok_expr("x = y = 3"), ExprKind::Assign { .. }));
+        // `==` is still a comparison.
+        assert_eq!(sexp("a == b"), "(Eq a b)");
+    }
+
+    #[test]
+    fn arrays_and_index_expressions() {
+        assert!(matches!(ok_expr("[]"), ExprKind::Array(v) if v.is_empty()));
+        assert!(matches!(ok_expr("[1, 2]"), ExprKind::Array(v) if v.len() == 2));
+        assert!(matches!(ok_expr("a[i + 1][0]"), ExprKind::Index { .. }));
+        assert!(matches!(ok_expr("f(x)[2].y"), ExprKind::Field { .. }));
     }
 
     #[test]
