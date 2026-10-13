@@ -108,6 +108,7 @@ impl Checker {
                     .insert(s.name.node.clone(), fields.clone());
                 out.structs.push(hir::StructDef {
                     name: s.name.node.clone(),
+                    name_span: s.name.span.clone(),
                     is_pub: s.is_pub,
                     fields,
                     span: s.span.clone(),
@@ -548,6 +549,7 @@ impl Checker {
             name: name.node.clone(),
             ty,
             mutable,
+            span: name.span.clone(),
         }
     }
 
@@ -599,6 +601,7 @@ impl Checker {
         self.scopes.clear();
         hir::FnDef {
             name: f.name.node.clone(),
+            name_span: f.name.span.clone(),
             is_pub: f.is_pub,
             params,
             ret,

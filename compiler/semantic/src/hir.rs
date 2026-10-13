@@ -20,6 +20,7 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: String,
+    pub name_span: Span,
     pub is_pub: bool,
     pub fields: Vec<(String, Ty)>,
     pub span: Span,
@@ -39,6 +40,8 @@ pub struct Local {
     pub name: String,
     pub ty: Ty,
     pub mutable: bool,
+    /// Span of the binding's name.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,6 +63,7 @@ pub struct Endpoint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDef {
     pub name: String,
+    pub name_span: Span,
     pub is_pub: bool,
     pub params: Vec<Local>,
     pub ret: Ty,

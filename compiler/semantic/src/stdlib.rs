@@ -780,3 +780,44 @@ pub fn function_paths() -> impl Iterator<Item = &'static str> {
 pub fn method_names() -> impl Iterator<Item = (&'static str, &'static str)> {
     METHODS.iter().map(|(t, n, _)| (*t, *n))
 }
+
+pub fn type_paths() -> impl Iterator<Item = &'static str> {
+    TYPES.iter().copied()
+}
+
+/// What a name inside a std module refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ItemKind {
+    Module,
+    Function,
+    Type,
+}
+
+/// The direct children of the std path `prefix` (e.g. `std::text`), sorted, without duplicates.
+pub fn children(prefix: &str) -> Vec<(String, ItemKind)> {
+    let start = format!("{prefix}::");
+    let mut out: Vec<(String, ItemKind)> = Vec::new();
+    let mut add = |path: &str, leaf: ItemKind| {
+        let Some(rest) = path.strip_prefix(&start) else { return };
+        let (name, kind) = match rest.split_once("::") {
+            Some((head, _)) => (head, ItemKind::Module),
+            None => (rest, leaf),
+        };
+        if !out.iter().any(|(n, _)| n == name) {
+            out.push((name.to_string(), kind));
+        }
+    };
+    for p in function_paths() {
+        add(p, ItemKind::Function);
+    }
+    for p in type_paths() {
+        add(p, ItemKind::Type);
+    }
+    out.sort();
+    out
+}
+
+/// Methods available on the std type `ty`, with their names.
+pub fn methods_of(ty: &str) -> Vec<&'static str> {
+    METHODS.iter().filter(|(t, _, _)| *t == ty).map(|(_, n, _)| *n).collect()
+}
