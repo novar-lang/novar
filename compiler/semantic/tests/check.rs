@@ -721,3 +721,14 @@ fn table_functions() {
         "must be `String`",
     );
 }
+
+#[test]
+fn tensors_can_be_indexed() {
+    assert_clean("fn f(t: Tensor<f32, [4]>) -> f32 { t[0] }");
+    assert_clean("fn f(t: Tensor<f32, [2, 3]>) -> Tensor<f32, [3]> { t[1] }");
+    assert_clean("fn f(t: Tensor<f32, [2, 3]>) -> f32 { t[1][2] }");
+    assert_err(
+        "fn f(t: Tensor<f32, [4]>) -> i32 { t[0] }",
+        "expected `i32`, found `f32`",
+    );
+}

@@ -812,6 +812,12 @@ impl Checker {
                 let ty = match &base.ty {
                     Ty::Vec(t) => (**t).clone(),
                     Ty::Table(s) => Ty::Struct(s.clone()),
+                    // Indexing peels the leading dimension: a row of a matrix is a vector.
+                    Ty::Tensor { elem, shape } if shape.len() == 1 => (**elem).clone(),
+                    Ty::Tensor { elem, shape } => Ty::Tensor {
+                        elem: elem.clone(),
+                        shape: shape[1..].to_vec(),
+                    },
                     Ty::Unknown | Ty::Never => Ty::Unknown,
                     other => {
                         let other = other.clone();
