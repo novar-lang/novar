@@ -96,7 +96,9 @@ fn name_resolution() {
     assert_err("struct A {} fn f() { A; }", "is a struct, not a value");
     assert_err("fn f() {} fn f() {}", "defined twice");
     assert_err("fn f(a: i32, a: i32) {}", "declared twice");
-    assert_clean("import std::db::Client; let c = Client::new(); fn f() { let x = c; }");
+    assert_clean(
+        "import std::ai::llm::OpenAIClient; let c = OpenAIClient::new(\"m\"); fn f() { let x = c; }",
+    );
     // A binding is not visible inside its own initializer.
     assert_err("fn f() { let x = x; }", "cannot find `x`");
 }
@@ -275,4 +277,122 @@ fn diagnostics_render_with_source_context() {
     let out = novar_diagnostics::render("main.nv", src, &diags, false);
     assert!(out.contains("main.nv:2:5"), "{out}");
     assert!(out.contains("expected `i32`, found `String`"), "{out}");
+}
+
+// ---- standard library ----------------------------------------------------------------------
+
+#[test]
+fn std_functions_are_typed() {
+    assert_clean(
+        "fn f(s: String) -> String { s |> std::text::clean_whitespace() |> std::text::truncate(10) }",
+    );
+    assert_err(
+        "fn f(n: i32) -> String { std::text::trim(n) }",
+        "argument 1 must be `String`, found `i32`",
+    );
+    assert_err(
+        "fn f(s: String) -> String { std::text::truncate(s) }",
+        "expected 2 argument(s), found 1",
+    );
+    assert_err(
+        "fn f(s: String) -> String { std::text::truncate(s, \"x\") }",
+        "must be an integer",
+    );
+    assert_err(
+        "fn f(s: String) -> i32 { std::text::trim(s) }",
+        "expected `i32`, found `String`",
+    );
+}
+
+#[test]
+fn std_unknown_items_are_errors() {
+    assert_err(
+        "fn f() { std::text::nope(); }",
+        "cannot find `std::text::nope`",
+    );
+    assert_err("import std::nope::Thing; fn f() {}", "unresolved import");
+    assert_err(
+        "import std::text; fn f() { text::nope(); }",
+        "cannot find `std::text::nope`",
+    );
+    assert_err("fn f() { let x = std::text; }", "is not a value");
+}
+
+#[test]
+fn iterators_propagate_element_types() {
+    assert_clean(
+        "struct D { text: String } \
+         fn f(v: Vec<D>) -> String { v |> std::iter::map(|d| d.text) |> std::string::join(\", \") }",
+    );
+    // The closure parameter is `D`, so a missing field is caught inside it.
+    assert_err(
+        "struct D { text: String } fn f(v: Vec<D>) { v |> std::iter::map(|d| d.nope); }",
+        "no field `nope`",
+    );
+    assert_err(
+        "fn f(v: Vec<String>) -> Vec<i32> { v |> std::iter::map(|s| s) }",
+        "expected `Vec<i32>`, found `Vec<String>`",
+    );
+    assert_err(
+        "fn f(n: i32) { std::iter::map(n, |x| x); }",
+        "must be a `Vec`",
+    );
+    assert_err(
+        "fn f(v: Vec<i32>) { v |> std::iter::filter(|x| 1); }",
+        "must be `fn(_) -> bool`",
+    );
+    assert_clean("fn f(v: Vec<i32>) -> u64 { v |> std::iter::take(3) |> std::iter::count() }");
+}
+
+#[test]
+fn std_types_have_typed_methods() {
+    let head = "import std::ai::embeddings::OllamaEmbedder; import std::ai::llm::OpenAIClient; \
+                let e = OllamaEmbedder::new(\"nomic-embed-text\"); let l = OpenAIClient::new(\"m\"); ";
+    assert_clean(&format!(
+        "{head} fn f(t: String) -> Tensor<f32, [768]> {{ t |> e.embed() }}"
+    ));
+    assert_err(
+        &format!("{head} fn f(t: String) -> Tensor<f32, [512]> {{ t |> e.embed() }}"),
+        "expected `Tensor<f32, [512]>`, found `Tensor<f32, [768]>`",
+    );
+    assert_err(
+        &format!("{head} fn f(t: String) -> String {{ l.nope(t) }}"),
+        "no method `nope` on type `OpenAIClient`",
+    );
+    assert_err(
+        &format!("{head} fn f() -> String {{ l.complete(1) }}"),
+        "must be `String`",
+    );
+}
+
+#[test]
+fn vector_query_pipeline() {
+    let head = "import std::db::pgvector::PgVectorClient; \
+                let db = PgVectorClient::connect(\"postgresql://x\"); ";
+    assert_clean(&format!(
+        "{head} fn f(v: Tensor<f32, [768]>) -> Vec<String> {{ \
+         db.search_collection(\"kb\") |> db.with_vector(v) |> db.limit(3) |> db.execute() }}"
+    ));
+    assert_err(
+        &format!(
+            "{head} fn f(v: Tensor<f32, [8]>) {{ db.search_collection(\"kb\") |> db.with_vector(v); }}"
+        ),
+        "must be `Tensor<f32, [768]>`",
+    );
+    assert_err(
+        &format!("{head} fn f() {{ db.execute(\"kb\"); }}"),
+        "must be `VectorQuery`",
+    );
+}
+
+#[test]
+fn status_constructors_flow_into_endpoint_results() {
+    let src = "import std::http::Status; \
+               fn f(ok: bool) -> Result<String, Status> { \
+                   if ok { return Ok(\"y\"); } Err(Status::NotFound(\"nope\")) }";
+    assert_clean(src);
+    assert_err(
+        "import std::http::Status; fn f() -> Result<String, Status> { Err(Status::Teapot(\"x\")) }",
+        "cannot find `std::http::Status::Teapot`",
+    );
 }
