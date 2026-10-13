@@ -1,6 +1,8 @@
 //! Novar runtime: a tree-walking interpreter over the typed HIR plus the std implementations.
 
 mod interp;
+#[cfg(feature = "live")]
+mod services;
 mod std_impl;
 mod table;
 mod tensor;

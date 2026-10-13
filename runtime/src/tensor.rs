@@ -55,6 +55,19 @@ impl TensorVal {
         self.array.is_empty()
     }
 
+    /// `self[i]`: a number for vectors, otherwise a sub-tensor that shares this buffer.
+    pub fn element(&self, i: usize, rest: &[usize]) -> Result<Value, RuntimeError> {
+        let chunk: usize = rest.iter().product();
+        let slice = self.array.slice(i * chunk, chunk);
+        if rest.is_empty() {
+            return crate::table::cell(&slice, 0);
+        }
+        Ok(Value::Tensor(Arc::new(TensorVal::from_array(
+            rest.to_vec(),
+            slice,
+        )?)))
+    }
+
     pub fn dtype(&self) -> &DataType {
         self.array.data_type()
     }

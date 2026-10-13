@@ -151,17 +151,33 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
         "std::http::Status::NotFound" => status(404, &args),
         "std::http::Status::Unprocessable" => status(422, &args),
         "std::http::Status::Internal" => status(500, &args),
-        "std::ai::embeddings::OllamaEmbedder::new" => {
-            want_str(&args[0])?;
-            Ok(Value::Native(Native::Embedder {
-                dim: EMBEDDING_DIM as usize,
+        "std::ai::embeddings::OllamaEmbedder::new" => Ok(Value::Native(Native::Embedder {
+            model: want_str(&args[0])?,
+            endpoint: if interp.is_live() {
+                Some(env_or("OLLAMA_HOST", "http://localhost:11434").into())
+            } else {
+                None
+            },
+        })),
+        "std::ai::llm::OpenAIClient::new" => {
+            let endpoint = if interp.is_live() {
+                let key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+                    RuntimeError::new("live mode needs the OPENAI_API_KEY environment variable")
+                })?;
+                Some(Arc::new((
+                    env_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                    key,
+                )))
+            } else {
+                None
+            };
+            Ok(Value::Native(Native::Llm {
+                model: want_str(&args[0])?,
+                endpoint,
             }))
         }
-        "std::ai::llm::OpenAIClient::new" => Ok(Value::Native(Native::Llm {
-            model: want_str(&args[0])?,
-        })),
         "std::db::pgvector::PgVectorClient::connect" => Ok(Value::Native(Native::Db(
-            interp.db_for(&want_str(&args[0])?),
+            interp.db_for(&want_str(&args[0])?)?,
         ))),
         other => err(format!(
             "std function `{other}` is not implemented by the runtime"
@@ -190,11 +206,36 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
             "len" => Ok(Value::Int(v.len() as i64)),
             _ => err(format!("Vec has no method `{name}`")),
         },
-        Value::Native(Native::Embedder { .. }) if name == "embed" => {
-            Ok(tensor(embed_text(&want_str(&args[0])?)))
+        Value::Native(Native::Embedder { model, endpoint }) if name == "embed" => {
+            let text = want_str(&args[0])?;
+            match endpoint {
+                #[cfg(feature = "live")]
+                Some(host) => Ok(tensor(crate::services::ollama_embed(
+                    host,
+                    model,
+                    &text,
+                    EMBEDDING_DIM as usize,
+                )?)),
+                #[cfg(not(feature = "live"))]
+                Some(_) => err("live mode is not available in this build"),
+                None => {
+                    let _ = model;
+                    Ok(tensor(embed_text(&text)))
+                }
+            }
         }
-        Value::Native(Native::Llm { model }) if name == "complete" => {
+        Value::Native(Native::Llm { model, endpoint }) if name == "complete" => {
             let prompt = want_str(&args[0])?;
+            #[cfg(feature = "live")]
+            if let Some(ep) = endpoint {
+                return Ok(Value::str(crate::services::openai_complete(
+                    &ep.0, &ep.1, model, &prompt,
+                )?));
+            }
+            #[cfg(not(feature = "live"))]
+            if endpoint.is_some() {
+                return err("live mode is not available in this build");
+            }
             let question = prompt
                 .lines()
                 .rev()
@@ -241,7 +282,7 @@ fn db_method(db: &Arc<Db>, name: &str, args: Vec<Value>) -> Res {
                 &want_str(&args[1])?,
                 &want_str(&args[2])?,
                 t.to_f32_vec(),
-            );
+            )?;
             Ok(Value::Unit)
         }
         _ => err(format!("PgVectorClient has no method `{name}`")),
@@ -262,6 +303,15 @@ fn execute(q: &Query) -> Res {
     let Some(vector) = &q.vector else {
         return err("vector query has no `with_vector(..)`");
     };
+    #[cfg(feature = "live")]
+    if let Some(pg) = &q.db.pg {
+        let rows = pg.search(&q.collection, vector, q.limit)?;
+        return Ok(Value::vec(
+            rows.into_iter()
+                .map(|(id, text, score)| row(&id, &text, score))
+                .collect(),
+        ));
+    }
     let cols = q.db.collections.lock().unwrap_or_else(|e| e.into_inner());
     let mut scored: Vec<(f64, &crate::value::Doc)> = cols
         .get(&q.collection)
@@ -278,16 +328,23 @@ fn execute(q: &Query) -> Res {
     let rows = scored
         .into_iter()
         .take(q.limit)
-        .map(|(score, d)| {
-            Value::Struct(Arc::new(StructVal {
-                name: "Row".into(),
-                fields: vec![
-                    ("id".into(), Value::str(d.id.as_str())),
-                    ("text".into(), Value::str(d.text.as_str())),
-                    ("score".into(), Value::Float(score)),
-                ],
-            }))
-        })
+        .map(|(score, d)| row(&d.id, &d.text, score))
         .collect();
     Ok(Value::vec(rows))
+}
+
+/// A search hit: an object with `id`, `text` and `score`.
+fn row(id: &str, text: &str, score: f64) -> Value {
+    Value::Struct(Arc::new(StructVal {
+        name: "Row".into(),
+        fields: vec![
+            ("id".into(), Value::str(id)),
+            ("text".into(), Value::str(text)),
+            ("score".into(), Value::Float(score)),
+        ],
+    }))
+}
+
+fn env_or(name: &str, default: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| default.to_string())
 }

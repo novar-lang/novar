@@ -101,8 +101,16 @@ pub enum Value {
 /// Objects provided by the runtime's standard library.
 #[derive(Debug, Clone)]
 pub enum Native {
-    Embedder { dim: usize },
-    Llm { model: Arc<str> },
+    /// `endpoint` is the Ollama host when running live; `None` uses the offline stand-in.
+    Embedder {
+        model: Arc<str>,
+        endpoint: Option<Arc<str>>,
+    },
+    /// `endpoint` is `(base URL, API key)` when running live.
+    Llm {
+        model: Arc<str>,
+        endpoint: Option<Arc<(String, String)>>,
+    },
     Db(Arc<Db>),
     Query(Arc<Query>),
 }
@@ -119,10 +127,23 @@ pub struct Doc {
 pub struct Db {
     pub url: String,
     pub collections: Mutex<HashMap<String, Vec<Doc>>>,
+    /// Set when the database is a real PostgreSQL server (live mode).
+    #[cfg(feature = "live")]
+    pub(crate) pg: Option<crate::services::PgStore>,
 }
 
 impl Db {
-    pub fn insert(&self, collection: &str, id: &str, text: &str, vector: Vec<f32>) {
+    pub fn insert(
+        &self,
+        collection: &str,
+        id: &str,
+        text: &str,
+        vector: Vec<f32>,
+    ) -> Result<(), crate::interp::RuntimeError> {
+        #[cfg(feature = "live")]
+        if let Some(pg) = &self.pg {
+            return pg.insert(collection, id, text, &vector);
+        }
         let mut cols = self.collections.lock().unwrap_or_else(|e| e.into_inner());
         let docs = cols.entry(collection.to_string()).or_default();
         // Upsert by id, like a primary-key conflict would.
@@ -132,6 +153,7 @@ impl Db {
             text: text.to_string(),
             vector,
         });
+        Ok(())
     }
 }
 

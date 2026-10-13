@@ -210,7 +210,7 @@ fn embeddings_are_deterministic_and_similarity_aware() {
 fn rag_example_end_to_end() {
     let src = include_str!("../../examples/rag-service.nv");
     let i = load(src);
-    let db = i.db_for("postgresql://localhost:5432/vectors");
+    let db = i.db_for("postgresql://localhost:5432/vectors").unwrap();
     for (id, text) in [
         (
             "t1",
@@ -222,7 +222,8 @@ fn rag_example_end_to_end() {
         ),
         ("b1", "Banana bread needs ripe bananas"),
     ] {
-        db.insert("knowledge_base", id, text, embed_text(text));
+        db.insert("knowledge_base", id, text, embed_text(text))
+            .unwrap();
     }
 
     let out = i

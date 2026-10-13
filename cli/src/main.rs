@@ -4,14 +4,14 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use novar_diagnostics::Diagnostic;
-use novar_runtime::{Interp, Value, embed_text};
+use novar_runtime::{Interp, Value};
 use novar_server::{HandlerError, handler};
 
 const USAGE: &str = "\
 usage:
   novar check <file.nv>
   novar run <file.nv> <function> [args...]
-  novar serve <file.nv> [--port N] [--seed docs.jsonl]
+  novar serve <file.nv> [--port N] [--seed docs.jsonl] [--live]
   novar jit <file.nv> <function> [args...]      (native, needs --features llvm)
   novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir] [-O 0-3]   (needs --features llvm)";
 
@@ -224,8 +224,10 @@ fn seed(interp: &Interp, path: &str) -> Result<usize, CliError> {
                 i + 1
             ));
         };
+        let vector = interp.embed(&text).or_else(|e| failed(e.to_string()))?;
         for db in &dbs {
-            db.insert(&col, &id, &text, embed_text(&text));
+            db.insert(&col, &id, &text, vector.clone())
+                .or_else(|e| failed(e.to_string()))?;
         }
         n += 1;
     }
@@ -235,8 +237,13 @@ fn seed(interp: &Interp, path: &str) -> Result<usize, CliError> {
 fn serve(file: &str, flags: &[&str]) -> Result<(), CliError> {
     let mut port: u16 = 8080;
     let mut seed_file = None;
-    let mut it = flags.iter();
+    let mut live = false;
+    let mut it = flags.iter().peekable();
     while let Some(flag) = it.next() {
+        if *flag == "--live" {
+            live = true;
+            continue;
+        }
         match (*flag, it.next()) {
             ("--port", Some(p)) => {
                 port = p
@@ -253,7 +260,10 @@ fn serve(file: &str, flags: &[&str]) -> Result<(), CliError> {
     if routes.is_empty() {
         return failed("no `@endpoint` functions found, nothing to serve");
     }
-    let interp = Arc::new(Interp::new(hir).or_else(|e| failed(e.to_string()))?);
+    let interp = Arc::new(Interp::with_live(hir, live).or_else(|e| failed(e.to_string()))?);
+    if live {
+        eprintln!("live mode: using the real Ollama / OpenAI / PostgreSQL services");
+    }
     if let Some(path) = seed_file {
         let n = seed(&interp, path)?;
         eprintln!("seeded {n} document(s) from {path}");

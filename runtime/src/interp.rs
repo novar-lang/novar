@@ -65,6 +65,7 @@ pub struct Interp {
     globals: RwLock<HashMap<String, Value>>,
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     out: Mutex<Box<dyn std::io::Write + Send>>,
+    live: std::sync::atomic::AtomicBool,
 }
 
 impl fmt::Debug for Interp {
@@ -83,6 +84,11 @@ struct Ctx {
 impl Interp {
     /// Prepares `program` for execution and evaluates its global `let`s in order.
     pub fn new(program: hir::Program) -> Result<Interp, RuntimeError> {
+        Self::with_live(program, false)
+    }
+
+    /// Like [`Interp::new`], choosing real services (`live`) before the globals are evaluated.
+    pub fn with_live(program: hir::Program, live: bool) -> Result<Interp, RuntimeError> {
         let interp = Interp {
             structs: program
                 .structs
@@ -97,6 +103,7 @@ impl Interp {
             globals: RwLock::new(HashMap::new()),
             dbs: Mutex::new(HashMap::new()),
             out: Mutex::new(Box::new(std::io::stdout())),
+            live: std::sync::atomic::AtomicBool::new(live),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -129,17 +136,59 @@ impl Interp {
             .map_err(|e| RuntimeError::new(format!("cannot write output: {e}")))
     }
 
-    /// The in-memory database behind `url`, created on first use. Lets embedders seed data.
-    pub fn db_for(&self, url: &str) -> Arc<Db> {
+    /// Switches the AI services between offline stand-ins (the default) and the real Ollama,
+    /// OpenAI and PostgreSQL backends. Must be called before the program creates its clients.
+    pub fn set_live(&self, live: bool) {
+        self.live.store(live, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Embeds `text` the way `OllamaEmbedder.embed` would: with Ollama (`OLLAMA_HOST`, model
+    /// `NOVAR_EMBED_MODEL`) when live, otherwise with the offline stand-in. Used to seed stores.
+    pub fn embed(&self, text: &str) -> Result<Vec<f32>, RuntimeError> {
+        #[cfg(feature = "live")]
+        if self.is_live() {
+            let host =
+                std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
+            let model =
+                std::env::var("NOVAR_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text".into());
+            return crate::services::ollama_embed(
+                &host,
+                &model,
+                text,
+                novar_hir::stdlib::EMBEDDING_DIM as usize,
+            );
+        }
+        Ok(crate::std_impl::embed_text(text))
+    }
+
+    pub fn is_live(&self) -> bool {
+        self.live.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The database behind `url`, opened on first use: PostgreSQL when live, otherwise an
+    /// in-memory store that embedders can seed.
+    pub fn db_for(&self, url: &str) -> Result<Arc<Db>, RuntimeError> {
         let mut dbs = self.dbs.lock().unwrap_or_else(|e| e.into_inner());
-        dbs.entry(url.to_string())
-            .or_insert_with(|| {
-                Arc::new(Db {
-                    url: url.to_string(),
-                    ..Db::default()
-                })
-            })
-            .clone()
+        if let Some(db) = dbs.get(url) {
+            return Ok(db.clone());
+        }
+        #[cfg(feature = "live")]
+        let pg = if self.is_live() && url.starts_with("postgres") {
+            Some(crate::services::PgStore::connect(
+                url,
+                novar_hir::stdlib::EMBEDDING_DIM as usize,
+            )?)
+        } else {
+            None
+        };
+        let db = Arc::new(Db {
+            url: url.to_string(),
+            #[cfg(feature = "live")]
+            pg,
+            ..Db::default()
+        });
+        dbs.insert(url.to_string(), db.clone());
+        Ok(db)
     }
 
     /// Every database opened so far (one per distinct URL).
@@ -400,6 +449,11 @@ impl Interp {
                     Value::Table(t) => match usize::try_from(i) {
                         Ok(i) if i < t.rows() => Ok(t.row(i)?),
                         _ => Err(out_of_bounds(t.rows())),
+                    },
+                    Value::Tensor(t) => match (usize::try_from(i), t.shape.split_first()) {
+                        (Ok(i), Some((&n, rest))) if i < n => Ok(t.element(i, rest)?),
+                        (_, Some((&n, _))) => Err(out_of_bounds(n)),
+                        _ => fail("cannot index a scalar tensor"),
                     },
                     _ => fail("indexing needs a Vec or a Table"),
                 }
