@@ -2,6 +2,7 @@
 
 mod check;
 pub mod hir;
+pub mod stdlib;
 pub mod ty;
 
 pub use ty::{Dim, Prim, Ty};

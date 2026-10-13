@@ -6,6 +6,7 @@ use novar_ast as ast;
 use novar_diagnostics::Diagnostic;
 
 use crate::hir::{self, Endpoint, HttpMethod, LocalId};
+use crate::stdlib::{self, Sig};
 use crate::ty::{Dim, Prim, Ty};
 
 type Span = std::ops::Range<usize>;
@@ -13,7 +14,8 @@ type Span = std::ops::Range<usize>;
 #[derive(Default)]
 pub(crate) struct Checker {
     diags: Vec<Diagnostic>,
-    imports: HashSet<String>,
+    /// Imported name -> its full path.
+    imports: HashMap<String, Vec<String>>,
     struct_fields: HashMap<String, Vec<(String, Ty)>>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
     globals: HashMap<String, Ty>,
@@ -40,17 +42,27 @@ impl Checker {
         for item in &program.items {
             if let ast::Item::Import(i) = item {
                 let base: Vec<String> = i.path.iter().map(|s| s.node.clone()).collect();
-                if i.group.is_empty() {
-                    if let Some(last) = base.last() {
-                        self.imports.insert(last.clone());
+                let mut bring_in = |this: &mut Self, name: &ast::Ident, full: Vec<String>| {
+                    let joined = full.join("::");
+                    let is_std = full.first().is_some_and(|f| f == "std");
+                    let known = stdlib::function(&joined).is_some()
+                        || stdlib::is_type(&joined)
+                        || stdlib::is_module(&joined);
+                    if is_std && !known {
+                        this.err(name.span.clone(), format!("unresolved import `{joined}`"));
                     }
-                    out.imports.push(base);
+                    this.imports.insert(name.node.clone(), full.clone());
+                    out.imports.push(full);
+                };
+                if i.group.is_empty() {
+                    if let Some(last) = i.path.last() {
+                        bring_in(self, last, base);
+                    }
                 } else {
                     for name in &i.group {
-                        self.imports.insert(name.node.clone());
                         let mut full = base.clone();
                         full.push(name.node.clone());
-                        out.imports.push(full);
+                        bring_in(self, name, full);
                     }
                 }
             }
@@ -163,7 +175,7 @@ impl Checker {
     fn resolve_type(&mut self, t: &ast::Type) -> Ty {
         let names: Vec<&str> = t.path.iter().map(|i| i.node.as_str()).collect();
         if names.len() > 1 {
-            if names[0] == "std" || self.imports.contains(names[0]) {
+            if names[0] == "std" || self.imports.contains_key(names[0]) {
                 return Ty::Named(names.join("::"));
             }
             self.err(
@@ -224,7 +236,7 @@ impl Checker {
                 no_args(self);
                 Ty::Struct(name.to_string())
             }
-            _ if self.imports.contains(name) => Ty::Named(name.to_string()),
+            _ if self.imports.contains_key(name) => Ty::Named(name.to_string()),
             _ => {
                 self.err(
                     t.span.clone(),
@@ -707,8 +719,32 @@ impl Checker {
                 return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
             }
         }
-        if first == "std" || self.imports.contains(first) || matches!(first, "Ok" | "Err") {
+        if matches!(first, "Ok" | "Err") && names.len() == 1 {
             return Self::mk(hir::ExprKind::Extern(names), Ty::Unknown, span);
+        }
+        let resolved = if first == "std" {
+            Some(names.clone())
+        } else {
+            self.imports.get(first).map(|base| {
+                let mut full = base.clone();
+                full.extend(names[1..].iter().cloned());
+                full
+            })
+        };
+        if let Some(full) = resolved {
+            if full[0] == "std" {
+                let joined = full.join("::");
+                if stdlib::function(&joined).is_none() {
+                    let what = if stdlib::is_type(&joined) || stdlib::is_module(&joined) {
+                        format!("`{}` is not a value", names.join("::"))
+                    } else {
+                        format!("cannot find `{joined}` in the standard library")
+                    };
+                    self.err(span.clone(), what);
+                    return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+                }
+            }
+            return Self::mk(hir::ExprKind::Extern(full), Ty::Unknown, span);
         }
         self.err(
             span.clone(),
@@ -773,6 +809,9 @@ impl Checker {
         }
 
         let callee = self.expr(callee, None);
+        if let Some(sig) = self.std_sig(&callee) {
+            return self.std_call(callee, sig, args, span);
+        }
         match callee.ty.clone() {
             Ty::Fn(params, ret) => {
                 if params.len() != args.len() {
@@ -824,6 +863,63 @@ impl Checker {
                 )
             }
         }
+    }
+
+    /// Typing rule for `callee` when it names a std function or a method of a std type.
+    fn std_sig(&mut self, callee: &hir::Expr) -> Option<Sig> {
+        match &callee.kind {
+            hir::ExprKind::Extern(path) if path.first().is_some_and(|p| p == "std") => {
+                stdlib::function(&path.join("::"))
+            }
+            hir::ExprKind::Field { base, name } => {
+                let Ty::Named(ty) = &base.ty else { return None };
+                match stdlib::method(ty, name) {
+                    Some(sig) => Some(sig),
+                    None => {
+                        if stdlib::is_std_type(ty) {
+                            self.err(
+                                callee.span.clone(),
+                                format!("no method `{name}` on type `{ty}`"),
+                            );
+                        }
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn std_call(
+        &mut self,
+        callee: hir::Expr,
+        sig: Sig,
+        args: &[ast::Expr],
+        span: &Span,
+    ) -> hir::Expr {
+        let mut checked: Vec<hir::Expr> = Vec::with_capacity(args.len());
+        let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
+        for a in args {
+            let hint = (sig.hint)(checked.len(), &tys);
+            let a = self.expr(a, hint.as_ref());
+            tys.push(a.ty.clone());
+            checked.push(a);
+        }
+        let ty = match (sig.check)(&tys) {
+            Ok(t) => t,
+            Err(msg) => {
+                self.err(span.clone(), msg);
+                Ty::Unknown
+            }
+        };
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args: checked,
+            },
+            ty,
+            span,
+        )
     }
 
     fn result_ctor(
