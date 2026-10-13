@@ -82,17 +82,20 @@ fn hover_shows_types() {
 #[test]
 fn definitions() {
     let s = snap();
+    // A call jumps to the function's name, a variable to its `let`, a struct literal to the struct.
     let def = s.definition(at(&s, "norm(origin)", 1)).unwrap();
-    assert_eq!(&s.text[def], "norm");
-    assert!(s.text[..s.text.find("fn norm").unwrap() + 5].len() >= 1);
-    let def = s.definition(at(&s, "norm(origin)", 5)).unwrap_or(0..0);
-    // `origin` -> its `let`
-    let def2 = s.definition(at(&s, "(origin)", 2)).unwrap();
-    assert_eq!(&s.text[def2.clone()], "origin");
-    assert!(def2.start < at(&s, "(origin)", 0));
-    let _ = def;
-    let pt = s.definition(at(&s, "Point { x: 0.0", 2)).unwrap();
-    assert_eq!(&s.text[pt], "Point");
+    assert_eq!(&s.text[def.clone()], "norm");
+    assert!(s.text[..def.start].ends_with("fn "));
+    let def = s.definition(at(&s, "(origin)", 2)).unwrap();
+    assert_eq!(&s.text[def.clone()], "origin");
+    assert!(def.end < at(&s, "(origin)", 0));
+    let def = s.definition(at(&s, "Point { x: 0.0", 2)).unwrap();
+    assert_eq!(&s.text[def.clone()], "Point");
+    assert!(s.text[..def.start].ends_with("struct "));
+    assert!(
+        s.definition(at(&s, "0.0;", 1)).is_none(),
+        "literals have no definition"
+    );
 }
 
 #[test]
