@@ -2422,6 +2422,7 @@ dependencies = [
  "novar_codegen",
  "novar_diagnostics",
  "novar_hir",
+ "novar_lsp",
  "novar_mlir",
  "novar_parser",
  "novar_runtime",

@@ -12,6 +12,7 @@ const USAGE: &str = "\
 usage:
   novar check <file.nv>
   novar run <file.nv> <function> [args...]
+  novar lsp                                                language server over stdio
   novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
@@ -52,6 +53,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             serve::run(check(file)?, &opts)
         }
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
+        ["lsp"] => novar_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
         ["build", file, rest @ ..] => native::build(file, rest),
         _ => Err(CliError::Usage),
