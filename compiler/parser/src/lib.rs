@@ -24,12 +24,21 @@ macro_rules! run {
 
 /// Lexes and parses `src`. Returns the program (when recovery allowed one) and all errors.
 pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
-    let (tokens, lex_errors) = novar_lexer::tokenize(src);
+    parse_at(src, 0)
+}
+
+/// Like [`parse`], with every span shifted by `base`. Lets several files share one offset space,
+/// so a single span identifies a place in a whole multi-file program.
+pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
+    let (mut tokens, lex_errors) = novar_lexer::tokenize(src);
+    for (_, span) in &mut tokens {
+        *span = span.start + base..span.end + base;
+    }
     let mut errors: Vec<Diagnostic> = lex_errors
         .into_iter()
-        .map(|span| Diagnostic::error(span, "invalid token"))
+        .map(|span| Diagnostic::error(span.start + base..span.end + base, "invalid token"))
         .collect();
-    let (program, parse_errors) = run!(program(), tokens, src.len());
+    let (program, parse_errors) = run!(program(), tokens, src.len() + base);
     errors.extend(parse_errors);
     errors.sort_by_key(|e| e.span.start);
     (program, errors)
@@ -972,6 +981,20 @@ mod tests {
         assert!(matches!(ok_expr("[1, 2]"), ExprKind::Array(v) if v.len() == 2));
         assert!(matches!(ok_expr("a[i + 1][0]"), ExprKind::Index { .. }));
         assert!(matches!(ok_expr("f(x)[2].y"), ExprKind::Field { .. }));
+    }
+
+    #[test]
+    fn spans_can_be_shifted_into_a_shared_offset_space() {
+        let src = "fn f() -> i32 { 1 }";
+        let (plain, _) = parse(src);
+        let (shifted, errs) = parse_at(src, 1000);
+        assert!(errs.is_empty());
+        let (Item::Fn(a), Item::Fn(b)) = (&plain.unwrap().items[0], &shifted.unwrap().items[0]) else { panic!() };
+        assert_eq!(b.name.span.start, a.name.span.start + 1000);
+        assert_eq!(b.span.end, a.span.end + 1000);
+        // Interpolations inside f-strings are shifted too.
+        let (p, _) = parse_at("fn g() -> String { f\"{a + 1}\" }", 500);
+        assert!(format!("{p:?}").contains("span: 5"), "expected shifted spans");
     }
 
     #[test]
