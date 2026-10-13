@@ -317,3 +317,54 @@ fn tables_and_tensors_travel_as_json() {
     assert_eq!(out["weighted"], json!([1.0, 3.0]));
     assert_eq!(out["rows"], body["rows"]);
 }
+
+#[test]
+fn int8_quantized_matmul_stays_close_to_float() {
+    let src = "fn mm(a: Tensor<f32, [4, 8]>, b: Tensor<f32, [8, 3]>) -> Tensor<f32, [4, 3]> { std::tensor::matmul(a, b) }";
+    let a: Vec<f32> = (0..32)
+        .map(|i| ((i * 37 % 19) as f32 - 9.0) / 4.0)
+        .collect();
+    let b: Vec<f32> = (0..24)
+        .map(|i| ((i * 53 % 23) as f32 - 11.0) / 7.0)
+        .collect();
+    let (ta, tb) = (f32s(&[4, 8], &a), f32s(&[8, 3], &b));
+
+    let exact = load(src);
+    let fp = tensor(exact.call("mm", vec![ta.clone(), tb.clone()]).unwrap()).to_f32_vec();
+
+    let quant = load(src);
+    quant.set_quantization(novar_hir::Quantization::Int8);
+    let q = tensor(quant.call("mm", vec![ta, tb]).unwrap()).to_f32_vec();
+
+    assert_ne!(fp, q, "quantization must actually change the arithmetic");
+    let scale = fp.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    let worst = fp
+        .iter()
+        .zip(&q)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0f32, f32::max);
+    assert!(
+        worst / scale < 0.03,
+        "relative error {} too large",
+        worst / scale
+    );
+}
+
+#[test]
+fn int8_quantization_handles_zeros_and_exact_cases() {
+    let src = "fn mm(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }";
+    let i = load(src);
+    i.set_quantization(novar_hir::Quantization::Int8);
+    let zero = f32s(&[2, 2], &[0.0; 4]);
+    assert_eq!(
+        tensor(i.call("mm", vec![zero.clone(), zero]).unwrap()).to_f32_vec(),
+        [0.0; 4]
+    );
+    // Values on the int8 grid multiply exactly: scales are max/127 and entries are multiples.
+    let a = f32s(&[2, 2], &[127.0, -127.0, 0.0, 127.0]);
+    let id = f32s(&[2, 2], &[1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(
+        tensor(i.call("mm", vec![a, id]).unwrap()).to_f32_vec(),
+        [127.0, -127.0, 0.0, 127.0]
+    );
+}

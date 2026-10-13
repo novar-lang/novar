@@ -68,6 +68,7 @@ pub struct Interp {
     live: std::sync::atomic::AtomicBool,
     /// Remaining evaluation steps; `u64::MAX` means unlimited.
     fuel: std::sync::atomic::AtomicU64,
+    quantization: std::sync::atomic::AtomicU8,
 }
 
 impl fmt::Debug for Interp {
@@ -107,6 +108,7 @@ impl Interp {
             out: Mutex::new(Box::new(std::io::stdout())),
             live: std::sync::atomic::AtomicBool::new(live),
             fuel: std::sync::atomic::AtomicU64::new(u64::MAX),
+            quantization: std::sync::atomic::AtomicU8::new(0),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -173,6 +175,23 @@ impl Interp {
     /// Converts request-style JSON into a value of static type `ty`.
     pub fn value_from_json(&self, ty: &Ty, json: &Json) -> Result<Value, String> {
         from_json(ty, json, &self.structs)
+    }
+
+    /// Runs `f32` matrix multiplications at the given precision (see [`Quantization`]).
+    pub fn set_quantization(&self, q: novar_hir::Quantization) {
+        let v = match q {
+            novar_hir::Quantization::None => 0,
+            novar_hir::Quantization::Int8 => 1,
+        };
+        self.quantization
+            .store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn quantization(&self) -> novar_hir::Quantization {
+        match self.quantization.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => novar_hir::Quantization::Int8,
+            _ => novar_hir::Quantization::None,
+        }
     }
 
     pub fn is_live(&self) -> bool {

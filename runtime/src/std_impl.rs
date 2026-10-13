@@ -71,7 +71,7 @@ fn status(code: u16, args: &[Value]) -> Res {
 
 pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, result: &Ty) -> Res {
     if path.starts_with("std::tensor::") {
-        return crate::tensor::call(path, &args, result);
+        return crate::tensor::call(path, &args, result, interp.quantization());
     }
     if path.starts_with("std::table::") {
         return crate::table::call(interp, path, &args, result);

@@ -204,7 +204,12 @@ fn map(a: &TensorVal, f: impl Fn(f64) -> f64) -> Value {
     )
 }
 
-pub(crate) fn call(path: &str, args: &[Value], result: &Ty) -> Res {
+pub(crate) fn call(
+    path: &str,
+    args: &[Value],
+    result: &Ty,
+    quantization: novar_hir::Quantization,
+) -> Res {
     let name = path.rsplit("::").next().unwrap_or(path);
     match name {
         "zeros" => {
@@ -375,6 +380,15 @@ pub(crate) fn call(path: &str, args: &[Value], result: &Ty) -> Res {
             if k != k2 {
                 return err(format!("`matmul` inner dimensions differ: {k} and {k2}"));
             }
+            if quantization == novar_hir::Quantization::Int8
+                && matches!(a.dtype(), DataType::Float32)
+                && matches!(b.dtype(), DataType::Float32)
+            {
+                let (x, y) = (a.to_f32_vec(), b.to_f32_vec());
+                let out = qmatmul_f32(&x, &y, m, k, n);
+                let shape = if vector { vec![m] } else { vec![m, n] };
+                return Ok(Value::Tensor(Arc::new(TensorVal::from_f32(shape, out))));
+            }
             let (x, y) = (a.to_f64_vec(), b.to_f64_vec());
             let mut out = vec![0.0; m * n];
             for i in 0..m {
@@ -405,4 +419,36 @@ pub(crate) fn call(path: &str, args: &[Value], result: &Ty) -> Res {
             "std function `std::tensor::{other}` is not implemented by the runtime"
         )),
     }
+}
+
+/// `max |x| / 127` as an `f32`, or 1 for an all-zero tensor.
+fn int8_scale(x: &[f32]) -> f32 {
+    let amax = x
+        .iter()
+        .fold(0.0f32, |m, v| if v.abs() > m { v.abs() } else { m });
+    if amax == 0.0 { 1.0 } else { amax / 127.0 }
+}
+
+/// `round(x / scale)` clamped to the `i8` range (ties away from zero).
+fn quantize_i8(x: f32, scale: f32) -> i8 {
+    (x / scale).round().clamp(-127.0, 127.0) as i8
+}
+
+/// Symmetric per-tensor int8 matrix product: `[m, k] x [k, n]` with `i32` accumulation.
+pub(crate) fn qmatmul_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let (sa, sb) = (int8_scale(a), int8_scale(b));
+    let qa: Vec<i8> = a.iter().map(|v| quantize_i8(*v, sa)).collect();
+    let qb: Vec<i8> = b.iter().map(|v| quantize_i8(*v, sb)).collect();
+    let scale = sa * sb;
+    let mut out = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut acc: i32 = 0;
+            for p in 0..k {
+                acc += i32::from(qa[i * k + p]) * i32::from(qb[p * n + j]);
+            }
+            out[i * n + j] = acc as f32 * scale;
+        }
+    }
+    out
 }
