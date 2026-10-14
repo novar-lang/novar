@@ -692,6 +692,31 @@ fn read_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     expect_table(expected, "a table reader")
 }
 
+fn env_get(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Option(Box::new(s())))
+}
+
+fn fs_read(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Result(Box::new(s()), Box::new(s())))
+}
+
+fn fs_write(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 0, &s())?;
+    want(args, 1, &s())?;
+    Ok(Ty::Result(Box::new(Ty::Unit), Box::new(s())))
+}
+
+fn fs_exists(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::bool())
+}
+
 fn json_stringify(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     Ok(s())
@@ -905,6 +930,10 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         sig_expected(read_check, read_result),
     ),
     ("std::table::sql", sig_expected(sql_check, sql_result)),
+    ("std::env::get", sig(env_get)),
+    ("std::fs::read", sig(fs_read)),
+    ("std::fs::write", sig(fs_write)),
+    ("std::fs::exists", sig(fs_exists)),
     ("std::json::stringify", sig(json_stringify)),
     (
         "std::json::parse",
