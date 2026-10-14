@@ -71,9 +71,9 @@ jobs:
           ref: ${{ needs.plan.outputs.tag }}
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      # Full build: tables, SQL, CSV / Parquet, real services (about 50 MB).
+      # Full build: SQL (DataFusion), Parquet and real services (about 50 MB).
       - run: cargo build --profile dist --locked -p novar_cli -p novar_pkg
-      # Lite build: no Arrow / DataFusion, so no tables or SQL; real services stay (about 10 MB).
+      # Lite build: no DataFusion or Parquet, so no SQL; tables, CSV and real services stay (about 10 MB).
       - run: >
           cargo build --release --locked -p novar_cli --no-default-features --features live
           --target-dir target/lite
@@ -190,16 +190,21 @@ jobs:
           cat reply.json || true
           [ -n "$ok" ] || { cat serve.log; exit 1; }
           grep -q '"answer"' reply.json
-      - name: Tables work in the full build and report a clear error in the lite one
+      - name: Tables and CSV work everywhere; SQL and Parquet only in the full build
         run: |
           cat > tables.nv <<'NV'
           struct Row { id: i64, score: f32 }
-          fn count(t: Table<Row>) -> u64 { t.len() }
-          fn load() -> u64 { let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]); t.len() }
+          fn count() -> u64 { let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]); t.len() }
+          fn query() -> u64 {
+              let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]);
+              let u: Table<Row> = t.sql("SELECT * FROM t");
+              u.len()
+          }
           NV
+          [ "$(novar run tables.nv count)" = 1 ]
           if [ "${{ matrix.variant }}" = full ]; then
-            [ "$(novar run tables.nv load)" = 1 ]
+            [ "$(novar run tables.nv query)" = 1 ]
           else
-            ! novar run tables.nv load 2> err.txt
+            ! novar run tables.nv query 2> err.txt
             grep -q "not available in this build" err.txt
           fi

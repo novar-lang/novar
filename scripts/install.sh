@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs `novar` and `nvpm` from a release archive or, failing that, builds them from source.
 # Usage: scripts/install.sh [version]     (default: the latest release)
-#        NOVAR_LITE=1 scripts/install.sh   a ~10 MB build without tables / SQL (CSV, Parquet)
+#        NOVAR_LITE=1 scripts/install.sh   a ~10 MB build without SQL and Parquet
 set -eu
 
 repo="ntsation/novar"
