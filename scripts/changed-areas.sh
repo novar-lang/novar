@@ -3,6 +3,8 @@
 #   core=true|false     anything that is not documentation, release plumbing, the extension or the Python package
 #   python=true|false   core, or the Python package
 #   vscode=true|false   core, or the VS Code extension
+#   docker=true|false   what the container build exercises: the generated Dockerfile, the server, the
+#                       dependencies, the toolchain and the example it serves
 # CI uses it to skip pipelines a change cannot affect: a documentation-only change runs none of them.
 # When the change set cannot be worked out, everything runs.
 # Usage (in CI): scripts/changed-areas.sh >> "$GITHUB_OUTPUT"
@@ -18,9 +20,10 @@ else
   esac
 fi
 
-core=false python=false vscode=false
+core=false python=false vscode=false docker=false
 if [ "$files" = __unknown__ ] || [ -z "$files" ]; then
   core=true
+  docker=true
 else
   for f in $files; do
     case "$f" in
@@ -32,6 +35,8 @@ else
       scripts/set-version.sh | scripts/next-version.sh) ;;
       python/*) python=true ;;
       editors/vscode/*) vscode=true ;;
+      cli/src/bundle.rs | cli/Cargo.toml | server/* | Cargo.toml | Cargo.lock | rust-toolchain.toml | examples/rag-service.tvx | .github/workflows/integration.yml | scripts/changed-areas.sh)
+        core=true docker=true ;;
       *) core=true ;;
     esac
   done
@@ -40,3 +45,4 @@ fi
 echo "core=$core"
 echo "python=$python"
 echo "vscode=$vscode"
+echo "docker=$docker"
