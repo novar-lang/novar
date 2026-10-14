@@ -131,3 +131,18 @@ novar lint file.nv           # unused variables, needless `mut`, unused private 
 ```
 
 The language server formats documents too, so VS Code can format on save.
+
+## Strings and vectors
+
+```novar
+fn demo(s: String) -> u64 {
+    let mut words = s.split(" ");           // Vec<String>
+    words.push("extra");
+    if s.contains("novar") && !s.starts_with("//") { words.len() } else { 0 }
+}
+```
+
+String: `len`, `is_empty`, `trim`, `to_lowercase`, `to_uppercase`, `contains`, `starts_with`,
+`ends_with`, `replace`, `split`. Vec: `len`, `is_empty`, `push`, `contains`. A method that does not
+exist is a compile error with a "did you mean" hint. These methods run in the interpreter; the
+native backend still only has `len` and `is_empty`.

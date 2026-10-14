@@ -74,6 +74,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 
 ## Known gaps
 
+* The full `novar` is about 51 MB because of Arrow and DataFusion; `novar-lite` (about 10 MB) leaves them out, so tables, CSV, Parquet and SQL report an error there.
 * The native backend supports a subset (see the README); tables, SQL, closures and most of `std` are interpreter-only.
 * Strings, vectors and tensors allocated by native code are never freed.
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `novar build`).

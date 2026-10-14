@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.3
+
+### Size
+* Two builds per system: the full `novar` (about 51 MB, down from 58 with full LTO) and a new
+  `novar-lite` (about 10 MB) without tables and SQL. `NOVAR_LITE=1` makes the install scripts
+  pick it. Build it yourself with `--no-default-features --features live`.
+
+### Language and errors
+* `String`: `contains`, `starts_with`, `ends_with`, `replace`, `split`. `Vec`: `push`, `contains`.
+* A method that does not exist on a built-in type is a compile error (it used to fail only when
+  run), and misspelled names, types, fields and methods get a "did you mean ...?" note.
+* A missing `;` is reported right after the previous token instead of listing every token that
+  could follow.
+
+### Dependencies
+* `wgpu` 30 (tested on a real GPU), `lsp-server` 0.10, `vscode-languageclient` 10 and TypeScript 7
+  (the extension now needs VS Code 1.91), newer GitHub Actions and maturin.
+
+### Fixes
+* The Dockerfile written by `build --serve` did not create `/out`; it builds now (CI builds it).
+
+
 ## 0.0.2
 
 ### Language
