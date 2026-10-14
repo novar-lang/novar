@@ -1,0 +1,19 @@
+[package]
+name = "novar_lint"
+description = "Novar: lints for unused code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+novar_diagnostics = { version = "0.0.1", path = "../../compiler/diagnostics" }
+novar_hir = { version = "0.0.1", path = "../../compiler/semantic" }
+
+[dev-dependencies]
+novar_parser = { version = "0.0.1", path = "../../compiler/parser" }
