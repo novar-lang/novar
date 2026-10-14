@@ -129,6 +129,8 @@ pub enum Token<'src> {
     Colon,
     #[token("@")]
     At,
+    #[token("?")]
+    Question,
 
     // Delimiters
     #[token("(")]
@@ -199,6 +201,7 @@ impl std::fmt::Display for Token<'_> {
             Semi => ";",
             Colon => ":",
             At => "@",
+            Question => "?",
             LParen => "(",
             RParen => ")",
             LBrace => "{",

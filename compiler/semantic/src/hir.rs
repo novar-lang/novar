@@ -146,6 +146,10 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Break,
     Continue,
+    /// `expr?` (see the AST).
+    Try(Box<Expr>),
+    /// `(a, b)`
+    Tuple(Vec<Expr>),
     /// `Shape::Circle(1.0)`, `Shape::Empty`
     EnumCtor {
         enum_name: String,
@@ -191,6 +195,8 @@ pub enum Pat {
     Wild,
     Bind(Local),
     Lit(Lit),
+    /// `(a, b)`
+    Tuple(Vec<Pat>),
     /// A variant of a user enum (`enum_name` is `Some`) or `Ok` / `Err` of a `Result` (`None`).
     Variant {
         enum_name: Option<String>,
