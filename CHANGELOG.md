@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.0.5
+
+The project is now called **Telvax** (it was Novar). Everything was renamed: the binaries are `telvax`
+and `tvpm`, source files end in `.tvx`, environment variables start with `TELVAX_`, the manifest is
+`telvax.toml`, and the repository is `telvax/telvax`. Releases before this one keep the old names.
+
+### Language
+* **Errors and control flow:** `expr?` passes the error of a `Result` (or the `None` of an `Option`) up
+  to the caller, and `if let` / `while let` match a single pattern.
+* **Tuples:** the type `(A, B)`, values, `.0` / `.1`, patterns, and destructuring in `let`, `for` and
+  closure parameters.
+* **Iterator methods on `Vec`:** `map`, `filter`, `any`, `all`, `find`, `enumerate`, `zip`, `sum`, `min`,
+  `max`, `fold`, `for_each`, `skip`, `join`; `Map::entries`.
+* **`impl` blocks, traits and generics:** methods on structs and enums, `trait` with
+  `impl Trait for Type`, trait-typed values dispatched at run time, and generic functions, structs,
+  enums and impls with trait bounds.
+* The new syntax runs in the interpreter; the native backend does not compile it yet.
+
+### Docs and examples
+* A use-cases guide (`docs/guide/use-cases.md`) and four new runnable examples: word count, a
+  shape-checked network, an HTTP service that needs no model, and error handling with `?`.
+
+### Fixes and security
+* `rustls` 0.23.46 (RUSTSEC-2026-0349).
+* The table tests no longer share a scratch file, and the bundle test waits for the server to answer.
+
+### Releases
+* Every pull request merged into `main` is now released automatically with the next patch version,
+  so no file needs editing. The VS Code extension is packaged and attached to each release, and
+  published to the Marketplace and Open VSX when their tokens are configured.
+
 ## 0.0.4
 
 ### Language

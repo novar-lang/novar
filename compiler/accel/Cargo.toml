@@ -17,8 +17,8 @@ llvm = ["dep:inkwell"]
 
 [dependencies]
 inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-prefer-dynamic", "target-nvptx"], optional = true }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-telvax_hir = { version = "0.0.4", path = "../semantic" }
+telvax_diagnostics = { path = "../diagnostics" }
+telvax_hir = { path = "../semantic" }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../parser" }
+telvax_parser = { path = "../parser" }

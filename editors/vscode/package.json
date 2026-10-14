@@ -2,7 +2,7 @@
   "name": "telvax",
   "displayName": "Telvax",
   "description": "Language support for Telvax: syntax highlighting, diagnostics, hover, completion, go to definition and inferred-type hints.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "telvax",
   "license": "MIT OR Apache-2.0",
   "repository": {

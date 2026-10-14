@@ -1,12 +1,13 @@
 name: Release
 
-# A push to main that raises `version` in the root Cargo.toml tags the commit `v<version>` and
-# publishes a release with binaries. Pushing a `v*` tag by hand (or running the workflow) does the
-# same for that tag.
+# Every push to main (that is, every merged pull request) is released: the commit is tagged with the
+# next patch version after the latest tag and published with binaries. To choose a version yourself,
+# raise `version` in the root Cargo.toml above the latest tag (for 0.1.0, say); the next merge then
+# releases exactly that. Put `[skip release]` in the pull request title to merge without releasing.
+# Pushing a `v*` tag by hand (or running the workflow) releases that tag.
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -28,24 +29,45 @@ jobs:
         with:
           fetch-depth: 0
       - id: tag
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
-          [ -n "$version" ] || { echo "no workspace version found" >&2; exit 1; }
-          tag="v$version"
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            tag="${GITHUB_REF_NAME}"
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "publish=true" >> "$GITHUB_OUTPUT"
-          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "$tag already exists, nothing to release"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$tag" -m "Telvax $version"
-            git push origin "$tag"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "this commit is already tagged, nothing to release"
+            echo "tag=none" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$HEAD_MESSAGE" in
+            *"[skip release]"*)
+              echo "tag=none" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
+          declared="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
+          [ -n "$declared" ] || { echo "no workspace version found" >&2; exit 1; }
+          latest="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          latest="${latest#v}"
+          if [ -z "$latest" ]; then
+            version="$declared"
+          elif [ "$(printf '%s\n%s\n' "$latest" "$declared" | sort -V | tail -n 1)" = "$declared" ] && [ "$declared" != "$latest" ]; then
+            version="$declared"
+          else
+            patch="${latest##*.}"
+            version="${latest%.*}.$((patch + 1))"
+          fi
+          tag="v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Telvax $version"
+          git push origin "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
@@ -71,6 +93,10 @@ jobs:
           ref: ${{ needs.plan.outputs.tag }}
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
+      - name: Build with the release version
+        run: scripts/set-version.sh "${TAG#v}"
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
       # Full build: SQL (DataFusion), Parquet and real services (about 50 MB).
       - run: cargo build --profile dist --locked -p telvax_cli -p telvax_pkg
       # Lite build: no DataFusion or Parquet, so no SQL; tables, CSV and real services stay (about 10 MB).
@@ -112,17 +138,19 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Release notes from the changelog
+      - name: Release notes
+        # The CHANGELOG section for this version, when there is one; GitHub adds the list of merged
+        # pull requests below it.
         run: |
           version="${{ needs.plan.outputs.tag }}"
           version="${version#v}"
           awk -v v="$version" '$0 ~ "^## "v"( |$)" {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "Release $version" > notes.md
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.plan.outputs.tag }}
           files: dist/*
           body_path: notes.md
+          generate_release_notes: true
           prerelease: true
 
   # Installs the release that was just published with the install scripts, on every system we ship

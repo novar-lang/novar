@@ -12,4 +12,4 @@ publish = false
 workspace = true
 
 [dependencies]
-telvax_lexer = { version = "0.0.4", path = "../../compiler/lexer" }
+telvax_lexer = { path = "../../compiler/lexer" }

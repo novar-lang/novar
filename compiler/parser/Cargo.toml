@@ -13,6 +13,6 @@ workspace = true
 
 [dependencies]
 chumsky = "0.13.0"
-telvax_ast = { version = "0.0.4", path = "../ast" }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-telvax_lexer = { version = "0.0.4", path = "../lexer" }
+telvax_ast = { path = "../ast" }
+telvax_diagnostics = { path = "../diagnostics" }
+telvax_lexer = { path = "../lexer" }

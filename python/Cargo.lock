@@ -2010,70 +2010,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "telvax_ast"
-version = "0.0.4"
-
-[[package]]
-name = "telvax_diagnostics"
-version = "0.0.4"
-dependencies = [
- "ariadne",
-]
-
-[[package]]
-name = "telvax_hir"
-version = "0.0.4"
-dependencies = [
- "telvax_ast",
- "telvax_diagnostics",
-]
-
-[[package]]
-name = "telvax_lexer"
-version = "0.0.4"
-dependencies = [
- "logos",
-]
-
-[[package]]
-name = "telvax_parser"
-version = "0.0.4"
-dependencies = [
- "chumsky",
- "telvax_ast",
- "telvax_diagnostics",
- "telvax_lexer",
-]
-
-[[package]]
-name = "telvax_py"
-version = "0.0.4"
-dependencies = [
- "arrow",
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_parser",
- "telvax_runtime",
- "pyo3",
- "serde_json",
-]
-
-[[package]]
-name = "telvax_runtime"
-version = "0.0.4"
-dependencies = [
- "arrow",
- "datafusion",
- "telvax_hir",
- "parquet",
- "postgres",
- "serde_json",
- "stacker",
- "tokio",
- "ureq",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2895,6 +2831,70 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
+name = "telvax_ast"
+version = "0.0.5"
+
+[[package]]
+name = "telvax_diagnostics"
+version = "0.0.5"
+dependencies = [
+ "ariadne",
+]
+
+[[package]]
+name = "telvax_hir"
+version = "0.0.5"
+dependencies = [
+ "telvax_ast",
+ "telvax_diagnostics",
+]
+
+[[package]]
+name = "telvax_lexer"
+version = "0.0.5"
+dependencies = [
+ "logos",
+]
+
+[[package]]
+name = "telvax_parser"
+version = "0.0.5"
+dependencies = [
+ "chumsky",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_lexer",
+]
+
+[[package]]
+name = "telvax_py"
+version = "0.0.4"
+dependencies = [
+ "arrow",
+ "pyo3",
+ "serde_json",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_runtime"
+version = "0.0.5"
+dependencies = [
+ "arrow",
+ "datafusion",
+ "parquet",
+ "postgres",
+ "serde_json",
+ "stacker",
+ "telvax_hir",
+ "tokio",
+ "ureq",
+]
 
 [[package]]
 name = "tempfile"

@@ -12,8 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
-telvax_ast = { version = "0.0.4", path = "../ast" }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_ast = { path = "../ast" }
+telvax_diagnostics = { path = "../diagnostics" }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../parser" }
+telvax_parser = { path = "../parser" }

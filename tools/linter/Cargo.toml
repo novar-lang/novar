@@ -12,8 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
-telvax_diagnostics = { version = "0.0.4", path = "../../compiler/diagnostics" }
-telvax_hir = { version = "0.0.4", path = "../../compiler/semantic" }
+telvax_diagnostics = { path = "../../compiler/diagnostics" }
+telvax_hir = { path = "../../compiler/semantic" }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../../compiler/parser" }
+telvax_parser = { path = "../../compiler/parser" }

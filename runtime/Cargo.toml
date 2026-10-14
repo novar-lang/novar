@@ -25,7 +25,7 @@ arrow = { version = "59", default-features = false, features = ["csv"] }
 datafusion = { version = "55.2.0", default-features = false, features = ["parquet", "sql", "math_expressions", "string_expressions", "datetime_expressions"], optional = true }
 parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
-telvax_hir = { version = "0.0.4", path = "../compiler/semantic" }
+telvax_hir = { path = "../compiler/semantic" }
 serde_json = "1.0.154"
 ureq = { version = "3", features = ["json"], optional = true }
 postgres = { version = "0.19", optional = true }
@@ -35,4 +35,4 @@ pollster = { version = "1.0.1", optional = true }
 bytemuck = { version = "1.25.2", optional = true }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../compiler/parser" }
+telvax_parser = { path = "../compiler/parser" }
