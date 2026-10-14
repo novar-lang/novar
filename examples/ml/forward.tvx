@@ -1,6 +1,6 @@
 // A two-layer network. The tensor shapes are part of the types: change a dimension below
-// and `novar check` rejects the program before anything runs.
-// Run from the repository root: novar run examples/ml/forward.nv main
+// and `telvax check` rejects the program before anything runs.
+// Run from the repository root: telvax run examples/ml/forward.tvx main
 
 fn layer1(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
     x.matmul(w).relu()

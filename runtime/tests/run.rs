@@ -1,11 +1,11 @@
-use novar_runtime::{Interp, Value, embed_text};
 use serde_json::json;
 use std::sync::Arc;
+use telvax_runtime::{Interp, Value, embed_text};
 
 fn load(src: &str) -> Interp {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "parse: {perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "check: {:?}",
@@ -216,13 +216,13 @@ fn embeddings_are_deterministic_and_similarity_aware() {
 
 #[test]
 fn rag_example_end_to_end() {
-    let src = include_str!("../../examples/rag-service.nv");
+    let src = include_str!("../../examples/rag-service.tvx");
     let i = load(src);
     let db = i.db_for("postgresql://localhost:5432/vectors").unwrap();
     for (id, text) in [
         (
             "t1",
-            "Tensors in Novar carry a static shape checked at compile time",
+            "Tensors in Telvax carry a static shape checked at compile time",
         ),
         (
             "p1",
@@ -243,7 +243,7 @@ fn rag_example_end_to_end() {
     let ctx = out["retrieved_context"].as_array().unwrap();
     assert_eq!(ctx.len(), 2);
     assert!(
-        ctx[0].as_str().unwrap().starts_with("Tensors in Novar"),
+        ctx[0].as_str().unwrap().starts_with("Tensors in Telvax"),
         "{ctx:?}"
     );
     assert_eq!(out["query"], "how are tensor shapes checked");
@@ -520,7 +520,7 @@ fn dist_map_spreads_work_over_threads_and_keeps_order() {
 fn dist_map_can_use_a_custom_executor() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Counting(AtomicUsize);
-    impl novar_runtime::Executor for Counting {
+    impl telvax_runtime::Executor for Counting {
         fn map(
             &self,
             function: &str,

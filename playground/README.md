@@ -1,4 +1,4 @@
-# Novar playground
+# Telvax playground
 
 The type checker and interpreter, compiled to WebAssembly, behind a small web page: edit, see
 diagnostics as you type, hover for inferred types, and run functions with JSON arguments. Nothing

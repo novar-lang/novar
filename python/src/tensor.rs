@@ -1,4 +1,4 @@
-//! `novar.Tensor`: an Arrow-backed tensor that exchanges memory with the Python ecosystem.
+//! `telvax.Tensor`: an Arrow-backed tensor that exchanges memory with the Python ecosystem.
 
 use std::panic::AssertUnwindSafe;
 use std::ptr::NonNull;
@@ -11,14 +11,14 @@ use arrow::array::{
 use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::DataType;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema, from_ffi, to_ffi};
-use novar_runtime::TensorVal;
+use telvax_runtime::TensorVal;
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
 
-use crate::NovarError;
+use crate::TelvaxError;
 
 /// A dense n-dimensional array (row-major) backed by an Arrow buffer.
-#[pyclass(module = "novar", frozen)]
+#[pyclass(module = "telvax", frozen)]
 pub struct Tensor {
     pub inner: Arc<TensorVal>,
 }
@@ -35,7 +35,7 @@ pub fn typestr(dt: &DataType) -> PyResult<&'static str> {
         DataType::UInt16 => "<u2",
         DataType::UInt32 => "<u4",
         DataType::UInt64 => "<u8",
-        other => return Err(NovarError::new_err(format!("tensors of {other} cannot be exposed as a buffer"))),
+        other => return Err(TelvaxError::new_err(format!("tensors of {other} cannot be exposed as a buffer"))),
     })
 }
 
@@ -58,8 +58,8 @@ fn dtype_name(dt: &DataType) -> String {
 /// Address of the first element, honouring the array's offset into its buffer.
 fn data_pointer(array: &ArrayRef) -> PyResult<usize> {
     let data = array.to_data();
-    let width = data.data_type().primitive_width().ok_or_else(|| NovarError::new_err("not a numeric tensor"))?;
-    let buffer = data.buffers().first().ok_or_else(|| NovarError::new_err("tensor has no data buffer"))?;
+    let width = data.data_type().primitive_width().ok_or_else(|| TelvaxError::new_err("not a numeric tensor"))?;
+    let buffer = data.buffers().first().ok_or_else(|| TelvaxError::new_err("tensor has no data buffer"))?;
     Ok(buffer.as_ptr() as usize + data.offset() * width)
 }
 
@@ -68,7 +68,7 @@ pub fn export_capsules<'py>(
     py: Python<'py>,
     array: &ArrayRef,
 ) -> PyResult<(Bound<'py, PyCapsule>, Bound<'py, PyCapsule>)> {
-    let (ffi_array, ffi_schema) = to_ffi(&array.to_data()).map_err(|e| NovarError::new_err(e.to_string()))?;
+    let (ffi_array, ffi_schema) = to_ffi(&array.to_data()).map_err(|e| TelvaxError::new_err(e.to_string()))?;
     let schema = PyCapsule::new_with_value_and_destructor(py, ffi_schema, c"arrow_schema", |s, _| drop(s))?;
     let array = PyCapsule::new_with_value_and_destructor(py, ffi_array, c"arrow_array", |a, _| drop(a))?;
     Ok((schema, array))
@@ -86,7 +86,7 @@ pub fn import_capsules(obj: &Bound<'_, PyAny>) -> PyResult<ArrayRef> {
         let array = std::ptr::replace(array_ptr, FFI_ArrowArray::empty());
         from_ffi(array, &*schema_ptr)
     }
-    .map_err(|e| NovarError::new_err(format!("cannot import the Arrow array: {e}")))?;
+    .map_err(|e| TelvaxError::new_err(format!("cannot import the Arrow array: {e}")))?;
     Ok(make_array(data))
 }
 
@@ -104,9 +104,9 @@ macro_rules! typed_from_buffer {
 /// the tensor; writes through either side are visible to both.
 fn from_array_interface(obj: &Bound<'_, PyAny>, shape: Option<Vec<usize>>) -> PyResult<Tensor> {
     let iface = obj.getattr("__array_interface__")?;
-    let dict = iface.cast::<PyDict>().map_err(|_| NovarError::new_err("__array_interface__ is not a dict"))?;
+    let dict = iface.cast::<PyDict>().map_err(|_| TelvaxError::new_err("__array_interface__ is not a dict"))?;
     let get = |k: &str| -> PyResult<Bound<'_, PyAny>> {
-        dict.get_item(k)?.ok_or_else(|| NovarError::new_err(format!("__array_interface__ has no `{k}`")))
+        dict.get_item(k)?.ok_or_else(|| TelvaxError::new_err(format!("__array_interface__ has no `{k}`")))
     };
     let typestr: String = get("typestr")?.extract()?;
     let array_shape = shape_of(&get("shape")?)?;
@@ -127,30 +127,30 @@ fn from_array_interface(obj: &Bound<'_, PyAny>, shape: Option<Vec<usize>>) -> Py
         }
     };
     if !contiguous {
-        return Err(NovarError::new_err("only C-contiguous arrays can be shared; call `.copy()` or `np.ascontiguousarray` first"));
+        return Err(TelvaxError::new_err("only C-contiguous arrays can be shared; call `.copy()` or `np.ascontiguousarray` first"));
     }
     let (ptr, _readonly): (usize, bool) = get("data")?.extract()?;
     let n: usize = array_shape.iter().product();
-    let width: usize = typestr[2..].parse().map_err(|_| NovarError::new_err(format!("bad typestr `{typestr}`")))?;
+    let width: usize = typestr[2..].parse().map_err(|_| TelvaxError::new_err(format!("bad typestr `{typestr}`")))?;
     let target_shape = match shape {
         Some(s) => {
             if s.iter().product::<usize>() != n {
-                return Err(NovarError::new_err(format!("shape {s:?} does not match the {n} elements")));
+                return Err(TelvaxError::new_err(format!("shape {s:?} does not match the {n} elements")));
             }
             s
         }
         None => array_shape,
     };
     if !typestr.starts_with(['<', '|']) {
-        return Err(NovarError::new_err("big-endian arrays are not supported"));
+        return Err(TelvaxError::new_err("big-endian arrays are not supported"));
     }
 
     let array: ArrayRef = if n == 0 {
         Arc::new(Float32Array::from(Vec::<f32>::new()))
     } else {
-        let nn = NonNull::new(ptr as *mut u8).ok_or_else(|| NovarError::new_err("null data pointer"))?;
+        let nn = NonNull::new(ptr as *mut u8).ok_or_else(|| TelvaxError::new_err("null data pointer"))?;
         if ptr % width.max(1) != 0 {
-            return Err(NovarError::new_err("the array is not aligned for its element type"));
+            return Err(TelvaxError::new_err("the array is not aligned for its element type"));
         }
         // SAFETY: `obj` owns the memory for as long as the buffer's owner (a strong reference to
         // `obj`) lives, the region is `n * width` bytes by the interface contract, and it is aligned.
@@ -167,7 +167,7 @@ fn from_array_interface(obj: &Bound<'_, PyAny>, shape: Option<Vec<usize>>) -> Py
             "<u2" => typed_from_buffer!(UInt16Array, u16, buffer, n),
             "<u4" => typed_from_buffer!(UInt32Array, u32, buffer, n),
             "<u8" => typed_from_buffer!(UInt64Array, u64, buffer, n),
-            other => return Err(NovarError::new_err(format!("unsupported array type `{other}`"))),
+            other => return Err(TelvaxError::new_err(format!("unsupported array type `{other}`"))),
         }
     };
     Ok(Tensor { inner: Arc::new(TensorVal::from_array(target_shape, array).map_err(crate::runtime_err)?) })
@@ -178,7 +178,7 @@ fn nested_to_flat(obj: &Bound<'_, PyAny>, depth: usize, shape: &mut Vec<usize>, 
         if shape.len() == depth {
             shape.push(list.len());
         } else if shape[depth] != list.len() {
-            return Err(NovarError::new_err("nested lists must be rectangular"));
+            return Err(TelvaxError::new_err("nested lists must be rectangular"));
         }
         for item in list.iter() {
             nested_to_flat(&item, depth + 1, shape, out)?;
@@ -189,14 +189,14 @@ fn nested_to_flat(obj: &Bound<'_, PyAny>, depth: usize, shape: &mut Vec<usize>, 
         if shape.len() == depth {
             shape.push(tuple.len());
         } else if shape[depth] != tuple.len() {
-            return Err(NovarError::new_err("nested sequences must be rectangular"));
+            return Err(TelvaxError::new_err("nested sequences must be rectangular"));
         }
         for item in tuple.iter() {
             nested_to_flat(&item, depth + 1, shape, out)?;
         }
         return Ok(());
     }
-    out.push(obj.extract::<f64>().map_err(|_| NovarError::new_err("tensor elements must be numbers"))?);
+    out.push(obj.extract::<f64>().map_err(|_| TelvaxError::new_err("tensor elements must be numbers"))?);
     Ok(())
 }
 
@@ -280,7 +280,7 @@ impl Tensor {
     }
 
     fn __repr__(&self) -> String {
-        format!("<novar.Tensor shape={:?} dtype={}>", self.inner.shape, dtype_name(self.inner.dtype()))
+        format!("<telvax.Tensor shape={:?} dtype={}>", self.inner.shape, dtype_name(self.inner.dtype()))
     }
 }
 

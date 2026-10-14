@@ -1,13 +1,13 @@
-//! Parser for Novar: token stream -> AST.
+//! Parser for Telvax: token stream -> AST.
 
 use chumsky::{
     input::{Stream, ValueInput},
     prelude::*,
 };
-use novar_ast::*;
-use novar_ast::{Span, Spanned};
-use novar_diagnostics::Diagnostic;
-use novar_lexer::Token;
+use telvax_ast::*;
+use telvax_ast::{Span, Spanned};
+use telvax_diagnostics::Diagnostic;
+use telvax_lexer::Token;
 
 macro_rules! run {
     ($parser:expr, $tokens:expr, $eoi:expr, $src:expr, $base:expr) => {{
@@ -58,7 +58,7 @@ pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
 /// Like [`parse`], with every span shifted by `base`. Lets several files share one offset space,
 /// so a single span identifies a place in a whole multi-file program.
 pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
-    let (mut tokens, lex_errors) = novar_lexer::tokenize(src);
+    let (mut tokens, lex_errors) = telvax_lexer::tokenize(src);
     for (_, span) in &mut tokens {
         *span = span.start + base..span.end + base;
     }
@@ -78,7 +78,7 @@ pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Diagnostic>) {
 }
 
 fn parse_expr_at(src: &str, offset: usize) -> (Option<Expr>, Vec<Diagnostic>) {
-    let (mut tokens, lex_errors) = novar_lexer::tokenize(src);
+    let (mut tokens, lex_errors) = telvax_lexer::tokenize(src);
     for (_, span) in &mut tokens {
         *span = span.start + offset..span.end + offset;
     }
@@ -1615,7 +1615,7 @@ mod tests {
 
     #[test]
     fn rag_example_parses() {
-        let src = include_str!("../../../examples/rag-service.nv");
+        let src = include_str!("../../../examples/rag-service.tvx");
         let (p, errs) = parse(src);
         assert!(errs.is_empty(), "{errs:#?}");
         let p = p.unwrap();

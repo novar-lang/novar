@@ -1,6 +1,6 @@
 [package]
-name = "novar_pkg"
-description = "Novar: nvpm, the package manager (manifests, lockfiles, version resolution, registries)"
+name = "telvax_pkg"
+description = "Telvax: tvpm, the package manager (manifests, lockfiles, version resolution, registries)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,15 +12,15 @@ publish = false
 workspace = true
 
 [lib]
-name = "novar_pkg"
+name = "telvax_pkg"
 
 [[bin]]
-name = "nvpm"
+name = "tvpm"
 path = "src/main.rs"
 
 [dependencies]
 flate2 = "1.1.10"
-novar_modules = { version = "0.0.4", path = "../../compiler/modules" }
+telvax_modules = { version = "0.0.4", path = "../../compiler/modules" }
 semver = { version = "1.0.28", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -30,6 +30,6 @@ toml = "1.1.8"
 ureq = "3"
 
 [dev-dependencies]
-novar_ast = { version = "0.0.4", path = "../../compiler/ast" }
-novar_hir = { version = "0.0.4", path = "../../compiler/semantic" }
-novar_runtime = { version = "0.0.4", path = "../../runtime", default-features = false }
+telvax_ast = { version = "0.0.4", path = "../../compiler/ast" }
+telvax_hir = { version = "0.0.4", path = "../../compiler/semantic" }
+telvax_runtime = { version = "0.0.4", path = "../../runtime", default-features = false }

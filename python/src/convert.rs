@@ -1,12 +1,12 @@
-//! Conversions between Python objects and runtime values, driven by Novar's static types.
+//! Conversions between Python objects and runtime values, driven by Telvax's static types.
 
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef};
 use arrow::compute::cast;
 use arrow::datatypes::DataType;
-use novar_hir::{Dim, Prim, Ty};
-use novar_runtime::{Interp, StructVal, TableVal, TensorVal, Value};
+use telvax_hir::{Dim, Prim, Ty};
+use telvax_runtime::{Interp, StructVal, TableVal, TensorVal, Value};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
@@ -14,7 +14,7 @@ use serde_json::Value as Json;
 
 use crate::tables::{Table, import_batch};
 use crate::tensor::{Tensor, import_capsules};
-use crate::{NovarError, StatusError, runtime_err};
+use crate::{TelvaxError, StatusError, runtime_err};
 
 fn arrow_elem(ty: &Ty) -> Option<DataType> {
     Some(match ty {
@@ -36,7 +36,7 @@ fn tensor_to_value(obj: &Bound<'_, PyAny>, elem: &Ty, shape: &[Dim]) -> PyResult
     let t: Arc<TensorVal> = if let Ok(t) = obj.cast::<Tensor>() {
         t.get().inner.clone()
     } else if obj.hasattr("__cuda_array_interface__")? {
-        return Err(NovarError::new_err(
+        return Err(TelvaxError::new_err(
             "a device (GPU) tensor cannot be passed to a CPU function; copy it to the host first",
         ));
     } else {
@@ -46,7 +46,7 @@ fn tensor_to_value(obj: &Bound<'_, PyAny>, elem: &Ty, shape: &[Dim]) -> PyResult
         }
     };
     if t.shape.len() != shape.len() {
-        return Err(NovarError::new_err(format!(
+        return Err(TelvaxError::new_err(format!(
             "expected a tensor of rank {}, got shape {:?}",
             shape.len(),
             t.shape
@@ -55,14 +55,14 @@ fn tensor_to_value(obj: &Bound<'_, PyAny>, elem: &Ty, shape: &[Dim]) -> PyResult
     for (got, want) in t.shape.iter().zip(shape) {
         if let Dim::Lit(n) = want {
             if *got as u64 != *n {
-                return Err(NovarError::new_err(format!("expected shape {shape:?}, got {:?}", t.shape)));
+                return Err(TelvaxError::new_err(format!("expected shape {shape:?}, got {:?}", t.shape)));
             }
         }
     }
     // Same element type: share the buffer. Otherwise convert (a copy).
     if let Some(want) = arrow_elem(elem) {
         if t.array.data_type() != &want {
-            let array: ArrayRef = cast(&t.array, &want).map_err(|e| NovarError::new_err(e.to_string()))?;
+            let array: ArrayRef = cast(&t.array, &want).map_err(|e| TelvaxError::new_err(e.to_string()))?;
             return Ok(Value::Tensor(Arc::new(TensorVal::from_array(t.shape.clone(), array).map_err(runtime_err)?)));
         }
     }
@@ -93,17 +93,17 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
         Ty::Struct(name) => {
             let fields = interp
                 .struct_fields(name)
-                .ok_or_else(|| NovarError::new_err(format!("unknown struct `{name}`")))?;
+                .ok_or_else(|| TelvaxError::new_err(format!("unknown struct `{name}`")))?;
             let mut out = Vec::with_capacity(fields.len());
             for (fname, fty) in fields {
                 let item = match obj.cast::<PyDict>() {
                     Ok(d) => d.get_item(fname)?,
                     Err(_) => obj.getattr(fname.as_str()).ok(),
                 }
-                .ok_or_else(|| NovarError::new_err(format!("`{name}` needs the field `{fname}`")))?;
+                .ok_or_else(|| TelvaxError::new_err(format!("`{name}` needs the field `{fname}`")))?;
                 out.push((
                     fname.clone(),
-                    py_to_value(interp, &item, fty).map_err(|e| NovarError::new_err(format!("field `{fname}`: {e}")))?,
+                    py_to_value(interp, &item, fty).map_err(|e| TelvaxError::new_err(format!("field `{fname}`: {e}")))?,
                 ));
             }
             Ok(Value::Struct(Arc::new(StructVal { name: name.clone(), fields: out })))
@@ -112,7 +112,7 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
         // Same shapes as the JSON form: `"Unit"`, `{"One": value}`, `{"Many": [values..]}`.
         Ty::Enum(_) | Ty::Option(_) | Ty::Map(..) | Ty::Tuple(_) => {
             let json = py_to_json(obj)?;
-            interp.value_from_json(ty, &json).map_err(NovarError::new_err)
+            interp.value_from_json(ty, &json).map_err(TelvaxError::new_err)
         }
         Ty::Table(schema) => {
             let batch = match obj.cast::<Table>() {
@@ -125,7 +125,7 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
     }
 }
 
-/// Converts a Python object whose Novar type is not statically known.
+/// Converts a Python object whose Telvax type is not statically known.
 fn infer(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
     if obj.is_none() {
         Ok(Value::Unit)
@@ -155,7 +155,7 @@ fn infer(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
         let array = import_capsules(obj)?;
         Ok(Value::Tensor(Arc::new(TensorVal::from_array(vec![array.len()], array).map_err(runtime_err)?)))
     } else {
-        Err(PyTypeError::new_err(format!("cannot convert a `{}` to a Novar value", obj.get_type().name()?)))
+        Err(PyTypeError::new_err(format!("cannot convert a `{}` to a Telvax value", obj.get_type().name()?)))
     }
 }
 
@@ -220,7 +220,7 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
                     err.value(py).setattr("status", code)?;
                     err
                 }
-                other => NovarError::new_err(format!("Err({other})")),
+                other => TelvaxError::new_err(format!("Err({other})")),
             });
         }
         Value::Status(code, msg) => {
@@ -229,7 +229,7 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
             d.set_item("message", msg.to_string())?;
             d.into_any().unbind()
         }
-        Value::Closure(_) | Value::Func(_) | Value::Native(_) => return Err(NovarError::new_err("this value cannot be converted to Python")),
+        Value::Closure(_) | Value::Func(_) | Value::Native(_) => return Err(TelvaxError::new_err("this value cannot be converted to Python")),
     })
 }
 

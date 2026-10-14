@@ -1,5 +1,5 @@
 use lsp_types::Position;
-use novar_lsp::analysis::{CompletionKind, Snapshot, SymbolKind};
+use telvax_lsp::analysis::{CompletionKind, Snapshot, SymbolKind};
 
 const SRC: &str = r#"import std::http::Status;
 import std::ai::embeddings::OllamaEmbedder;
@@ -153,18 +153,18 @@ fn inlay_hints_show_inferred_types_only_where_unwritten() {
     );
 }
 
-fn labels(items: &[novar_lsp::analysis::Completion]) -> Vec<&str> {
+fn labels(items: &[telvax_lsp::analysis::Completion]) -> Vec<&str> {
     items.iter().map(|c| c.label.as_str()).collect()
 }
 
-fn complete_in(src_with_marker: &str) -> Vec<novar_lsp::analysis::Completion> {
+fn complete_in(src_with_marker: &str) -> Vec<telvax_lsp::analysis::Completion> {
     let offset = src_with_marker.find('|').unwrap();
     let text = src_with_marker.replacen('|', "", 1);
     Snapshot::analyze(text.clone()).completions(offset.min(text.len()))
 }
 
 /// Completion runs while the code is incomplete; the last good analysis supplies the types.
-fn complete_after_edit(before: &str, typed: &str) -> Vec<novar_lsp::analysis::Completion> {
+fn complete_after_edit(before: &str, typed: &str) -> Vec<telvax_lsp::analysis::Completion> {
     let good = Snapshot::analyze(before.replacen("/*here*/", "", 1));
     assert!(
         good.diagnostics.iter().all(|d| !d.is_error()) || good.hir.is_some(),

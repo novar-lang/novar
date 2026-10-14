@@ -2010,61 +2010,61 @@ dependencies = [
 ]
 
 [[package]]
-name = "novar_ast"
+name = "telvax_ast"
 version = "0.0.4"
 
 [[package]]
-name = "novar_diagnostics"
+name = "telvax_diagnostics"
 version = "0.0.4"
 dependencies = [
  "ariadne",
 ]
 
 [[package]]
-name = "novar_hir"
+name = "telvax_hir"
 version = "0.0.4"
 dependencies = [
- "novar_ast",
- "novar_diagnostics",
+ "telvax_ast",
+ "telvax_diagnostics",
 ]
 
 [[package]]
-name = "novar_lexer"
+name = "telvax_lexer"
 version = "0.0.4"
 dependencies = [
  "logos",
 ]
 
 [[package]]
-name = "novar_parser"
+name = "telvax_parser"
 version = "0.0.4"
 dependencies = [
  "chumsky",
- "novar_ast",
- "novar_diagnostics",
- "novar_lexer",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_lexer",
 ]
 
 [[package]]
-name = "novar_py"
+name = "telvax_py"
 version = "0.0.4"
 dependencies = [
  "arrow",
- "novar_diagnostics",
- "novar_hir",
- "novar_parser",
- "novar_runtime",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
  "pyo3",
  "serde_json",
 ]
 
 [[package]]
-name = "novar_runtime"
+name = "telvax_runtime"
 version = "0.0.4"
 dependencies = [
  "arrow",
  "datafusion",
- "novar_hir",
+ "telvax_hir",
  "parquet",
  "postgres",
  "serde_json",

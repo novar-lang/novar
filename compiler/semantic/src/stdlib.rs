@@ -1,8 +1,8 @@
-//! Typing rules for the Novar standard library.
+//! Typing rules for the Telvax standard library.
 //!
 //! Std functions are polymorphic (`map`, `filter`, ...) and the checker has no generics yet, so
 //! each item carries a small typing rule instead of a fixed signature. The interpreter in
-//! `novar_runtime` implements the same set of items; keep the two in sync.
+//! `telvax_runtime` implements the same set of items; keep the two in sync.
 
 use crate::ty::{Dim, Prim, Ty};
 

@@ -1,4 +1,4 @@
-//! A worker: an HTTP service that runs calls of Novar programs sent by a coordinator.
+//! A worker: an HTTP service that runs calls of Telvax programs sent by a coordinator.
 //!
 //! * `POST /load`  `{entry, files, deps}` -> `{program}`  (idempotent: the id is a content hash)
 //! * `POST /call`  `{program, function, args}` -> `{result}` or `{error}`
@@ -15,10 +15,10 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use novar_modules::Image;
-use novar_runtime::Interp;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use telvax_modules::Image;
+use telvax_runtime::Interp;
 
 impl std::fmt::Debug for Worker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -72,7 +72,7 @@ impl Worker {
         if let Some(d) = loaded.diagnostics.iter().find(|d| d.is_error()) {
             return Err(format!("the program does not parse: {}", d.message));
         }
-        let (hir, diags) = novar_hir::lower(&loaded.program);
+        let (hir, diags) = telvax_hir::lower(&loaded.program);
         if let Some(d) = diags.iter().find(|d| d.is_error()) {
             return Err(format!("the program does not type-check: {}", d.message));
         }
@@ -175,7 +175,7 @@ pub fn serve(addr: &str, token: Option<String>) -> Result<(), String> {
             .await
             .map_err(|e| format!("cannot bind {addr}: {e}"))?;
         eprintln!(
-            "novar worker listening on {} {}",
+            "telvax worker listening on {} {}",
             listener.local_addr().map_err(|e| e.to_string())?,
             if token.is_some() {
                 "(token required)"

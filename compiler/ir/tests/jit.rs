@@ -1,11 +1,11 @@
 #![cfg(feature = "llvm")]
 
-use novar_mlir::{JitValue, emit_mlir, jit_call, jit_call_with, lower};
+use telvax_mlir::{JitValue, emit_mlir, jit_call, jit_call_with, lower};
 
-fn hir(src: &str) -> novar_hir::hir::Program {
-    let (ast, perrs) = novar_parser::parse(src);
+fn hir(src: &str) -> telvax_hir::hir::Program {
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "{perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "{:?}",
@@ -192,7 +192,7 @@ fn unsupported_features_are_diagnosed_not_miscompiled() {
     ];
     for (src, needle) in cases {
         let h = hir(src);
-        let ctx = novar_mlir::context();
+        let ctx = telvax_mlir::context();
         let errs = lower(&ctx, &h)
             .err()
             .unwrap_or_else(|| panic!("expected an error for {src}"));
@@ -351,15 +351,15 @@ fn differential_against_the_interpreter() {
         fn mix(x: f64, n: i32) -> f64 { if n <= 0 { x } else { mix(x * 1.5 - 0.25, n - 1) } }
     ";
     let h = hir(src);
-    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    let interp = telvax_runtime::Interp::new(h.clone()).unwrap();
     for (a, b) in [(12, 18), (17, 5), (1_000_000, 750), (7, 0)] {
         let want = interp
             .call(
                 "gcd",
-                vec![novar_runtime::Value::Int(a), novar_runtime::Value::Int(b)],
+                vec![telvax_runtime::Value::Int(a), telvax_runtime::Value::Int(b)],
             )
             .unwrap();
-        let novar_runtime::Value::Int(want) = want else {
+        let telvax_runtime::Value::Int(want) = want else {
             panic!()
         };
         assert_eq!(
@@ -371,10 +371,10 @@ fn differential_against_the_interpreter() {
         let want = interp
             .call(
                 "collatz",
-                vec![novar_runtime::Value::Int(n), novar_runtime::Value::Int(0)],
+                vec![telvax_runtime::Value::Int(n), telvax_runtime::Value::Int(0)],
             )
             .unwrap();
-        let novar_runtime::Value::Int(want) = want else {
+        let telvax_runtime::Value::Int(want) = want else {
             panic!()
         };
         assert_eq!(
@@ -386,12 +386,12 @@ fn differential_against_the_interpreter() {
         .call(
             "mix",
             vec![
-                novar_runtime::Value::Float(2.0),
-                novar_runtime::Value::Int(10),
+                telvax_runtime::Value::Float(2.0),
+                telvax_runtime::Value::Int(10),
             ],
         )
         .unwrap();
-    let novar_runtime::Value::Float(want) = want else {
+    let telvax_runtime::Value::Float(want) = want else {
         panic!()
     };
     assert_eq!(
@@ -513,7 +513,7 @@ fn unsupported_vector_shapes_are_diagnosed() {
         ("fn f(v: Vec<Vec<i32>>) -> i32 { 1 }", "`Vec<Vec<i32>>`"),
     ] {
         let h = hir(src);
-        let ctx = novar_mlir::context();
+        let ctx = telvax_mlir::context();
         let errs = lower(&ctx, &h)
             .err()
             .unwrap_or_else(|| panic!("expected an error for {src}"));
@@ -568,7 +568,7 @@ const PLACES: &str = r#"
 #[test]
 fn places_match_the_interpreter() {
     let h = hir(PLACES);
-    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    let interp = telvax_runtime::Interp::new(h.clone()).unwrap();
     for f in [
         "elems",
         "nested",
@@ -578,12 +578,12 @@ fn places_match_the_interpreter() {
         "loop_writes",
         "bubble",
     ] {
-        let novar_runtime::Value::Int(want) = interp.call(f, vec![]).unwrap() else {
+        let telvax_runtime::Value::Int(want) = interp.call(f, vec![]).unwrap() else {
             panic!("{f}")
         };
         assert_eq!(jit_call(&h, f, &[]).unwrap(), JitValue::Int(want), "{f}");
     }
-    let novar_runtime::Value::Bool(want) = interp.call("fields_ok", vec![]).unwrap() else {
+    let telvax_runtime::Value::Bool(want) = interp.call("fields_ok", vec![]).unwrap() else {
         panic!()
     };
     assert!(want);
@@ -648,7 +648,7 @@ const TENSORS: &str = r#"
 #[test]
 fn native_tensors_match_the_interpreter_bit_for_bit() {
     let h = hir(TENSORS);
-    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    let interp = telvax_runtime::Interp::new(h.clone()).unwrap();
     for f in [
         "mm_sum",
         "transposed",
@@ -661,7 +661,7 @@ fn native_tensors_match_the_interpreter_bit_for_bit() {
         "reshaped",
         "f64_math",
     ] {
-        let novar_runtime::Value::Float(want) = interp.call(f, vec![]).unwrap() else {
+        let telvax_runtime::Value::Float(want) = interp.call(f, vec![]).unwrap() else {
             panic!("{f}")
         };
         let JitValue::Float(got) = jit_call(&h, f, &[]).unwrap() else {
@@ -674,16 +674,16 @@ fn native_tensors_match_the_interpreter_bit_for_bit() {
         );
     }
     for f in ["best", "round_trip"] {
-        let novar_runtime::Value::Int(want) = interp.call(f, vec![]).unwrap() else {
+        let telvax_runtime::Value::Int(want) = interp.call(f, vec![]).unwrap() else {
             panic!("{f}")
         };
         assert_eq!(jit_call(&h, f, &[]).unwrap(), JitValue::Int(want), "{f}");
     }
     for (i, j) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
-        let novar_runtime::Value::Float(want) = interp
+        let telvax_runtime::Value::Float(want) = interp
             .call(
                 "mm_at",
-                vec![novar_runtime::Value::Int(i), novar_runtime::Value::Int(j)],
+                vec![telvax_runtime::Value::Int(i), telvax_runtime::Value::Int(j)],
             )
             .unwrap()
         else {
@@ -702,7 +702,7 @@ fn native_tensors_match_the_interpreter_bit_for_bit() {
 
 #[test]
 fn quantized_native_matmul_matches_the_quantized_interpreter() {
-    use novar_hir::Quantization;
+    use telvax_hir::Quantization;
     let src = r#"
         fn a() -> Tensor<f32, [4, 8]> {
             let mut v = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -728,9 +728,9 @@ fn quantized_native_matmul_matches_the_quantized_interpreter() {
     "#;
     let h = hir(src);
     let run = |q: Quantization| {
-        let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+        let interp = telvax_runtime::Interp::new(h.clone()).unwrap();
         interp.set_quantization(q);
-        let novar_runtime::Value::Float(x) = interp.call("checksum", vec![]).unwrap() else {
+        let telvax_runtime::Value::Float(x) = interp.call("checksum", vec![]).unwrap() else {
             panic!()
         };
         let native = jit_call_with(&h, "checksum", &[], q).unwrap();
@@ -750,12 +750,12 @@ fn quantized_native_matmul_matches_the_quantized_interpreter() {
         "{exact_i} vs {quant_i}"
     );
 
-    let text = novar_mlir::emit_mlir_with(&h, false, Quantization::Int8).unwrap();
+    let text = telvax_mlir::emit_mlir_with(&h, false, Quantization::Int8).unwrap();
     assert!(
         text.contains("arith.extsi") && text.contains("math.round") && text.contains("i8"),
         "the int8 kernel is in the IR"
     );
-    let plain = novar_mlir::emit_mlir_with(&h, false, Quantization::None).unwrap();
+    let plain = telvax_mlir::emit_mlir_with(&h, false, Quantization::None).unwrap();
     assert!(
         !plain.contains("math.round"),
         "the float build has no quantization code"
@@ -764,7 +764,7 @@ fn quantized_native_matmul_matches_the_quantized_interpreter() {
 
 #[test]
 fn native_tensor_indexing_is_bounds_checked_and_symbolic_shapes_are_rejected() {
-    let ctx = novar_mlir::context();
+    let ctx = telvax_mlir::context();
     for (src, needle) in [
         (
             "fn f(t: Tensor<f32, [N]>) -> f32 { 1.0 }",
@@ -835,7 +835,7 @@ const BREAK_CONTINUE: &str = "
 #[test]
 fn break_and_continue_match_the_interpreter() {
     let h = hir(BREAK_CONTINUE);
-    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    let interp = telvax_runtime::Interp::new(h.clone()).unwrap();
     for (f, args) in [
         ("first_square_over", vec![50]),
         ("first_square_over", vec![5000000]),
@@ -849,10 +849,12 @@ fn break_and_continue_match_the_interpreter() {
         let want = interp
             .call(
                 f,
-                args.iter().map(|a| novar_runtime::Value::Int(*a)).collect(),
+                args.iter()
+                    .map(|a| telvax_runtime::Value::Int(*a))
+                    .collect(),
             )
             .unwrap();
-        let novar_runtime::Value::Int(want) = want else {
+        let telvax_runtime::Value::Int(want) = want else {
             panic!("{want:?}")
         };
         let got = jit_call(
@@ -864,17 +866,17 @@ fn break_and_continue_match_the_interpreter() {
         assert_eq!(got, JitValue::Int(want), "{f}{args:?}");
     }
     let sq = interp
-        .call("first_square_over", vec![novar_runtime::Value::Int(50)])
+        .call("first_square_over", vec![telvax_runtime::Value::Int(50)])
         .unwrap();
-    assert!(matches!(sq, novar_runtime::Value::Int(8)));
+    assert!(matches!(sq, telvax_runtime::Value::Int(8)));
 }
 
 #[test]
 fn break_outside_a_loop_is_an_error() {
-    let (ast, _) = novar_parser::parse(
+    let (ast, _) = telvax_parser::parse(
         "fn f() -> i32 { break; 1 }\nfn g() -> i32 { let h = || { continue }; 2 }",
     );
-    let (_, diags) = novar_hir::lower(&ast.unwrap());
+    let (_, diags) = telvax_hir::lower(&ast.unwrap());
     let msgs: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
     assert!(
         msgs.iter().any(|m| m.contains("`break` outside of a loop")),
@@ -900,10 +902,10 @@ fn per_channel_quantization_is_refused_natively() {
         "fn f(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }",
     );
     for q in [
-        novar_hir::Quantization::Int8Channel,
-        novar_hir::Quantization::Int4Channel,
+        telvax_hir::Quantization::Int8Channel,
+        telvax_hir::Quantization::Int4Channel,
     ] {
-        let err = novar_mlir::emit_mlir_with(&h, false, q).unwrap_err();
+        let err = telvax_mlir::emit_mlir_with(&h, false, q).unwrap_err();
         assert!(err[0].message.contains("interpreter only"), "{err:?}");
     }
 }
@@ -921,9 +923,9 @@ fn impl_methods_compile_natively() {
     ";
     assert_eq!(jit(src, "run", &[JitValue::Int(3)]), JitValue::Int(25));
     let h = hir(src);
-    let interp = novar_runtime::Interp::new(h).unwrap();
+    let interp = telvax_runtime::Interp::new(h).unwrap();
     let want = interp
-        .call("run", vec![novar_runtime::Value::Int(3)])
+        .call("run", vec![telvax_runtime::Value::Int(3)])
         .unwrap();
-    assert!(matches!(want, novar_runtime::Value::Int(25)));
+    assert!(matches!(want, telvax_runtime::Value::Int(25)));
 }

@@ -1,16 +1,16 @@
 //! Measures ingestion and stream-processing throughput of the runtime.
 //!
-//!     cargo run --release -p novar_bench --bin ingest [-- --rows N]
+//!     cargo run --release -p telvax_bench --bin ingest [-- --rows N]
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use novar_runtime::{Interp, TensorVal, Value, embed_text};
+use telvax_runtime::{Interp, TensorVal, Value, embed_text};
 
 fn load(src: &str) -> Interp {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "{perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "{:?}",
@@ -33,7 +33,7 @@ fn main() {
         .windows(2)
         .find(|w| w[0] == "--rows")
         .map_or(1_000_000, |w| w[1].parse().unwrap());
-    let dir = std::env::temp_dir().join(format!("novar-ingest-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-ingest-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
 
     let src = r#"

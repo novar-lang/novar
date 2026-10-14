@@ -1,14 +1,14 @@
 #!/bin/sh
-# Installs `novar` and `nvpm` from a release archive or, failing that, builds them from source.
+# Installs `telvax` and `tvpm` from a release archive or, failing that, builds them from source.
 # Usage: scripts/install.sh [version]     (default: the latest release)
-#        NOVAR_LITE=1 scripts/install.sh   a ~10 MB build without SQL and Parquet
+#        TELVAX_LITE=1 scripts/install.sh   a ~10 MB build without SQL and Parquet
 set -eu
 
-repo="novar-lang/novar"
+repo="telvax/telvax"
 version="${1:-latest}"
-prefix="${NOVAR_HOME:-$HOME/.novar}"
-asset=novar
-[ -n "${NOVAR_LITE:-}" ] && asset=novar-lite
+prefix="${TELVAX_HOME:-$HOME/.telvax}"
+asset=telvax
+[ -n "${TELVAX_LITE:-}" ] && asset=telvax-lite
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) target="aarch64-apple-darwin" ;;
@@ -28,9 +28,9 @@ if [ -n "$target" ] && command -v curl >/dev/null 2>&1; then
   url="https://github.com/$repo/releases/download/$tag/$asset-$target.tar.gz"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  if curl -fsSL "$url" -o "$tmp/novar.tar.gz"; then
+  if curl -fsSL "$url" -o "$tmp/telvax.tar.gz"; then
     mkdir -p "$prefix/bin"
-    tar -xzf "$tmp/novar.tar.gz" -C "$prefix/bin"
+    tar -xzf "$tmp/telvax.tar.gz" -C "$prefix/bin"
     echo "installed to $prefix/bin; add it to PATH:  export PATH=\"$prefix/bin:\$PATH\""
     exit 0
   fi
@@ -40,4 +40,4 @@ fi
 command -v cargo >/dev/null 2>&1 || { echo "install Rust first: https://rustup.rs" >&2; exit 1; }
 ref=""
 [ "$version" = latest ] || ref="--tag v$version"
-cargo install --locked --git "https://github.com/$repo" $ref novar_cli novar_pkg
+cargo install --locked --git "https://github.com/$repo" $ref telvax_cli telvax_pkg

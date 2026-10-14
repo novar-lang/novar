@@ -1,11 +1,11 @@
-//! `novar serve` and the server half of bundled binaries.
+//! `telvax serve` and the server half of bundled binaries.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use novar_hir::hir;
-use novar_runtime::Interp;
-use novar_server::{HandlerError, handler};
+use telvax_hir::hir;
+use telvax_runtime::Interp;
+use telvax_server::{HandlerError, handler};
 
 use crate::{CliError, failed};
 
@@ -15,8 +15,8 @@ pub struct Options {
     pub port: u16,
     pub seed: Option<String>,
     pub live: bool,
-    pub quantize: novar_hir::Quantization,
-    pub device: novar_runtime::Device,
+    pub quantize: telvax_hir::Quantization,
+    pub device: telvax_runtime::Device,
 }
 
 impl Options {
@@ -27,8 +27,8 @@ impl Options {
             port: 8080,
             seed: None,
             live: false,
-            quantize: novar_hir::Quantization::None,
-            device: novar_runtime::Device::Cpu,
+            quantize: telvax_hir::Quantization::None,
+            device: telvax_runtime::Device::Cpu,
         };
         let mut it = flags.iter();
         while let Some(flag) = it.next() {
@@ -99,7 +99,7 @@ pub fn run(
     opts: &Options,
     cluster: Option<(Vec<String>, crate::bundle::Bundle)>,
 ) -> Result<(), CliError> {
-    let routes = novar_server::routes(&program);
+    let routes = telvax_server::routes(&program);
     if routes.is_empty() {
         return failed("no `@endpoint` functions found, nothing to serve");
     }
@@ -136,7 +136,7 @@ pub fn run(
             }),
         );
     }
-    let app = novar_server::router(&routes, handlers).or_else(|e| failed(e.to_string()))?;
+    let app = telvax_server::router(&routes, handlers).or_else(|e| failed(e.to_string()))?;
 
     let rt = tokio::runtime::Runtime::new().or_else(|e| failed(e.to_string()))?;
     rt.block_on(async {

@@ -1,4 +1,4 @@
-//! `novar.toml`.
+//! `telvax.toml`.
 //!
 //! ```toml
 //! [package]
@@ -16,7 +16,7 @@ use std::path::Path;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
-pub const MANIFEST: &str = "novar.toml";
+pub const MANIFEST: &str = "telvax.toml";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -31,7 +31,7 @@ pub struct PackageInfo {
     pub version: Version,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The file that `novar run` / `serve` start from; defaults to `src/main.nv`, then `src/lib.nv`.
+    /// The file that `telvax run` / `serve` start from; defaults to `src/main.tvx`, then `src/lib.tvx`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<String>,
 }

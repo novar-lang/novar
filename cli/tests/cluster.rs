@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const NOVAR: &str = env!("CARGO_BIN_EXE_novar");
+const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 struct Proc(Child);
 
@@ -24,7 +24,7 @@ fn free_port() -> u16 {
 }
 
 fn worker(port: u16) -> Proc {
-    let child = Command::new(NOVAR)
+    let child = Command::new(TELVAX)
         .args(["worker", "--listen", &format!("127.0.0.1:{port}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -57,9 +57,9 @@ fn calls(port: u16) -> u64 {
 }
 
 fn program(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("novar-cluster-cli-{}-{tag}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-cluster-cli-{}-{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("app.nv");
+    let path = dir.join("app.tvx");
     std::fs::write(
         &path,
         "fn square(x: i64) -> i64 { x * x }\n\
@@ -71,12 +71,12 @@ fn program(tag: &str) -> PathBuf {
 }
 
 #[test]
-fn run_sends_dist_map_to_workers_started_with_novar_worker() {
+fn run_sends_dist_map_to_workers_started_with_telvax_worker() {
     let (pa, pb) = (free_port(), free_port());
     let (_a, _b) = (worker(pa), worker(pb));
     let file = program("run");
 
-    let local = Command::new(NOVAR)
+    let local = Command::new(TELVAX)
         .args(["run"])
         .arg(&file)
         .arg("all")
@@ -89,7 +89,7 @@ fn run_sends_dist_map_to_workers_started_with_novar_worker() {
     );
     assert_eq!(String::from_utf8_lossy(&local.stdout).trim(), "385");
 
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["run"])
         .arg(&file)
         .arg("all")
@@ -116,7 +116,7 @@ fn run_sends_dist_map_to_workers_started_with_novar_worker() {
 #[test]
 fn workers_can_require_a_token() {
     let port = free_port();
-    let child = Command::new(NOVAR)
+    let child = Command::new(TELVAX)
         .args([
             "worker",
             "--listen",
@@ -136,7 +136,7 @@ fn workers_can_require_a_token() {
     }
     let file = program("token");
     let workers = format!("127.0.0.1:{port}");
-    let denied = Command::new(NOVAR)
+    let denied = Command::new(TELVAX)
         .args(["run"])
         .arg(&file)
         .arg("all")
@@ -147,12 +147,12 @@ fn workers_can_require_a_token() {
         !denied.status.success()
             && String::from_utf8_lossy(&denied.stderr).contains("rejected the token")
     );
-    let ok = Command::new(NOVAR)
+    let ok = Command::new(TELVAX)
         .args(["run"])
         .arg(&file)
         .arg("all")
         .args(["--workers", &workers])
-        .env("NOVAR_CLUSTER_TOKEN", "hunter2")
+        .env("TELVAX_CLUSTER_TOKEN", "hunter2")
         .output()
         .unwrap();
     assert!(

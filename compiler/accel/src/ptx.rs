@@ -243,7 +243,7 @@ fn kernel_for(op: &str) -> Option<&'static str> {
 }
 
 /// The `std::tensor` operations in `program` that [`ptx`] has a kernel for.
-pub fn used_ops(program: &novar_hir::hir::Program) -> Vec<String> {
+pub fn used_ops(program: &telvax_hir::hir::Program) -> Vec<String> {
     crate::tensor_ops(program)
         .into_iter()
         .filter(|o| kernel_for(o).is_some())
@@ -252,7 +252,7 @@ pub fn used_ops(program: &novar_hir::hir::Program) -> Vec<String> {
 
 /// Compiles the kernels for the operations `program` uses to PTX for compute capability `sm`
 /// (for example `"sm_80"`).
-pub fn ptx(program: &novar_hir::hir::Program, sm: &str) -> Result<Ptx, String> {
+pub fn ptx(program: &telvax_hir::hir::Program, sm: &str) -> Result<Ptx, String> {
     let all = crate::tensor_ops(program);
     let unsupported: Vec<String> = all
         .iter()
@@ -301,7 +301,7 @@ fn compile(ir: &str, sm: &str) -> Result<String, String> {
         )
         .ok_or("cannot create an NVPTX target machine")?;
     let context = Context::create();
-    let buffer = MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "novar_ptx");
+    let buffer = MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "telvax_ptx");
     let module = context
         .create_module_from_ir(buffer)
         .map_err(|e| format!("invalid kernel IR: {e}"))?;
@@ -328,9 +328,9 @@ mod tests {
                 }
                 fn s(a: Tensor<f32, [16]>, b: Tensor<f32, [16]>) -> f32 { std::tensor::sum(a) + std::tensor::mean(a) + std::tensor::dot(a, b) }
             ";
-            let (ast, errs) = novar_parser::parse(src);
+            let (ast, errs) = telvax_parser::parse(src);
             assert!(errs.is_empty(), "{errs:?}");
-            let (hir, d) = novar_hir::lower(&ast.unwrap());
+            let (hir, d) = telvax_hir::lower(&ast.unwrap());
             assert!(
                 d.is_empty(),
                 "{:?}",

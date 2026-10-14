@@ -41,7 +41,7 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$tag" -m "Novar $version"
+            git tag -a "$tag" -m "Telvax $version"
             git push origin "$tag"
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
@@ -72,34 +72,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       # Full build: SQL (DataFusion), Parquet and real services (about 50 MB).
-      - run: cargo build --profile dist --locked -p novar_cli -p novar_pkg
+      - run: cargo build --profile dist --locked -p telvax_cli -p telvax_pkg
       # Lite build: no DataFusion or Parquet, so no SQL; tables, CSV and real services stay (about 10 MB).
       - run: >
-          cargo build --release --locked -p novar_cli --no-default-features --features live
+          cargo build --release --locked -p telvax_cli --no-default-features --features live
           --target-dir target/lite
       - name: Package
         run: |
           mkdir dist-full dist-lite
           ext=""; if [ "${{ runner.os }}" = Windows ]; then ext=".exe"; fi
-          cp target/dist/novar$ext target/dist/nvpm$ext dist-full/
-          cp target/lite/release/novar$ext target/dist/nvpm$ext dist-lite/
+          cp target/dist/telvax$ext target/dist/tvpm$ext dist-full/
+          cp target/lite/release/telvax$ext target/dist/tvpm$ext dist-lite/
           for variant in full lite; do
-            name=novar-${{ matrix.target }}
-            [ $variant = lite ] && name=novar-lite-${{ matrix.target }}
+            name=telvax-${{ matrix.target }}
+            [ $variant = lite ] && name=telvax-lite-${{ matrix.target }}
             if [ "${{ runner.os }}" = Windows ]; then
-              (cd dist-$variant && 7z a -tzip ../$name.zip novar.exe nvpm.exe)
+              (cd dist-$variant && 7z a -tzip ../$name.zip telvax.exe tvpm.exe)
               sha256sum $name.zip > $name.zip.sha256
             else
-              tar -czf $name.tar.gz -C dist-$variant novar nvpm
+              tar -czf $name.tar.gz -C dist-$variant telvax tvpm
               shasum -a 256 $name.tar.gz > $name.tar.gz.sha256
             fi
           done
       - uses: actions/upload-artifact@v7
         with:
-          name: novar-${{ matrix.target }}
+          name: telvax-${{ matrix.target }}
           path: |
-            novar-*${{ matrix.target }}.tar.gz*
-            novar-*${{ matrix.target }}.zip*
+            telvax-*${{ matrix.target }}.tar.gz*
+            telvax-*${{ matrix.target }}.zip*
 
   publish:
     needs: [plan, build]
@@ -154,31 +154,31 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
           version="${TAG#v}"
-          export NOVAR_HOME="$RUNNER_TEMP/novar-home"
-          [ "${{ matrix.variant }}" = lite ] && export NOVAR_LITE=1
+          export TELVAX_HOME="$RUNNER_TEMP/telvax-home"
+          [ "${{ matrix.variant }}" = lite ] && export TELVAX_LITE=1
           if [ "${{ runner.os }}" = Windows ]; then
-            NOVAR_VERSION="$version" powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+            TELVAX_VERSION="$version" powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
           else
             sh scripts/install.sh "$version"
           fi
-          echo "$NOVAR_HOME/bin" >> "$GITHUB_PATH"
+          echo "$TELVAX_HOME/bin" >> "$GITHUB_PATH"
       - name: Version
         env:
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          out="$(novar --version)"
+          out="$(telvax --version)"
           echo "$out"
-          [ "$out" = "novar ${TAG#v}" ]
-          nvpm --help | head -n 3
+          [ "$out" = "telvax ${TAG#v}" ]
+          tvpm --help | head -n 3
       - name: Check, run and format
         run: |
-          novar check examples/rag-service.nv
-          novar run examples/basics/primes.nv main
-          novar fmt --check examples/basics/primes.nv
-          novar lint examples/basics/primes.nv
+          telvax check examples/rag-service.tvx
+          telvax run examples/basics/primes.tvx main
+          telvax fmt --check examples/basics/primes.tvx
+          telvax lint examples/basics/primes.tvx
       - name: Serve the RAG example
         run: |
-          novar serve examples/rag-service.nv --port 18080 > serve.log 2>&1 &
+          telvax serve examples/rag-service.tvx --port 18080 > serve.log 2>&1 &
           pid=$!
           ok=""
           for i in $(seq 1 30); do
@@ -192,7 +192,7 @@ jobs:
           grep -q '"answer"' reply.json
       - name: Tables and CSV work everywhere; SQL and Parquet only in the full build
         run: |
-          cat > tables.nv <<'NV'
+          cat > tables.tvx <<'NV'
           struct Row { id: i64, score: f32 }
           fn count() -> u64 { let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]); t.len() }
           fn query() -> u64 {
@@ -201,11 +201,11 @@ jobs:
               u.len()
           }
           NV
-          [ "$(novar run tables.nv count)" = 1 ]
+          [ "$(telvax run tables.tvx count)" = 1 ]
           if [ "${{ matrix.variant }}" = full ]; then
-            [ "$(novar run tables.nv query)" = 1 ]
+            [ "$(telvax run tables.tvx query)" = 1 ]
           else
-            ! novar run tables.nv query 2> err.txt
+            ! telvax run tables.tvx query 2> err.txt
             grep -q "not available in this build" err.txt
           fi
 
@@ -239,12 +239,12 @@ jobs:
       - run: npm run compile
       - run: npm test
       - name: Package
-        run: npx vsce package -o "novar-${TAG#v}.vsix"
+        run: npx vsce package -o "telvax-${TAG#v}.vsix"
       - name: Attach to the release
-        run: gh release upload "$TAG" "novar-${TAG#v}.vsix" --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "telvax-${TAG#v}.vsix" --clobber --repo "$GITHUB_REPOSITORY"
       - name: Visual Studio Marketplace
         if: env.VSCE_PAT != ''
-        run: npx vsce publish --packagePath "novar-${TAG#v}.vsix" --pat "$VSCE_PAT"
+        run: npx vsce publish --packagePath "telvax-${TAG#v}.vsix" --pat "$VSCE_PAT"
       - name: Open VSX
         if: env.OVSX_PAT != ''
-        run: npx ovsx publish "novar-${TAG#v}.vsix" --pat "$OVSX_PAT"
+        run: npx ovsx publish "telvax-${TAG#v}.vsix" --pat "$OVSX_PAT"

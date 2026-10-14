@@ -1,6 +1,6 @@
 use std::process::Command;
 
-const NOVAR: &str = env!("CARGO_BIN_EXE_novar");
+const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 const SRC: &str =
     "fn layer(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
@@ -9,11 +9,11 @@ const SRC: &str =
 ";
 
 fn emit(kind: &str) -> (bool, String, String) {
-    let dir = std::env::temp_dir().join(format!("novar-accel-{}-{kind}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-accel-{}-{kind}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("layer.nv");
+    let file = dir.join("layer.tvx");
     std::fs::write(&file, SRC).unwrap();
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["build", file.to_str().unwrap(), "--emit", kind])
         .output()
         .unwrap();

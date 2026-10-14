@@ -2,13 +2,13 @@
 
 use std::path::PathBuf;
 
-use novar_lsp::analysis::Snapshot;
+use telvax_lsp::analysis::Snapshot;
 
 struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let d = std::env::temp_dir().join(format!("novar-lsp-mod-{}-{tag}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("telvax-lsp-mod-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)
@@ -34,8 +34,8 @@ const UTIL: &str =
 
 fn project(tag: &str) -> (Dir, PathBuf) {
     let d = Dir::new(tag);
-    d.write("util.nv", UTIL);
-    let main = d.write("main.nv", MAIN);
+    d.write("util.tvx", UTIL);
+    let main = d.write("main.tvx", MAIN);
     (d, main)
 }
 
@@ -75,12 +75,12 @@ fn go_to_definition_crosses_files() {
     let s = Snapshot::analyze_in(MAIN.to_string(), Some(&main));
     let at = MAIN.find("double(p.a)").unwrap() + 2;
     let (file, span) = s.definition_location(at).unwrap();
-    assert!(file.ends_with("util.nv"), "{file}");
+    assert!(file.ends_with("util.tvx"), "{file}");
     assert_eq!(&UTIL[span], "double");
     let at = MAIN.find("Pair {").unwrap() + 1;
     let (file, span) = s.definition_location(at).unwrap();
     assert!(
-        file.ends_with("util.nv") && UTIL[span].starts_with("Pair"),
+        file.ends_with("util.tvx") && UTIL[span].starts_with("Pair"),
         "{file}"
     );
 }
@@ -88,13 +88,13 @@ fn go_to_definition_crosses_files() {
 #[test]
 fn only_this_documents_problems_and_symbols_are_listed() {
     let d = Dir::new("scope");
-    d.write("util.nv", "pub fn broken() -> i32 {\n    \"nope\"\n}\n");
+    d.write("util.tvx", "pub fn broken() -> i32 {\n    \"nope\"\n}\n");
     let main_text = "import util::broken;\nfn main() -> i32 { broken() }\nfn other() {}\n";
-    let main = d.write("main.nv", main_text);
+    let main = d.write("main.tvx", main_text);
     let s = Snapshot::analyze_in(main_text.to_string(), Some(&main));
     assert!(
         s.diagnostics.is_empty(),
-        "util.nv's error belongs to util.nv: {:?}",
+        "util.tvx's error belongs to util.tvx: {:?}",
         s.diagnostics
     );
     let names: Vec<_> = s.symbols().into_iter().map(|x| x.name).collect();
@@ -105,8 +105,8 @@ fn only_this_documents_problems_and_symbols_are_listed() {
     );
 
     // Opening the broken file itself reports the error there.
-    let util_text = std::fs::read_to_string(d.0.join("util.nv")).unwrap();
-    let u = Snapshot::analyze_in(util_text, Some(&d.0.join("util.nv")));
+    let util_text = std::fs::read_to_string(d.0.join("util.tvx")).unwrap();
+    let u = Snapshot::analyze_in(util_text, Some(&d.0.join("util.tvx")));
     assert!(
         u.diagnostics
             .iter()
@@ -134,19 +134,19 @@ fn completion_offers_imported_items_without_mangled_names() {
 }
 
 #[test]
-fn project_dependencies_are_found_through_novar_toml() {
+fn project_dependencies_are_found_through_telvax_toml() {
     let d = Dir::new("pkg");
-    d.write("novar.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nshared = { path = \"shared\" }\n");
+    d.write("telvax.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nshared = { path = \"shared\" }\n");
     d.write(
-        "shared/novar.toml",
+        "shared/telvax.toml",
         "[package]\nname = \"shared\"\nversion = \"0.1.0\"\n",
     );
-    d.write("shared/src/lib.nv", "pub fn answer() -> i32 { 42 }\n");
+    d.write("shared/src/lib.tvx", "pub fn answer() -> i32 { 42 }\n");
     // The locked path dependency is what the compiler consults.
-    let project = novar_pkg::Project::open(&d.0).unwrap();
+    let project = telvax_pkg::Project::open(&d.0).unwrap();
     project.lock(None).unwrap();
     let text = "import shared::answer;\nfn main() -> i32 { answer() }\n";
-    let main = d.write("src/main.nv", text);
+    let main = d.write("src/main.tvx", text);
     let s = Snapshot::analyze_in(text.to_string(), Some(&main));
     assert!(s.diagnostics.is_empty(), "{:?}", s.diagnostics);
     let (hover, _) = s.hover(text.find("answer()").unwrap() + 1).unwrap();

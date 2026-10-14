@@ -167,7 +167,7 @@ pub fn diagnostics(snap: &Snapshot, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
                 } else {
                     DiagnosticSeverity::WARNING
                 }),
-                source: Some("novar".into()),
+                source: Some("telvax".into()),
                 message,
                 related_information: Some(
                     d.labels
@@ -401,7 +401,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 return unknown(id);
             };
             // Source that does not tokenise is left alone rather than reported as an error.
-            let edits: Vec<TextEdit> = match novar_fmt::format(&snap.text) {
+            let edits: Vec<TextEdit> = match telvax_fmt::format(&snap.text) {
                 Ok(formatted) if formatted != snap.text => vec![TextEdit {
                     range: snap.index.range(&(0..snap.text.len())),
                     new_text: formatted,

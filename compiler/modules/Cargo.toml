@@ -1,6 +1,6 @@
 [package]
-name = "novar_modules"
-description = "Novar: multi-file programs, module imports and package dependencies"
+name = "telvax_modules"
+description = "Telvax: multi-file programs, module imports and package dependencies"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,11 +12,11 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_ast = { version = "0.0.4", path = "../ast" }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-novar_parser = { version = "0.0.4", path = "../parser" }
+telvax_ast = { version = "0.0.4", path = "../ast" }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_parser = { version = "0.0.4", path = "../parser" }
 serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
-novar_hir = { version = "0.0.4", path = "../semantic" }
-novar_runtime = { version = "0.0.4", path = "../../runtime", default-features = false }
+telvax_hir = { version = "0.0.4", path = "../semantic" }
+telvax_runtime = { version = "0.0.4", path = "../../runtime", default-features = false }

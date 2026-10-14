@@ -3,12 +3,12 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use novar_codegen::{BuildError, OptLevel, build_executable, build_object, llvm_ir, optimize_ir};
+use telvax_codegen::{BuildError, OptLevel, build_executable, build_object, llvm_ir, optimize_ir};
 
-fn hir(src: &str) -> novar_hir::hir::Program {
-    let (ast, perrs) = novar_parser::parse(src);
+fn hir(src: &str) -> telvax_hir::hir::Program {
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "{perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "{:?}",
@@ -18,7 +18,7 @@ fn hir(src: &str) -> novar_hir::hir::Program {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("novar-codegen-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-codegen-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
@@ -119,9 +119,9 @@ fn run_interpreted(src: &str) -> (i64, String) {
         }
     }
     let buf = Arc::new(Mutex::new(Vec::new()));
-    let interp = novar_runtime::Interp::new(hir(src)).unwrap();
+    let interp = telvax_runtime::Interp::new(hir(src)).unwrap();
     interp.set_output(Sink(buf.clone()));
-    let novar_runtime::Value::Int(code) = interp.call("main", vec![]).unwrap() else {
+    let telvax_runtime::Value::Int(code) = interp.call("main", vec![]).unwrap() else {
         panic!("main must return an int")
     };
     (
@@ -249,7 +249,7 @@ fn out_of_bounds_index_aborts_with_a_message() {
 
 #[test]
 fn sieve_example_matches_the_interpreter() {
-    let src = include_str!("../../../examples/basics/sieve.nv");
+    let src = include_str!("../../../examples/basics/sieve.tvx");
     let (code, out) = run_interpreted(src);
     assert_eq!(out, "2 3 5 7 11 13 17 19 23 29 \n");
     assert_eq!(code, 10);
@@ -258,7 +258,7 @@ fn sieve_example_matches_the_interpreter() {
 
 #[test]
 fn primes_example_matches_the_interpreter() {
-    let src = include_str!("../../../examples/basics/primes.nv");
+    let src = include_str!("../../../examples/basics/primes.tvx");
     let (code, out) = run_interpreted(src);
     assert_eq!(run_native(src, "primes"), (Some(code as i32), out));
 }

@@ -1,4 +1,4 @@
-import init, { check, functions, run, hover } from "./pkg/novar_wasm.js";
+import init, { check, functions, run, hover } from "./pkg/telvax_wasm.js";
 import { EXAMPLES } from "./examples.js";
 
 const $ = (id) => document.getElementById(id);
@@ -72,7 +72,7 @@ function updateStatus() {
   if (!ready) return;
   const { line, character } = caretPosition();
   const info = hover(code.value, line, character);
-  status.textContent = info ? info.replace(/```novar\n?|```/g, "").trim() : `Ln ${line + 1}, Col ${character + 1}`;
+  status.textContent = info ? info.replace(/```telvax\n?|```/g, "").trim() : `Ln ${line + 1}, Col ${character + 1}`;
 }
 
 // ---- running ------------------------------------------------------------------------------------

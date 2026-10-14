@@ -1,4 +1,4 @@
-//! Talks to the real `novar-lsp` binary over stdio, like an editor would.
+//! Talks to the real `telvax-lsp` binary over stdio, like an editor would.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -14,7 +14,7 @@ struct Client {
 
 impl Client {
     fn start() -> Client {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_novar-lsp"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_telvax-lsp"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -83,12 +83,12 @@ impl Client {
     }
 }
 
-const URI: &str = "file:///project/app.nv";
+const URI: &str = "file:///project/app.tvx";
 
 fn open(c: &mut Client, text: &str) {
     c.notify(
         "textDocument/didOpen",
-        json!({"textDocument": {"uri": URI, "languageId": "novar", "version": 1, "text": text}}),
+        json!({"textDocument": {"uri": URI, "languageId": "telvax", "version": 1, "text": text}}),
     );
 }
 
@@ -138,7 +138,7 @@ fn publishes_diagnostics_and_clears_them() {
     let d = c.diagnostics(URI);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0]["severity"], 1);
-    assert_eq!(d[0]["source"], "novar");
+    assert_eq!(d[0]["source"], "telvax");
     assert_eq!(d[0]["range"]["start"], json!({"line": 1, "character": 4}));
     assert!(
         d[0]["message"]

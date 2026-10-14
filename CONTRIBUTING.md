@@ -1,15 +1,15 @@
-# Contributing to Novar
+# Contributing to Telvax
 
-Thanks for trying Novar. At 0.0.x the most useful contribution is a bug report or a program that
+Thanks for trying Telvax. At 0.0.x the most useful contribution is a bug report or a program that
 did not behave as you expected.
 
 ## Reporting problems
 
 Open an issue and include:
 
-* the output of `novar --version` and your operating system;
-* the smallest `.nv` program that shows the problem;
-* what you ran (`novar run ...`, `novar serve ...`) and the full output.
+* the output of `telvax --version` and your operating system;
+* the smallest `.tvx` program that shows the problem;
+* what you ran (`telvax run ...`, `telvax serve ...`) and the full output.
 
 Language ideas are welcome too, ideally with a short example of the code you wish you could write.
 
@@ -18,7 +18,7 @@ Language ideas are welcome too, ideally with a short example of the code you wis
 Nightly Rust is required; `rust-toolchain.toml` selects it.
 
 ```sh
-cargo build --release -p novar_cli      # target/release/novar
+cargo build --release -p telvax_cli      # target/release/telvax
 cargo test --workspace                  # default build, no LLVM needed
 ```
 
@@ -26,8 +26,8 @@ Optional pieces:
 
 | Feature | What it adds | Needs |
 |---|---|---|
-| `--features novar_cli/llvm` | native code, `--emit ptx` | LLVM 22 with MLIR (`. scripts/llvm-env.sh`) |
-| `--features novar_cli/gpu` | `--device gpu` | a GPU with Metal, Vulkan or DX12 |
+| `--features telvax_cli/llvm` | native code, `--emit ptx` | LLVM 22 with MLIR (`. scripts/llvm-env.sh`) |
+| `--features telvax_cli/gpu` | `--device gpu` | a GPU with Metal, Vulkan or DX12 |
 
 The Python bindings (`python/`), the VS Code extension (`editors/vscode`) and the Wasm playground
 (`playground/`) have their own README and tests.

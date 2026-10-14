@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use novar_diagnostics::Diagnostic;
-use novar_hir::hir::{self, BinOp, ExprKind, Lit, Stmt};
-use novar_hir::{Dim, Prim, Ty};
+use telvax_diagnostics::Diagnostic;
+use telvax_hir::hir::{self, BinOp, ExprKind, Lit, Stmt};
+use telvax_hir::{Dim, Prim, Ty};
 
 /// The StableHLO module for a program.
 #[derive(Debug)]
@@ -43,7 +43,7 @@ pub fn stablehlo(program: &hir::Program) -> Result<StableHlo, Vec<Diagnostic>> {
             break;
         }
     }
-    let mut text = String::from("module @novar {\n");
+    let mut text = String::from("module @telvax {\n");
     let mut emitted = Vec::new();
     for f in &program.fns {
         if let Some(t) = done.get(&f.name) {
@@ -445,9 +445,9 @@ mod tests {
     use super::*;
 
     fn compile(src: &str) -> StableHlo {
-        let (ast, errs) = novar_parser::parse(src);
+        let (ast, errs) = telvax_parser::parse(src);
         assert!(errs.is_empty(), "{errs:?}");
-        let (hir, diags) = novar_hir::lower(&ast.unwrap());
+        let (hir, diags) = telvax_hir::lower(&ast.unwrap());
         assert!(
             diags.is_empty(),
             "{:?}",

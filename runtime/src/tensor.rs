@@ -9,7 +9,7 @@ use std::sync::Arc;
 use arrow::array::{Array, ArrayRef, Float32Array, Float64Array};
 use arrow::compute::cast;
 use arrow::datatypes::DataType;
-use novar_hir::{Dim, Prim, Ty};
+use telvax_hir::{Dim, Prim, Ty};
 
 use crate::interp::RuntimeError;
 use crate::value::{TensorVal, Value};
@@ -208,7 +208,7 @@ pub(crate) fn call(
     path: &str,
     args: &[Value],
     result: &Ty,
-    quantization: novar_hir::Quantization,
+    quantization: telvax_hir::Quantization,
     device: crate::interp::Device,
 ) -> Res {
     if device == crate::interp::Device::Gpu
@@ -386,16 +386,16 @@ pub(crate) fn call(
             if k != k2 {
                 return err(format!("`matmul` inner dimensions differ: {k} and {k2}"));
             }
-            if quantization != novar_hir::Quantization::None
+            if quantization != telvax_hir::Quantization::None
                 && matches!(a.dtype(), DataType::Float32)
                 && matches!(b.dtype(), DataType::Float32)
             {
                 let (x, y) = (a.to_f32_vec(), b.to_f32_vec());
                 let out = match quantization {
-                    novar_hir::Quantization::Int8Channel => {
+                    telvax_hir::Quantization::Int8Channel => {
                         qmatmul_channel_f32(&x, &y, m, k, n, 127.0)
                     }
-                    novar_hir::Quantization::Int4Channel => {
+                    telvax_hir::Quantization::Int4Channel => {
                         qmatmul_channel_f32(&x, &y, m, k, n, 7.0)
                     }
                     _ => qmatmul_f32(&x, &y, m, k, n),
@@ -504,7 +504,7 @@ pub(crate) fn qmatmul_channel_f32(
 /// Runs the operation on the GPU when it is one of the supported `f32` kernels; `None` means
 /// "not handled here", so the CPU implementation runs instead.
 #[cfg(feature = "gpu")]
-fn on_gpu(path: &str, args: &[Value], quantization: novar_hir::Quantization) -> Option<Res> {
+fn on_gpu(path: &str, args: &[Value], quantization: telvax_hir::Quantization) -> Option<Res> {
     use crate::gpu::{self, Elementwise};
     let name = path.rsplit("::").next()?;
     let f32_tensor = |v: &Value| match v {
@@ -569,7 +569,7 @@ fn on_gpu(path: &str, args: &[Value], quantization: novar_hir::Quantization) -> 
                 a.shape.clone(),
             )
         }
-        "matmul" if quantization == novar_hir::Quantization::None => {
+        "matmul" if quantization == telvax_hir::Quantization::None => {
             let b = f32_tensor(args.get(1)?)?;
             let (m, k) = match a.shape[..] {
                 [m, k] => (m, k),
@@ -613,7 +613,7 @@ fn on_gpu(path: &str, args: &[Value], quantization: novar_hir::Quantization) -> 
 }
 
 #[cfg(not(feature = "gpu"))]
-fn on_gpu(_: &str, _: &[Value], _: novar_hir::Quantization) -> Option<Res> {
+fn on_gpu(_: &str, _: &[Value], _: telvax_hir::Quantization) -> Option<Res> {
     Some(err(
         "this build has no GPU support (rebuild with the `gpu` feature)",
     ))

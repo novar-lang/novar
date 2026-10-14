@@ -1,6 +1,6 @@
 [package]
-name = "novar_ast"
-description = "Novar: novar_ast"
+name = "telvax_ast"
+description = "Telvax: telvax_ast"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

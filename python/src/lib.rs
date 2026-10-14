@@ -1,13 +1,13 @@
-//! Python bindings for Novar.
+//! Python bindings for Telvax.
 //!
-//! * `novar.load(path)` / `novar.compile(source)` type-check a program and return a `Program`
+//! * `telvax.load(path)` / `telvax.compile(source)` type-check a program and return a `Program`
 //!   whose functions and `@endpoint`s can be called from Python.
 //! * `Tensor` and `Table` wrap the runtime's Arrow-backed values. They speak the Arrow PyCapsule
 //!   interface (`__arrow_c_array__`) and NumPy's `__array_interface__`, so PyArrow, Polars,
-//!   NumPy and PyTorch (through NumPy) exchange data with Novar without copying.
+//!   NumPy and PyTorch (through NumPy) exchange data with Telvax without copying.
 //! * `DeviceTensor` carries a GPU buffer described by `__cuda_array_interface__` (PyTorch, CuPy,
-//!   Numba, ...) through Novar by pointer, again without copying.
-//! * Scalars cross the boundary by value; calling a Novar function costs a few microseconds.
+//!   Numba, ...) through Telvax by pointer, again without copying.
+//! * Scalars cross the boundary by value; calling a Telvax function costs a few microseconds.
 
 mod convert;
 mod cuda;
@@ -16,7 +16,7 @@ mod tensor;
 
 use std::sync::Arc;
 
-use novar_runtime::Interp;
+use telvax_runtime::Interp;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
@@ -24,17 +24,17 @@ use pyo3::types::{PyDict, PyTuple};
 
 use convert::{json_to_py, py_to_json, py_to_value, value_to_py};
 
-create_exception!(novar, NovarError, PyException, "Base class of every Novar error.");
-create_exception!(novar, CompileError, NovarError, "The program has syntax or type errors.");
+create_exception!(telvax, TelvaxError, PyException, "Base class of every Telvax error.");
+create_exception!(telvax, CompileError, TelvaxError, "The program has syntax or type errors.");
 create_exception!(
-    novar,
+    telvax,
     StatusError,
-    NovarError,
+    TelvaxError,
     "An endpoint returned `Err(Status::..)`; `.status` holds the HTTP status code."
 );
 
 pub(crate) fn runtime_err(e: impl std::fmt::Display) -> PyErr {
-    NovarError::new_err(e.to_string())
+    TelvaxError::new_err(e.to_string())
 }
 
 /// Runs `std::dist::map` through a Python callable.
@@ -42,7 +42,7 @@ struct PyExecutor {
     callable: Py<PyAny>,
 }
 
-impl novar_runtime::Executor for PyExecutor {
+impl telvax_runtime::Executor for PyExecutor {
     fn map(&self, function: &str, items: Vec<serde_json::Value>) -> Result<Vec<serde_json::Value>, String> {
         Python::attach(|py| {
             let texts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
@@ -61,8 +61,8 @@ impl novar_runtime::Executor for PyExecutor {
     }
 }
 
-/// A checked Novar program ready to run.
-#[pyclass(module = "novar")]
+/// A checked Telvax program ready to run.
+#[pyclass(module = "telvax")]
 struct Program {
     interp: Arc<Interp>,
 }
@@ -81,7 +81,7 @@ impl Program {
 
     /// Routes `std::dist::map` calls through `executor(function, items)`, where `items` is a list
     /// of JSON strings and the result is a list of JSON strings in the same order. This is how the
-    /// work is handed to Ray (see `novar.ray`) or any other scheduler.
+    /// work is handed to Ray (see `telvax.ray`) or any other scheduler.
     fn set_executor(&self, executor: Py<PyAny>) {
         self.interp.set_executor(Arc::new(PyExecutor { callable: executor }));
     }
@@ -94,12 +94,12 @@ impl Program {
             .iter()
             .map(|a| {
                 let text: String = a.extract()?;
-                serde_json::from_str(&text).map_err(|e| NovarError::new_err(format!("invalid JSON argument: {e}")))
+                serde_json::from_str(&text).map_err(|e| TelvaxError::new_err(format!("invalid JSON argument: {e}")))
             })
             .collect::<PyResult<Vec<serde_json::Value>>>()?;
         let interp = self.interp.clone();
         let result = py.detach(move || interp.call_json(function, &parsed));
-        result.map(|v| v.to_string()).map_err(NovarError::new_err)
+        result.map(|v| v.to_string()).map_err(TelvaxError::new_err)
     }
 
     /// Calls function `name` with Python arguments converted by the function's parameter types.
@@ -108,9 +108,9 @@ impl Program {
         let (params, _) = self
             .interp
             .signature(name)
-            .ok_or_else(|| NovarError::new_err(format!("no function `{name}`")))?;
+            .ok_or_else(|| TelvaxError::new_err(format!("no function `{name}`")))?;
         if params.len() != args.len() {
-            return Err(NovarError::new_err(format!(
+            return Err(TelvaxError::new_err(format!(
                 "`{name}` takes {} argument(s), got {}",
                 params.len(),
                 args.len()
@@ -120,7 +120,7 @@ impl Program {
         for ((pname, ty), arg) in params.iter().zip(args.iter()) {
             values.push(
                 py_to_value(&self.interp, &arg, ty)
-                    .map_err(|e| NovarError::new_err(format!("argument `{pname}` of `{name}`: {e}")))?,
+                    .map_err(|e| TelvaxError::new_err(format!("argument `{pname}` of `{name}`: {e}")))?,
             );
         }
         let interp = self.interp.clone();
@@ -145,21 +145,21 @@ impl Program {
     }
 
     fn __repr__(&self) -> String {
-        format!("<novar.Program {} functions>", self.interp.function_names().len())
+        format!("<telvax.Program {} functions>", self.interp.function_names().len())
     }
 }
 
 fn build(source: &str, name: &str, live: bool) -> PyResult<Program> {
-    let (ast, mut diags) = novar_parser::parse(source);
+    let (ast, mut diags) = telvax_parser::parse(source);
     let mut hir = None;
     if let Some(ast) = ast {
-        let (h, d) = novar_hir::lower(&ast);
+        let (h, d) = telvax_hir::lower(&ast);
         diags.extend(d);
         hir = Some(h);
     }
     if diags.iter().any(|d| d.is_error()) {
         let errors = diags.iter().filter(|d| d.is_error()).count();
-        let rendered = novar_diagnostics::render(name, source, &diags, false);
+        let rendered = telvax_diagnostics::render(name, source, &diags, false);
         return Err(CompileError::new_err(format!("{rendered}{errors} error(s) in `{name}`")));
     }
     let hir = hir.ok_or_else(|| CompileError::new_err("the program could not be parsed"))?;
@@ -167,18 +167,18 @@ fn build(source: &str, name: &str, live: bool) -> PyResult<Program> {
     Ok(Program { interp: Arc::new(interp) })
 }
 
-/// Type-checks Novar source code and returns a `Program`.
+/// Type-checks Telvax source code and returns a `Program`.
 #[pyfunction]
 #[pyo3(signature = (source, name = "<string>", live = false))]
 fn compile(source: &str, name: &str, live: bool) -> PyResult<Program> {
     build(source, name, live)
 }
 
-/// Reads, type-checks and loads a `.nv` file.
+/// Reads, type-checks and loads a `.tvx` file.
 #[pyfunction]
 #[pyo3(signature = (path, live = false))]
 fn load(path: &str, live: bool) -> PyResult<Program> {
-    let source = std::fs::read_to_string(path).map_err(|e| NovarError::new_err(format!("cannot read `{path}`: {e}")))?;
+    let source = std::fs::read_to_string(path).map_err(|e| TelvaxError::new_err(format!("cannot read `{path}`: {e}")))?;
     build(&source, path, live)
 }
 
@@ -198,7 +198,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(tensor::tensor, m)?)?;
     m.add_function(wrap_pyfunction!(tables::table, m)?)?;
-    m.add("NovarError", m.py().get_type::<NovarError>())?;
+    m.add("TelvaxError", m.py().get_type::<TelvaxError>())?;
     m.add("CompileError", m.py().get_type::<CompileError>())?;
     m.add("StatusError", m.py().get_type::<StatusError>())?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

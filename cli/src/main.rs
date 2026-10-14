@@ -6,21 +6,21 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
-use novar_diagnostics::Diagnostic;
-use novar_runtime::{Interp, Value};
+use telvax_diagnostics::Diagnostic;
+use telvax_runtime::{Interp, Value};
 
 const USAGE: &str = "\
 usage:
-  novar check <file.nv>
-  novar lint <file.nv> [--deny-warnings]                    unused variables, `mut` and functions
-  novar fmt [--check] <file.nv>...                          format in place (`-` reads stdin)
-  novar run <file.nv> <function> [args...] [--quantize int8|int8-channel|int4-channel] [--device gpu]
-  novar lsp                                                language server over stdio
-  novar worker [--listen host:port] [--token T]            run calls for a coordinator
-  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8|int8-channel|int4-channel] [--device gpu]
-  novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
-  novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
-  novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
+  telvax check <file.tvx>
+  telvax lint <file.tvx> [--deny-warnings]                    unused variables, `mut` and functions
+  telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
+  telvax run <file.tvx> <function> [args...] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax lsp                                                language server over stdio
+  telvax worker [--listen host:port] [--token T]            run calls for a coordinator
+  telvax serve <file.tvx> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax build --serve <file.tvx> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
+  telvax jit <file.tvx> <function> [args...]                 (native, needs --features llvm)
+  telvax build <file.tvx> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
                                                     (all but stablehlo need --features llvm)";
 
 fn main() -> ExitCode {
@@ -54,7 +54,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         ["fmt", rest @ ..] => fmt(rest),
         ["lint", file, rest @ ..] => lint(file, rest),
         ["--version" | "-V" | "version"] => {
-            println!("novar {}", env!("CARGO_PKG_VERSION"));
+            println!("telvax {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         ["--help" | "-h" | "help"] => {
@@ -71,19 +71,19 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         }
         ["worker", rest @ ..] => worker(rest),
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
-        ["lsp"] => novar_lsp::run_stdio().or_else(|e| failed(e.to_string())),
+        ["lsp"] => telvax_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
         ["build", file, rest @ ..] => native::build(file, rest),
         _ => Err(CliError::Usage),
     }
 }
 
-/// A binary produced by `novar build --serve`: serve the embedded program. Containers set
+/// A binary produced by `telvax build --serve`: serve the embedded program. Containers set
 /// `PORT` / `HOST`; flags win over the environment.
-/// `novar worker [--listen host:port] [--token T]`: runs calls sent by a coordinator.
+/// `telvax worker [--listen host:port] [--token T]`: runs calls sent by a coordinator.
 fn worker(flags: &[&str]) -> Result<(), CliError> {
     let mut listen = "127.0.0.1:7077".to_string();
-    let mut token = std::env::var("NOVAR_CLUSTER_TOKEN").ok();
+    let mut token = std::env::var("TELVAX_CLUSTER_TOKEN").ok();
     let mut it = flags.iter();
     while let Some(f) = it.next() {
         match (*f, it.next()) {
@@ -92,7 +92,7 @@ fn worker(flags: &[&str]) -> Result<(), CliError> {
             _ => return Err(CliError::Usage),
         }
     }
-    novar_cluster::worker::serve(&listen, token).or_else(failed)
+    telvax_cluster::worker::serve(&listen, token).or_else(failed)
 }
 
 fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError> {
@@ -108,14 +108,14 @@ fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError>
             .parse()
             .or_else(|_| failed(format!("invalid PORT `{p}`")))?;
     }
-    opts.live |= std::env::var("NOVAR_LIVE").is_ok_and(|v| v == "1");
+    opts.live |= std::env::var("TELVAX_LIVE").is_ok_and(|v| v == "1");
     let loaded = bundle.load();
     serve::run(lower_loaded(&loaded)?.0, &opts, None)
 }
 
-/// Splits `--workers host:port,host:port` out of `args`; `NOVAR_WORKERS` is the default.
+/// Splits `--workers host:port,host:port` out of `args`; `TELVAX_WORKERS` is the default.
 pub fn take_workers<'a>(args: &[&'a str]) -> (Option<Vec<String>>, Vec<&'a str>) {
-    let mut workers = std::env::var("NOVAR_WORKERS")
+    let mut workers = std::env::var("TELVAX_WORKERS")
         .ok()
         .filter(|w| !w.is_empty());
     let mut rest = Vec::new();
@@ -144,8 +144,8 @@ pub fn attach_cluster(
     workers: Vec<String>,
     image: &bundle::Bundle,
 ) -> Result<(), CliError> {
-    let token = std::env::var("NOVAR_CLUSTER_TOKEN").ok();
-    let exec = novar_cluster::ClusterExecutor::new(workers, image, token).or_else(failed)?;
+    let token = std::env::var("TELVAX_CLUSTER_TOKEN").ok();
+    let exec = telvax_cluster::ClusterExecutor::new(workers, image, token).or_else(failed)?;
     interp.set_executor(std::sync::Arc::new(exec));
     Ok(())
 }
@@ -153,15 +153,15 @@ pub fn attach_cluster(
 /// Splits `--device cpu|gpu` out of `args`.
 pub fn take_device<'a>(
     args: &[&'a str],
-) -> Result<(novar_runtime::Device, Vec<&'a str>), CliError> {
-    let mut device = novar_runtime::Device::Cpu;
+) -> Result<(telvax_runtime::Device, Vec<&'a str>), CliError> {
+    let mut device = telvax_runtime::Device::Cpu;
     let mut rest = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if *a == "--device" {
             device = match it.next().copied() {
-                Some("gpu") => novar_runtime::Device::Gpu,
-                Some("cpu") => novar_runtime::Device::Cpu,
+                Some("gpu") => telvax_runtime::Device::Gpu,
+                Some("cpu") => telvax_runtime::Device::Cpu,
                 other => {
                     return failed(format!(
                         "--device takes `cpu` or `gpu`, not {}",
@@ -179,17 +179,17 @@ pub fn take_device<'a>(
 /// Splits `--quantize int8|int8-channel|int4-channel|none` out of `args`.
 pub fn take_quantize<'a>(
     args: &[&'a str],
-) -> Result<(novar_hir::Quantization, Vec<&'a str>), CliError> {
-    let mut quant = novar_hir::Quantization::None;
+) -> Result<(telvax_hir::Quantization, Vec<&'a str>), CliError> {
+    let mut quant = telvax_hir::Quantization::None;
     let mut rest = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if *a == "--quantize" {
             quant = match it.next().copied() {
-                Some("int8") => novar_hir::Quantization::Int8,
-                Some("int8-channel") => novar_hir::Quantization::Int8Channel,
-                Some("int4-channel") => novar_hir::Quantization::Int4Channel,
-                Some("none") => novar_hir::Quantization::None,
+                Some("int8") => telvax_hir::Quantization::Int8,
+                Some("int8-channel") => telvax_hir::Quantization::Int8Channel,
+                Some("int4-channel") => telvax_hir::Quantization::Int4Channel,
+                Some("none") => telvax_hir::Quantization::None,
                 other => {
                     return failed(format!(
                         "--quantize takes `int8`, `int8-channel`, `int4-channel` or `none`, not {}",
@@ -216,16 +216,16 @@ pub fn failed<T>(msg: impl Into<String>) -> Result<T, CliError> {
 
 #[derive(Debug)]
 pub struct Checked {
-    pub hir: novar_hir::hir::Program,
+    pub hir: telvax_hir::hir::Program,
     /// Everything needed to rebuild the program without the source tree.
     pub bundle: bundle::Bundle,
 }
 
 /// Type-checks a loaded program, printing every diagnostic against the file it belongs to.
 fn lower_loaded(
-    loaded: &novar_modules::Loaded,
-) -> Result<(novar_hir::hir::Program, usize), CliError> {
-    let (hir, diags) = novar_hir::lower(&loaded.program);
+    loaded: &telvax_modules::Loaded,
+) -> Result<(telvax_hir::hir::Program, usize), CliError> {
+    let (hir, diags) = telvax_hir::lower(&loaded.program);
     let all: Vec<Diagnostic> = loaded.diagnostics.iter().cloned().chain(diags).collect();
     eprint!(
         "{}",
@@ -243,16 +243,16 @@ fn lower_loaded(
     Ok((hir, all.len()))
 }
 
-/// Loads `file` with its modules and the dependencies of its project (if it has a `novar.toml`),
+/// Loads `file` with its modules and the dependencies of its project (if it has a `telvax.toml`),
 /// then type-checks everything. Errors from any file are printed against that file.
 pub fn check_project(file: &str) -> Result<Checked, CliError> {
     let path = Path::new(file);
-    let deps = match novar_pkg::Project::discover(path) {
+    let deps = match telvax_pkg::Project::discover(path) {
         Ok(Some(project)) => project.dependency_packages().or_else(failed)?,
         Ok(None) => Vec::new(),
         Err(e) => return failed(e),
     };
-    let loaded = novar_modules::load(path, &deps).or_else(failed)?;
+    let loaded = telvax_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
     eprintln!("`{file}` ok");
     let bundle = bundle::Bundle::new(file, &loaded, &deps);
@@ -260,7 +260,7 @@ pub fn check_project(file: &str) -> Result<Checked, CliError> {
 }
 
 /// Parses and checks `file`, printing diagnostics. Fails if any is an error.
-pub fn check(file: &str) -> Result<novar_hir::hir::Program, CliError> {
+pub fn check(file: &str) -> Result<telvax_hir::hir::Program, CliError> {
     check_project(file).map(|c| c.hir)
 }
 
@@ -297,7 +297,7 @@ fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     Ok(())
 }
 
-/// `novar fmt [--check] <file>...`: rewrites files in place, or only reports with `--check`.
+/// `telvax fmt [--check] <file>...`: rewrites files in place, or only reports with `--check`.
 fn fmt(args: &[&str]) -> Result<(), CliError> {
     let check = args.contains(&"--check");
     let files: Vec<&str> = args.iter().copied().filter(|a| *a != "--check").collect();
@@ -310,12 +310,12 @@ fn fmt(args: &[&str]) -> Result<(), CliError> {
             let mut src = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut src)
                 .or_else(|e| failed(format!("cannot read stdin: {e}")))?;
-            print!("{}", novar_fmt::format(&src).or_else(failed)?);
+            print!("{}", telvax_fmt::format(&src).or_else(failed)?);
             continue;
         }
         let src = std::fs::read_to_string(file)
             .or_else(|e| failed(format!("cannot read `{file}`: {e}")))?;
-        let formatted = novar_fmt::format(&src).or_else(|e| failed(format!("`{file}`: {e}")))?;
+        let formatted = telvax_fmt::format(&src).or_else(|e| failed(format!("`{file}`: {e}")))?;
         if formatted == src {
             continue;
         }
@@ -334,7 +334,7 @@ fn fmt(args: &[&str]) -> Result<(), CliError> {
     Ok(())
 }
 
-/// `novar lint <file> [--deny-warnings]`: type-checks, then reports unused code.
+/// `telvax lint <file> [--deny-warnings]`: type-checks, then reports unused code.
 fn lint(file: &str, flags: &[&str]) -> Result<(), CliError> {
     let deny = match flags {
         [] => false,
@@ -342,14 +342,14 @@ fn lint(file: &str, flags: &[&str]) -> Result<(), CliError> {
         _ => return Err(CliError::Usage),
     };
     let path = Path::new(file);
-    let deps = match novar_pkg::Project::discover(path) {
+    let deps = match telvax_pkg::Project::discover(path) {
         Ok(Some(project)) => project.dependency_packages().or_else(failed)?,
         Ok(None) => Vec::new(),
         Err(e) => return failed(e),
     };
-    let loaded = novar_modules::load(path, &deps).or_else(failed)?;
+    let loaded = telvax_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
-    let warnings = novar_lint::lint(&hir);
+    let warnings = telvax_lint::lint(&hir);
     eprint!(
         "{}",
         loaded

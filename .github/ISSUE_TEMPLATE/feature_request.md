@@ -1,6 +1,6 @@
 ---
 name: Idea or feature request
-about: Something you would like Novar to do
+about: Something you would like Telvax to do
 labels: enhancement
 ---
 
@@ -8,7 +8,7 @@ labels: enhancement
 
 **What would you write? (a short example of the code you wish worked)**
 
-```novar
+```telvax
 
 ```
 

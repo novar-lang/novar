@@ -3,7 +3,7 @@ const assert = require("node:assert");
 const path = require("node:path");
 const vscode = require("vscode");
 
-const ws = process.env.NOVAR_TEST_WORKSPACE;
+const ws = process.env.TELVAX_TEST_WORKSPACE;
 const open = async (name) => {
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(path.join(ws, name)));
   await vscode.window.showTextDocument(doc);
@@ -21,16 +21,16 @@ async function until(what, fn, timeoutMs = 30000) {
 }
 
 async function run() {
-  const ok = await open("ok.nv");
-  assert.strictEqual(ok.languageId, "novar", "the .nv extension must map to the novar language");
+  const ok = await open("ok.tvx");
+  assert.strictEqual(ok.languageId, "telvax", "the .tvx extension must map to the telvax language");
 
-  const ext = vscode.extensions.getExtension("novar-lang.novar");
+  const ext = vscode.extensions.getExtension("telvax.telvax");
   assert.ok(ext, "the extension is installed in the test host");
   await ext.activate();
 
   // Diagnostics come from the language server.
-  const bad = await open("bad.nv");
-  const diagnostics = await until("diagnostics for bad.nv", () => {
+  const bad = await open("bad.tvx");
+  const diagnostics = await until("diagnostics for bad.tvx", () => {
     const d = vscode.languages.getDiagnostics(bad.uri);
     return d.length ? d : null;
   });
@@ -38,7 +38,7 @@ async function run() {
     diagnostics.some((d) => d.message.includes("mismatched types")),
     `expected a type error, got ${JSON.stringify(diagnostics.map((d) => d.message))}`,
   );
-  assert.deepStrictEqual(vscode.languages.getDiagnostics(ok.uri), [], "ok.nv has no problems");
+  assert.deepStrictEqual(vscode.languages.getDiagnostics(ok.uri), [], "ok.tvx has no problems");
 
   // Hover on `norm` in the call on line 5.
   const hovers = await until("a hover", async () => {
@@ -94,7 +94,7 @@ async function run() {
   assert.ok(labels.includes("norm") || labels.includes("origin"), `completions: ${labels.slice(0, 10)}`);
 
   // Formatting rewrites a messy file.
-  const messy = await open("messy.nv");
+  const messy = await open("messy.tvx");
   // The server learns about the document asynchronously, so ask until it answers.
   const edits = await until("a formatting edit", async () => {
     const e = await vscode.commands.executeCommand(

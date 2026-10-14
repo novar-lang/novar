@@ -1,6 +1,6 @@
 [package]
-name = "novar_bench"
-description = "Novar: alpha benchmarks (RAG serving overhead, memory footprint, ingestion throughput)"
+name = "telvax_bench"
+description = "Telvax: alpha benchmarks (RAG serving overhead, memory footprint, ingestion throughput)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_hir = { version = "0.0.4", path = "../compiler/semantic" }
-novar_parser = { version = "0.0.4", path = "../compiler/parser" }
-novar_runtime = { version = "0.0.4", path = "../runtime" }
+telvax_hir = { version = "0.0.4", path = "../compiler/semantic" }
+telvax_parser = { version = "0.0.4", path = "../compiler/parser" }
+telvax_runtime = { version = "0.0.4", path = "../runtime" }
 serde_json = "1"

@@ -21,9 +21,9 @@ use melior::utility::{
     parse_pass_pipeline, register_all_dialects, register_all_llvm_translations, register_all_passes,
 };
 use melior::{Context, ExecutionEngine};
-use novar_diagnostics::Diagnostic;
-use novar_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
-use novar_hir::{Prim, Quantization, Ty};
+use telvax_diagnostics::Diagnostic;
+use telvax_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
+use telvax_hir::{Prim, Quantization, Ty};
 
 mod tensor;
 
@@ -274,7 +274,7 @@ fn declare_support<'c>(cx: &Cx<'c, '_>, module: &Module<'c>) {
     }
 }
 
-/// `__novar_itoa(value: i64, signed: i1) -> (ptr, len)`: decimal text in a fresh 24-byte buffer.
+/// `__telvax_itoa(value: i64, signed: i1) -> (ptr, len)`: decimal text in a fresh 24-byte buffer.
 fn build_itoa<'c>(cx: &Cx<'c, '_>) -> melior::ir::Operation<'c> {
     let (ctx, loc) = (cx.ctx, Location::unknown(cx.ctx));
     let (i64t, i1t, i8t, ptr) = (cx.i(64), cx.i(1), cx.i(8), cx.ptr());
@@ -381,7 +381,7 @@ fn build_itoa<'c>(cx: &Cx<'c, '_>) -> melior::ir::Operation<'c> {
 
     func::func(
         ctx,
-        StringAttribute::new(ctx, "__novar_itoa"),
+        StringAttribute::new(ctx, "__telvax_itoa"),
         TypeAttribute::new(FunctionType::new(ctx, &[i64t, i1t], &[ptr, i64t]).into()),
         region,
         &[(
@@ -1354,7 +1354,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
             ExprKind::Extern(path) => {
                 Err(self.unsupported(&format!("the std item `{}`", path.join("::")), &callee.span))
             }
-            _ => Err(self.unsupported("calls to anything but Novar functions", &e.span)),
+            _ => Err(self.unsupported("calls to anything but Telvax functions", &e.span)),
         }
     }
 
@@ -1396,7 +1396,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                 self.cx.state.itoa.set(true);
                 let call = func::call(
                     ctx,
-                    FlatSymbolRefAttribute::new(ctx, "__novar_itoa"),
+                    FlatSymbolRefAttribute::new(ctx, "__telvax_itoa"),
                     &[wide, flag],
                     &[self.cx.ptr(), i64_ty],
                     self.loc,

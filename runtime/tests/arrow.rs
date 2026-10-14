@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use novar_runtime::{Interp, TensorVal, Value};
 use serde_json::json;
+use telvax_runtime::{Interp, TensorVal, Value};
 
 fn load(src: &str) -> Interp {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "parse: {perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "check: {:?}",
@@ -50,7 +50,7 @@ fn f32s(shape: &[usize], data: &[f32]) -> Value {
 /// another was reading it made a SQL test see an empty table now and then.
 fn scratch(name: &str) -> String {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!("novar-arrow-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-arrow-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     dir.join(format!("{n}-{name}"))
@@ -339,7 +339,7 @@ fn int8_quantized_matmul_stays_close_to_float() {
     let fp = tensor(exact.call("mm", vec![ta.clone(), tb.clone()]).unwrap()).to_f32_vec();
 
     let quant = load(src);
-    quant.set_quantization(novar_hir::Quantization::Int8);
+    quant.set_quantization(telvax_hir::Quantization::Int8);
     let q = tensor(quant.call("mm", vec![ta, tb]).unwrap()).to_f32_vec();
 
     assert_ne!(fp, q, "quantization must actually change the arithmetic");
@@ -360,7 +360,7 @@ fn int8_quantized_matmul_stays_close_to_float() {
 fn int8_quantization_handles_zeros_and_exact_cases() {
     let src = "fn mm(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }";
     let i = load(src);
-    i.set_quantization(novar_hir::Quantization::Int8);
+    i.set_quantization(telvax_hir::Quantization::Int8);
     let zero = f32s(&[2, 2], &[0.0; 4]);
     assert_eq!(
         tensor(i.call("mm", vec![zero.clone(), zero]).unwrap()).to_f32_vec(),
@@ -390,12 +390,12 @@ fn per_channel_quantization_is_more_accurate_when_columns_differ() {
         })
         .collect();
     let (ta, tb) = (f32s(&[6, 16], &a), f32s(&[16, 4], &b));
-    let run_with = |q: novar_hir::Quantization| {
+    let run_with = |q: telvax_hir::Quantization| {
         let interp = load(src);
         interp.set_quantization(q);
         tensor(interp.call("mm", vec![ta.clone(), tb.clone()]).unwrap()).to_f32_vec()
     };
-    let exact = run_with(novar_hir::Quantization::None);
+    let exact = run_with(telvax_hir::Quantization::None);
     // Relative error per column, worst case over the rows.
     let worst = |got: &[f32]| {
         (0..4)
@@ -409,9 +409,9 @@ fn per_channel_quantization_is_more_accurate_when_columns_differ() {
             })
             .fold(0.0f32, f32::max)
     };
-    let per_tensor = worst(&run_with(novar_hir::Quantization::Int8));
-    let per_channel = worst(&run_with(novar_hir::Quantization::Int8Channel));
-    let int4 = worst(&run_with(novar_hir::Quantization::Int4Channel));
+    let per_tensor = worst(&run_with(telvax_hir::Quantization::Int8));
+    let per_channel = worst(&run_with(telvax_hir::Quantization::Int8Channel));
+    let int4 = worst(&run_with(telvax_hir::Quantization::Int4Channel));
     println!(
         "worst relative error: per-tensor {per_tensor:.4}, per-channel {per_channel:.4}, int4 {int4:.4}"
     );

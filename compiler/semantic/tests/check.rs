@@ -1,7 +1,7 @@
-use novar_hir::{Ty, hir, lower};
+use telvax_hir::{Ty, hir, lower};
 
 fn check(src: &str) -> (hir::Program, Vec<String>) {
-    let (ast, parse_errs) = novar_parser::parse(src);
+    let (ast, parse_errs) = telvax_parser::parse(src);
     assert!(parse_errs.is_empty(), "parse errors: {parse_errs:?}");
     let (hir, diags) = lower(&ast.unwrap());
     (hir, diags.into_iter().map(|d| d.message).collect())
@@ -26,7 +26,7 @@ fn assert_err(src: &str, needle: &str) {
 
 #[test]
 fn rag_example_is_clean() {
-    let src = include_str!("../../../examples/rag-service.nv");
+    let src = include_str!("../../../examples/rag-service.tvx");
     let (hir, errs) = check(src);
     assert!(errs.is_empty(), "{errs:#?}");
 
@@ -272,10 +272,10 @@ fn closures_and_extern_calls_stay_lenient() {
 #[test]
 fn diagnostics_render_with_source_context() {
     let src = "fn f() -> i32 {\n    \"oops\"\n}\n";
-    let (ast, _) = novar_parser::parse(src);
+    let (ast, _) = telvax_parser::parse(src);
     let (_, diags) = lower(&ast.unwrap());
-    let out = novar_diagnostics::render("main.nv", src, &diags, false);
-    assert!(out.contains("main.nv:2:5"), "{out}");
+    let out = telvax_diagnostics::render("main.tvx", src, &diags, false);
+    assert!(out.contains("main.tvx:2:5"), "{out}");
     assert!(out.contains("expected `i32`, found `String`"), "{out}");
 }
 
@@ -735,7 +735,7 @@ fn tensors_can_be_indexed() {
 
 #[test]
 fn std_registry_can_be_browsed() {
-    use novar_hir::stdlib::{ItemKind, children, methods_of};
+    use telvax_hir::stdlib::{ItemKind, children, methods_of};
     let top = children("std");
     assert!(top.contains(&("text".to_string(), ItemKind::Module)));
     assert!(top.contains(&("collect".to_string(), ItemKind::Function)));
@@ -855,7 +855,7 @@ fn enum_type_errors() {
 // ---- friendlier errors -----------------------------------------------------------------------
 
 fn full(src: &str) -> Vec<(String, Vec<String>)> {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "parse errors: {perrs:?}");
     lower(&ast.unwrap())
         .1
@@ -912,7 +912,7 @@ fn unknown_methods_on_builtin_types_are_compile_errors() {
 #[test]
 fn a_missing_semicolon_is_reported_after_the_previous_token() {
     let src = "fn main() -> i32 {\n    let x = 5\n    x + 1\n}\n";
-    let (_, errs) = novar_parser::parse(src);
+    let (_, errs) = telvax_parser::parse(src);
     let first = &errs[0];
     assert_eq!(first.message, "expected `;` after this");
     // The span is the last character of `5`, not the token that follows.

@@ -1,8 +1,8 @@
-# A tour of Novar
+# A tour of Telvax
 
 ## Functions, types and inference
 
-```novar
+```telvax
 struct Point { x: f64, y: f64 }
 
 fn norm(p: Point) -> f64 { p.x * p.x + p.y * p.y }
@@ -25,13 +25,13 @@ Types: `i8..i64`, `u8..u64`, `f32`, `f64`, `bool`, `String`, `Vec<T>`, `Result<T
 
 `x |> f(a)` means `f(x, a)`, so stages read left to right:
 
-```novar
+```telvax
 let answer = prompt |> llm.complete() |> std::text::trim();
 ```
 
 ## Tensors and tables
 
-```novar
+```telvax
 fn forward(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> {
     x |> std::tensor::matmul(w) |> std::tensor::relu()     // [2,3] x [3,2] -> [2,2], checked
 }
@@ -48,7 +48,7 @@ fn mean_score(t: Table<Row>) -> f32 { std::tensor::mean(t.score) }   // zero-cop
 
 ## HTTP endpoints
 
-```novar
+```telvax
 @endpoint(path = "/v1/score", method = "POST")
 pub fn score(input: In) -> Result<Out, Status> { ... }
 ```
@@ -58,28 +58,28 @@ Returning `Err(Status::BadRequest("..."))` becomes an HTTP 400.
 
 ## Modules and packages
 
-```novar
-import util::clamp;            // ./util.nv
-import mathx::vec::dot;        // dependency `mathx`, file vec.nv
+```telvax
+import util::clamp;            // ./util.tvx
+import mathx::vec::dot;        // dependency `mathx`, file vec.tvx
 ```
 
 ```sh
-nvpm new app && cd app
-nvpm add mathx --registry ~/registry     # or --path ../mathx
-nvpm install --registry ~/registry       # resolves, writes novar.lock, downloads
-nvpm run                                  # runs src/main.nv with the dependencies
+tvpm new app && cd app
+tvpm add mathx --registry ~/registry     # or --path ../mathx
+tvpm install --registry ~/registry       # resolves, writes telvax.lock, downloads
+tvpm run                                  # runs src/main.tvx with the dependencies
 ```
 
 ## Distribution
 
-```novar
+```telvax
 fn work(item: Job) -> Done { ... }
 fn all(jobs: Vec<Job>) -> Vec<Done> { std::dist::map(jobs, work) }
 ```
 
 `std::dist::map` takes the *name* of a top-level function. It runs on local threads by default;
-`novar run app.nv all --workers host1:7077,host2:7077` sends the calls to machines running
-`novar worker`, and `novar.ray.RayExecutor` (Python) sends them to Ray.
+`telvax run app.tvx all --workers host1:7077,host2:7077` sends the calls to machines running
+`telvax worker`, and `telvax.ray.RayExecutor` (Python) sends them to Ray.
 
 ## Quantization
 
@@ -95,14 +95,14 @@ stores the weights in 4 bits. Scales are computed on each call; there is no cali
 ## Accelerators
 
 * `--device gpu` (on `run` and `serve`, needs `cargo build --features gpu`) runs `f32` tensor operations on the GPU through `wgpu`: Metal on macOS, Vulkan on Linux, DX12 on Windows.
-* `novar build file.nv --emit stablehlo` prints StableHLO for the tensor functions in the file, for XLA / PJRT.
-* `novar build file.nv --emit ptx [--sm sm_80]` prints PTX kernels for the tensor operations the file uses (needs `--features llvm`).
+* `telvax build file.tvx --emit stablehlo` prints StableHLO for the tensor functions in the file, for XLA / PJRT.
+* `telvax build file.tvx --emit ptx [--sm sm_80]` prints PTX kernels for the tensor operations the file uses (needs `--features llvm`).
 
 PTX and StableHLO are generated and checked, not executed: see `docs/design/status.md`.
 
 ## Enums, `match`, `break` and `continue`
 
-```novar
+```telvax
 enum Shape { Circle(f64), Rect(f64, f64), Empty }
 
 fn area(s: Shape) -> f64 {
@@ -130,9 +130,9 @@ Enums run in the interpreter; the native backend does not compile them yet.
 ## Formatting and linting
 
 ```sh
-novar fmt file.nv            # rewrite in place
-novar fmt --check file.nv    # list files that would change (exit 1), for CI
-novar lint file.nv           # unused variables, needless `mut`, unused private functions
+telvax fmt file.tvx            # rewrite in place
+telvax fmt --check file.tvx    # list files that would change (exit 1), for CI
+telvax lint file.tvx           # unused variables, needless `mut`, unused private functions
 ```
 
 The language server formats documents too, so VS Code can format on save. It also finds all
@@ -141,11 +141,11 @@ would collide with another one in scope, or when the symbol is a struct or lives
 
 ## Strings and vectors
 
-```novar
+```telvax
 fn demo(s: String) -> u64 {
     let mut words = s.split(" ");           // Vec<String>
     words.push("extra");
-    if s.contains("novar") && !s.starts_with("//") { words.len() } else { 0 }
+    if s.contains("telvax") && !s.starts_with("//") { words.len() } else { 0 }
 }
 ```
 
@@ -156,14 +156,14 @@ native backend still only has `len` and `is_empty`.
 
 ## Option, Map and closures
 
-```novar
+```telvax
 fn demo(text: String) -> i64 {
     let counts: Map<String, i64> = std::map::new();
     for word in text.split(" ") {
         let seen = counts.get(word).unwrap_or(0);   // Option<i64>
         counts.insert(word, seen + 1);
     }
-    match counts.get("novar") {
+    match counts.get("telvax") {
         Some(n) => n,
         None => 0,
     }
@@ -186,7 +186,7 @@ fn demo(text: String) -> i64 {
 
 ## Tables and tensors, the short way
 
-```novar
+```telvax
 struct Sale { id: i64, region: String, units: i64, price: f64 }
 
 fn main() {
@@ -210,11 +210,11 @@ fn main() {
 * `fn main()` may return nothing.
 
 See `examples/dataframe/`. The pandas version of the same program is about as long, but the
-Novar one checks the column names and types before it runs.
+Telvax one checks the column names and types before it runs.
 
 ## Errors, tuples and iterators
 
-```novar
+```telvax
 fn split_pair(line: String) -> Result<(String, String), String> {
     let parts = line.split("=");
     if parts.len() != 2 { return Err(f"bad line: {line}"); }

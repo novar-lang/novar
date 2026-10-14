@@ -16,7 +16,7 @@
 
 ### Tools
 * The language server finds references and renames variables and functions (a rename that would
-  collide with another name is refused). `novar fmt` indents the line after a trailing `=`.
+  collide with another name is refused). `telvax fmt` indents the line after a trailing `=`.
 * Quantization: `--quantize int8-channel` and `--quantize int4-channel` (interpreter only).
 
 ### GPU
@@ -34,8 +34,8 @@
 ## 0.0.3
 
 ### Size
-* Two builds per system: the full `novar` (about 51 MB, down from 58 with full LTO) and a new
-  `novar-lite` (about 10 MB) without SQL and Parquet (tables in memory and CSV still work). `NOVAR_LITE=1` makes the install scripts
+* Two builds per system: the full `telvax` (about 51 MB, down from 58 with full LTO) and a new
+  `telvax-lite` (about 10 MB) without SQL and Parquet (tables in memory and CSV still work). `TELVAX_LITE=1` makes the install scripts
   pick it. Build it yourself with `--no-default-features --features live`.
 
 ### Language and errors
@@ -62,10 +62,10 @@
   They run in the interpreter; the native backend reports them as unsupported.
 
 ### Tools
-* `novar fmt [--check]`: a token-based formatter that keeps comments and your line breaks. The
+* `telvax fmt [--check]`: a token-based formatter that keeps comments and your line breaks. The
   language server formats documents too.
-* `novar lint [--deny-warnings]`: unused variables, needless `mut`, unused private functions.
-* `novar --version` and `--help`.
+* `telvax lint [--deny-warnings]`: unused variables, needless `mut`, unused private functions.
+* `telvax --version` and `--help`.
 
 ### Platforms and releases
 * Windows: CI builds and tests it, releases include a `.zip`, and `scripts/install.ps1` installs
@@ -87,7 +87,7 @@ A first version for trying the language out. Expect rough edges and breaking cha
 ### Works
 * Front end: lexer, parser with error recovery, typed HIR, literal type inference, tensor shapes
   checked at compile time, `Table<Row>`, loops, `let mut`, arrays, f-strings, modules and `import`.
-* `novar check | run | serve | jit | build | lsp | worker`.
+* `telvax check | run | serve | jit | build | lsp | worker`.
 * Interpreter on Arrow: tensors, tables, SQL (DataFusion), CSV and Parquet.
 * `@endpoint` functions served over HTTP, with JSON validation; `build --serve` bundles the
   service into one executable and can write a Dockerfile.
@@ -97,7 +97,7 @@ A first version for trying the language out. Expect rough edges and breaking cha
 * `--device gpu` (`--features gpu`): `f32` tensor operations on the GPU through wgpu.
 * `--emit ptx` and `--emit stablehlo` for NVIDIA and TPU toolchains (generated, **not executed on
   that hardware**).
-* `nvpm` package manager, language server, VS Code extension, Wasm playground, Python bindings
+* `tvpm` package manager, language server, VS Code extension, Wasm playground, Python bindings
   (zero-copy NumPy, Arrow, Polars, PyTorch), Ray executor, cluster workers.
 
 ### Known limits

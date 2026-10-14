@@ -1,6 +1,6 @@
 [package]
-name = "novar_hir"
-description = "Novar: novar_hir"
+name = "telvax_hir"
+description = "Telvax: telvax_hir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_ast = { version = "0.0.4", path = "../ast" }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_ast = { version = "0.0.4", path = "../ast" }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.4", path = "../parser" }
+telvax_parser = { version = "0.0.4", path = "../parser" }

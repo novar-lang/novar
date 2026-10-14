@@ -5,7 +5,7 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-import novar
+import telvax
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -35,10 +35,10 @@ fn best(t: Table<Row>) -> Table<Row> { t |> std::table::sql("SELECT * FROM t WHE
 
 @pytest.fixture(scope="module")
 def prog():
-    return novar.compile(PROGRAM)
+    return telvax.compile(PROGRAM)
 
 
-# ---- calling Novar from Python -------------------------------------------------------------
+# ---- calling Telvax from Python -------------------------------------------------------------
 
 
 def test_scalars_strings_and_unit(prog):
@@ -57,35 +57,35 @@ def test_structs_are_dicts(prog):
 
 
 def test_type_errors_are_reported(prog):
-    with pytest.raises(novar.NovarError, match="argument `a` of `add`"):
+    with pytest.raises(telvax.TelvaxError, match="argument `a` of `add`"):
         prog.call("add", "x", 1)
-    with pytest.raises(novar.NovarError, match="takes 2 argument"):
+    with pytest.raises(telvax.TelvaxError, match="takes 2 argument"):
         prog.call("add", 1)
-    with pytest.raises(novar.NovarError, match="no function"):
+    with pytest.raises(telvax.TelvaxError, match="no function"):
         prog.call("nope")
-    with pytest.raises(novar.NovarError, match="needs the field `y`"):
+    with pytest.raises(telvax.TelvaxError, match="needs the field `y`"):
         prog.call("scale", {"x": 1.0}, 2.0)
-    with pytest.raises(novar.NovarError):
+    with pytest.raises(telvax.TelvaxError):
         prog.call("add", True, 1)  # bool is not an integer
 
 
 def test_runtime_errors_become_exceptions(prog):
-    with pytest.raises(novar.NovarError, match="division by zero"):
+    with pytest.raises(telvax.TelvaxError, match="division by zero"):
         prog.call("boom", 0)
 
 
 def test_compile_errors_carry_diagnostics():
-    with pytest.raises(novar.CompileError) as e:
-        novar.compile("fn f() -> i32 { \"oops\" }", name="bad.nv")
-    assert "bad.nv:1" in str(e.value) and "expected `i32`, found `String`" in str(e.value)
+    with pytest.raises(telvax.CompileError) as e:
+        telvax.compile("fn f() -> i32 { \"oops\" }", name="bad.tvx")
+    assert "bad.tvx:1" in str(e.value) and "expected `i32`, found `String`" in str(e.value)
 
 
 def test_rag_endpoint_and_status_errors():
-    prog = novar.load(str(ROOT / "examples" / "rag-service.nv"))
+    prog = telvax.load(str(ROOT / "examples" / "rag-service.tvx"))
     assert prog.endpoints() == ["handle_rag"]
     out = prog.endpoint("handle_rag", {"query": "tensor shapes", "top_k": 2})
     assert out["query"] == "tensor shapes" and "answer" in out
-    with pytest.raises(novar.StatusError, match="cannot be empty") as e:
+    with pytest.raises(telvax.StatusError, match="cannot be empty") as e:
         prog.endpoint("handle_rag", {"query": "", "top_k": 1})
     assert e.value.status == 400
 
@@ -95,7 +95,7 @@ def test_rag_endpoint_and_status_errors():
 
 def test_numpy_in_is_zero_copy(prog):
     a = np.array([1, 2, 3, 4], dtype=np.float32)
-    t = novar.tensor(a)
+    t = telvax.tensor(a)
     assert t.data_ptr == a.__array_interface__["data"][0], "no copy on the way in"
     assert t.shape == (4,) and t.dtype == "float32"
     assert prog.call("tsum", a) == 10.0
@@ -116,7 +116,7 @@ def test_matrix_shapes(prog):
     b = np.ones((3, 2), dtype=np.float32)
     out = np.asarray(prog.call("mm", a, b))
     assert out.shape == (2, 2) and np.allclose(out, a @ b)
-    with pytest.raises(novar.NovarError, match="expected shape"):
+    with pytest.raises(telvax.TelvaxError, match="expected shape"):
         prog.call("mm", b, a)  # [3, 2] x [2, 3] has the wrong static shape
 
 
@@ -124,20 +124,20 @@ def test_dtype_conversion_copies_only_when_needed(prog):
     f64 = np.array([1, 2, 3, 4], dtype=np.float64)
     assert prog.call("tsum", f64) == 10.0  # f64 -> f32 parameter: converted
     assert prog.call("head", f64) == 1.0
-    t = novar.tensor(f64)
+    t = telvax.tensor(f64)
     assert t.data_ptr == f64.__array_interface__["data"][0]
 
 
 def test_non_contiguous_arrays_are_rejected_not_copied_silently():
     a = np.arange(8, dtype=np.float32)[::2]
-    with pytest.raises(novar.NovarError, match="C-contiguous"):
-        novar.tensor(a)
-    assert novar.tensor(np.ascontiguousarray(a)).shape == (4,)
+    with pytest.raises(telvax.TelvaxError, match="C-contiguous"):
+        telvax.tensor(a)
+    assert telvax.tensor(np.ascontiguousarray(a)).shape == (4,)
 
 
 def test_pyarrow_round_trip_shares_buffers():
     arr = pa.array([1.0, 2.0, 3.0], pa.float32())
-    t = novar.Tensor.from_arrow(arr)
+    t = telvax.Tensor.from_arrow(arr)
     assert t.data_ptr == arr.buffers()[1].address, "imported without copying"
     back = pa.array(t)
     assert back.to_pylist() == [1.0, 2.0, 3.0]
@@ -157,17 +157,17 @@ def test_torch_tensors_share_memory_through_numpy(prog):
     torch = pytest.importorskip("torch")
     x = torch.tensor([1.0, 2.0, 3.0, 4.0])
     assert prog.call("tsum", x.numpy()) == 10.0
-    t = novar.tensor(x.numpy())
-    assert t.data_ptr == x.data_ptr(), "torch -> novar without copying"
+    t = telvax.tensor(x.numpy())
+    assert t.data_ptr == x.data_ptr(), "torch -> telvax without copying"
     y = torch.from_numpy(np.asarray(prog.call("double", x.numpy())))
     assert y.tolist() == [2.0, 4.0, 6.0, 8.0]
 
 
 def test_nested_lists_build_tensors():
-    t = novar.tensor([[1, 2, 3], [4, 5, 6]])
+    t = telvax.tensor([[1, 2, 3], [4, 5, 6]])
     assert t.shape == (2, 3) and t.dtype == "float32" and t.tolist() == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
-    with pytest.raises(novar.NovarError, match="rectangular"):
-        novar.tensor([[1, 2], [3]])
+    with pytest.raises(telvax.TelvaxError, match="rectangular"):
+        telvax.tensor([[1, 2], [3]])
 
 
 # ---- tables ---------------------------------------------------------------------------------
@@ -188,7 +188,7 @@ def test_pyarrow_tables_in_and_out(prog):
     assert prog.call("count", table) == 3
     assert prog.call("mean_score", table) == pytest.approx(7.0 / 3.0, rel=1e-6)
     top = prog.call("best", table)
-    assert isinstance(top, novar.Table) and len(top) == 2 and top.schema == "Row"
+    assert isinstance(top, telvax.Table) and len(top) == 2 and top.schema == "Row"
     assert top.columns == ["id", "score", "name"]
     assert pa.record_batch(top).to_pylist() == [
         {"id": 3, "score": 3.5, "name": "cy"},
@@ -199,9 +199,9 @@ def test_pyarrow_tables_in_and_out(prog):
 
 def test_table_columns_are_zero_copy_tensors(prog):
     table = make_table()
-    t = novar.table(table, "Row")
+    t = telvax.table(table, "Row")
     col = t.column("score")
-    assert isinstance(col, novar.Tensor) and col.data_ptr == table.column("score").chunk(0).buffers()[1].address
+    assert isinstance(col, telvax.Tensor) and col.data_ptr == table.column("score").chunk(0).buffers()[1].address
     assert t.column("name") == ["ann", "bob", "cy"]
 
 
@@ -214,7 +214,7 @@ def test_polars_frames_are_tables(prog):
 
 
 def test_missing_columns_are_reported(prog):
-    with pytest.raises(novar.NovarError, match="no column `name`"):
+    with pytest.raises(telvax.TelvaxError, match="no column `name`"):
         prog.call("count", pa.table({"id": [1], "score": pa.array([1.0], pa.float32())}))
 
 
@@ -237,29 +237,29 @@ class FakeCudaArray:
 
 def test_device_tensors_pass_by_pointer():
     src = FakeCudaArray()
-    d = novar.tensor(src)
-    assert isinstance(d, novar.DeviceTensor)
+    d = telvax.tensor(src)
+    assert isinstance(d, telvax.DeviceTensor)
     assert d.device_ptr == 0x7F0000001000 and d.shape == (2, 3) and d.typestr == "<f4"
     assert d.is_contiguous and d.owner is src
     # Re-exported verbatim, so any other framework can adopt it with no copy.
     assert d.__cuda_array_interface__ == {**src.__cuda_array_interface__, "shape": (2, 3)}
-    again = novar.DeviceTensor.from_cuda(d)
+    again = telvax.DeviceTensor.from_cuda(d)
     assert again.device_ptr == d.device_ptr
 
 
 def test_device_tensor_validation():
-    with pytest.raises(novar.NovarError, match="too old"):
-        novar.tensor(FakeCudaArray(version=1))
-    with pytest.raises(novar.NovarError, match="null device pointer"):
-        novar.tensor(FakeCudaArray(ptr=0))
-    with pytest.raises(novar.NovarError, match="invalid typestr"):
-        novar.tensor(FakeCudaArray(typestr="float"))
-    d = novar.tensor(FakeCudaArray(strides=(4, 8)))
+    with pytest.raises(telvax.TelvaxError, match="too old"):
+        telvax.tensor(FakeCudaArray(version=1))
+    with pytest.raises(telvax.TelvaxError, match="null device pointer"):
+        telvax.tensor(FakeCudaArray(ptr=0))
+    with pytest.raises(telvax.TelvaxError, match="invalid typestr"):
+        telvax.tensor(FakeCudaArray(typestr="float"))
+    d = telvax.tensor(FakeCudaArray(strides=(4, 8)))
     assert not d.is_contiguous
 
 
 def test_device_tensors_cannot_enter_cpu_functions(prog):
-    with pytest.raises(novar.NovarError, match="device \\(GPU\\) tensor"):
+    with pytest.raises(telvax.TelvaxError, match="device \\(GPU\\) tensor"):
         prog.call("tsum", FakeCudaArray(shape=(4,)))
 
 
@@ -300,48 +300,48 @@ def test_a_python_callable_can_execute_mapped_calls():
 
     def executor(function, items):
         calls.append((function, len(items)))
-        prog = novar.compile(DIST)
+        prog = telvax.compile(DIST)
         return [prog.call_json(function, item) for item in items]
 
-    prog = novar.compile(DIST)
+    prog = telvax.compile(DIST)
     assert prog.call("squares", [1, 2, 3]) == [1, 4, 9], "without an executor it runs locally"
     prog.set_executor(executor)
     assert prog.call("squares", [4, 5, 6]) == [16, 25, 36]
     assert calls == [("square", 3)]
 
 
-def test_executor_errors_surface_as_novar_errors():
-    prog = novar.compile(DIST)
+def test_executor_errors_surface_as_telvax_errors():
+    prog = telvax.compile(DIST)
 
     def broken(function, items):
         raise RuntimeError("cluster is down")
 
     prog.set_executor(broken)
-    with pytest.raises(novar.NovarError, match="cluster is down"):
+    with pytest.raises(telvax.TelvaxError, match="cluster is down"):
         prog.call("squares", [1])
 
     prog.set_executor(lambda f, items: ["not json"])
-    with pytest.raises(novar.NovarError, match="invalid JSON"):
+    with pytest.raises(telvax.TelvaxError, match="invalid JSON"):
         prog.call("squares", [1])
 
 
 def test_call_json_runs_one_item():
-    prog = novar.compile(DIST)
+    prog = telvax.compile(DIST)
     assert prog.call_json("square", "12") == "144"
-    with pytest.raises(novar.NovarError, match="argument"):
+    with pytest.raises(telvax.TelvaxError, match="argument"):
         prog.call_json("square", '"x"')
 
 
 def test_mapped_calls_run_as_ray_tasks():
     ray = pytest.importorskip("ray")
-    import novar.ray as nray
+    import telvax.ray as nray
 
     ray.init(num_cpus=4, include_dashboard=False, ignore_reinit_error=True, log_to_driver=False)
     try:
-        prog = novar.compile(DIST)
+        prog = telvax.compile(DIST)
         prog.set_executor(nray.RayExecutor(DIST))
         assert prog.call("squares", list(range(50))) == [x * x for x in range(50)]
-        local = novar.compile(DIST)
+        local = telvax.compile(DIST)
         items = list(range(1, 400))
         assert prog.call("longest", items) == local.call("longest", items)
         # Same answers with one task per item.
@@ -367,14 +367,14 @@ fn make(kind: i64) -> Shape {
 
 
 def test_enums_use_the_json_shape():
-    p = novar.compile(ENUMS)
+    p = telvax.compile(ENUMS)
     assert p.call("area", {"Circle": 2.0}) == 12.0
     assert p.call("area", {"Rect": [2.0, 3.5]}) == 7.0
     assert p.call("area", "Empty") == 0.0
     assert p.call("make", 0) == {"Circle": 1.5}
     assert p.call("make", 1) == {"Rect": [2.0, 3.0]}
     assert p.call("make", 2) == "Empty"
-    with pytest.raises(novar.NovarError):
+    with pytest.raises(telvax.TelvaxError):
         p.call("area", "Triangle")
 
 
@@ -395,7 +395,7 @@ fn total(x: Tensor<f32, [4]>) -> f32 { (x * 2.0 + x).sum() }
 
 
 def test_option_and_map_cross_the_boundary():
-    p = novar.compile(OPT_MAP)
+    p = telvax.compile(OPT_MAP)
     assert p.call("maybe", True) == "yes"
     assert p.call("maybe", False) is None
     assert p.call("word_counts", "a b a") == {"a": 2, "b": 1}
@@ -405,5 +405,5 @@ def test_option_and_map_cross_the_boundary():
 
 
 def test_tensor_operators_run_from_python():
-    p = novar.compile(OPT_MAP)
+    p = telvax.compile(OPT_MAP)
     assert p.call("total", np.ones(4, np.float32)) == 12.0

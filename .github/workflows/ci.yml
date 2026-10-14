@@ -29,7 +29,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
       - name: Examples are formatted
-        run: cargo run -q -p novar_cli -- fmt --check examples/rag-service.nv examples/basics/primes.nv examples/basics/sieve.nv examples/hello-world/hello.nv examples/dataframe/sales.nv
+        run: cargo run -q -p telvax_cli -- fmt --check examples/rag-service.tvx examples/basics/primes.tvx examples/basics/sieve.tvx examples/hello-world/hello.tvx examples/dataframe/sales.tvx
 
   deny:
     runs-on: ubuntu-latest
@@ -63,8 +63,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p novar_runtime -p novar_cli --features novar_cli/gpu --all-targets
-      - run: cargo test -p novar_runtime --features gpu --no-run
+      - run: cargo clippy -p telvax_runtime -p telvax_cli --features telvax_cli/gpu --all-targets
+      - run: cargo test -p telvax_runtime --features gpu --no-run
 
   # Windows runs the same tests as Linux.
   windows:
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p novar_cli --no-default-features --features live
+      - run: cargo test -p telvax_cli --no-default-features --features live
 
   # The same tests as Linux and Windows, on macOS (Apple silicon). The runners have no GPU, so
   # the GPU tests do not run here either.
@@ -116,12 +116,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p novar_cli --no-default-features --features live
-      - run: cargo build --release -p novar_bench
+      - run: cargo build --release -p telvax_cli --no-default-features --features live
+      - run: cargo build --release -p telvax_bench
       # Shared runners are noisy: one retry before calling it a regression.
       - name: RAG overhead and memory
         run: |
-          target/release/rag_latency target/release/novar --docs 2000 --check ||
-            target/release/rag_latency target/release/novar --docs 2000 --check
+          target/release/rag_latency target/release/telvax --docs 2000 --check ||
+            target/release/rag_latency target/release/telvax --docs 2000 --check
       - name: Interpreter speed
-        run: benchmarks/speed.sh target/release/novar
+        run: benchmarks/speed.sh target/release/telvax

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use novar_ast::*;
+use telvax_ast::*;
 
 pub struct Rewriter<'a> {
     /// Module-level name -> program-wide name.

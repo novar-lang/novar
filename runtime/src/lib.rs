@@ -1,4 +1,4 @@
-//! Novar runtime: a tree-walking interpreter over the typed HIR plus the std implementations.
+//! Telvax runtime: a tree-walking interpreter over the typed HIR plus the std implementations.
 
 // wgpu's types nest deeply enough that proving `Send` for the GPU handle overflows the default
 // limit (a warning today, a hard error in a future compiler).

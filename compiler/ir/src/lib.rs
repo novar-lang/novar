@@ -1,6 +1,6 @@
 //! Lowering of the typed HIR to MLIR (`func`, `arith` and `cf` dialects), plus a JIT for it.
 //!
-//! The native backend covers the numeric core of Novar: integers, floats and booleans, local
+//! The native backend covers the numeric core of Telvax: integers, floats and booleans, local
 //! bindings, arithmetic and comparisons, `if`/`else`, early `return` and calls between
 //! functions. Anything else is reported as a diagnostic instead of being miscompiled.
 //!

@@ -1,4 +1,4 @@
-//! The Novar playground engine: type-check and run programs inside a browser tab.
+//! The Telvax playground engine: type-check and run programs inside a browser tab.
 //!
 //! Everything crosses the JS boundary as JSON strings so the page needs no glue code beyond
 //! `JSON.parse`. Programs run in the interpreter with a step limit, with the offline model
@@ -7,9 +7,9 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-use novar_lsp::analysis::Snapshot;
-use novar_runtime::Interp;
 use serde_json::{Value as Json, json};
+use telvax_lsp::analysis::Snapshot;
+use telvax_runtime::Interp;
 use wasm_bindgen::prelude::*;
 
 /// How many evaluation steps a run may take before it is stopped.
@@ -60,7 +60,7 @@ pub fn check(source: &str) -> String {
     json!({
         "ok": ok,
         "diagnostics": diagnostics_json(&snap),
-        "rendered": novar_diagnostics::render("playground.nv", source, &snap.diagnostics, false),
+        "rendered": telvax_diagnostics::render("playground.tvx", source, &snap.diagnostics, false),
     })
     .to_string()
 }
@@ -168,5 +168,5 @@ fn lsp_position(line: u32, character: u32) -> lsp_types_position::Position {
 }
 
 mod lsp_types_position {
-    pub use novar_lsp::position::Position;
+    pub use telvax_lsp::position::Position;
 }

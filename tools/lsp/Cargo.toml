@@ -1,6 +1,6 @@
 [package]
-name = "novar_lsp"
-description = "Novar: language server (diagnostics, hover, completion, go to definition, inlay hints)"
+name = "telvax_lsp"
+description = "Telvax: language server (diagnostics, hover, completion, go to definition, inlay hints)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,26 +12,26 @@ publish = false
 workspace = true
 
 [lib]
-name = "novar_lsp"
+name = "telvax_lsp"
 
 [[bin]]
-name = "novar-lsp"
+name = "telvax-lsp"
 path = "src/main.rs"
 
 [features]
 default = ["project"]
-# Find a project's installed dependencies through `novar.toml` (needs the package manager, which
+# Find a project's installed dependencies through `telvax.toml` (needs the package manager, which
 # pulls in an HTTP client: off for the WebAssembly build).
-project = ["dep:novar_pkg"]
+project = ["dep:telvax_pkg"]
 
 [dependencies]
 lsp-server = "0.10"
 lsp-types = "0.97"
-novar_fmt = { version = "0.0.4", path = "../formatter" }
-novar_diagnostics = { version = "0.0.4", path = "../../compiler/diagnostics" }
-novar_hir = { version = "0.0.4", path = "../../compiler/semantic" }
-novar_modules = { version = "0.0.4", path = "../../compiler/modules" }
-novar_parser = { version = "0.0.4", path = "../../compiler/parser" }
-novar_pkg = { version = "0.0.4", path = "../package-manager", optional = true }
+telvax_fmt = { version = "0.0.4", path = "../formatter" }
+telvax_diagnostics = { version = "0.0.4", path = "../../compiler/diagnostics" }
+telvax_hir = { version = "0.0.4", path = "../../compiler/semantic" }
+telvax_modules = { version = "0.0.4", path = "../../compiler/modules" }
+telvax_parser = { version = "0.0.4", path = "../../compiler/parser" }
+telvax_pkg = { version = "0.0.4", path = "../package-manager", optional = true }
 serde = "1"
 serde_json = "1"

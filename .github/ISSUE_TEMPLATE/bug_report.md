@@ -8,9 +8,9 @@ labels: bug
 
 **What you expected**
 
-**Smallest `.nv` program that shows it**
+**Smallest `.tvx` program that shows it**
 
-```novar
+```telvax
 
 ```
 
@@ -19,4 +19,4 @@ labels: bug
 ```
 ```
 
-**Version and system** (`novar --version`, OS, how you installed)
+**Version and system** (`telvax --version`, OS, how you installed)

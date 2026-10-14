@@ -1,6 +1,6 @@
 //! Native code generation: MLIR (LLVM dialect) -> LLVM IR -> optimised object -> executable.
 //!
-//! The pipeline is `novar_mlir::lower` (HIR to `func`/`arith`/`cf`), conversion to the LLVM
+//! The pipeline is `telvax_mlir::lower` (HIR to `func`/`arith`/`cf`), conversion to the LLVM
 //! dialect, translation to textual LLVM IR, then `inkwell` parses, verifies and optimises it and
 //! asks the host target machine for an object file. Linking is delegated to the system `cc`.
 //!

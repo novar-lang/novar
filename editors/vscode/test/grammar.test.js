@@ -1,4 +1,4 @@
-// Tokenises Novar code with the same TextMate engine VS Code uses and checks the scopes.
+// Tokenises Telvax code with the same TextMate engine VS Code uses and checks the scopes.
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
@@ -15,15 +15,15 @@ const onigLib = oniguruma.loadWASM(wasm).then(() => ({
 const registry = new vsctm.Registry({
   onigLib,
   loadGrammar: async (scope) => {
-    if (scope !== "source.novar") return null;
-    const file = path.join(__dirname, "../syntaxes/novar.tmLanguage.json");
+    if (scope !== "source.telvax") return null;
+    const file = path.join(__dirname, "../syntaxes/telvax.tmLanguage.json");
     return vsctm.parseRawGrammar(fs.readFileSync(file, "utf8"), file);
   },
 });
 
 /** Returns [text, scopes] for every token of every line. */
 async function tokenize(source) {
-  const grammar = await registry.loadGrammar("source.novar");
+  const grammar = await registry.loadGrammar("source.telvax");
   let ruleStack = vsctm.INITIAL;
   const out = [];
   for (const line of source.split("\n")) {
@@ -103,11 +103,11 @@ test("numbers, booleans, comments and control flow", async () => {
 
 test("the example programs tokenise without raw leftovers", async () => {
   const dir = path.join(__dirname, "../../../examples");
-  const files = [path.join(dir, "rag-service.nv"), path.join(dir, "basics/primes.nv"), path.join(dir, "basics/sieve.nv")];
+  const files = [path.join(dir, "rag-service.tvx"), path.join(dir, "basics/primes.tvx"), path.join(dir, "basics/sieve.tvx")];
   for (const file of files) {
     const tokens = await tokenize(fs.readFileSync(file, "utf8"));
     assert.ok(tokens.length > 50, file);
-    const unscoped = tokens.filter(([text, scopes]) => /[A-Za-z_]{2,}/.test(text) && scopes.length === 1 && scopes[0] === "source.novar");
+    const unscoped = tokens.filter(([text, scopes]) => /[A-Za-z_]{2,}/.test(text) && scopes.length === 1 && scopes[0] === "source.telvax");
     // Plain variables stay unscoped; keywords and declarations must never be.
     assert.ok(!unscoped.some(([text]) => ["fn", "let", "struct", "return", "import", "pub"].includes(text)), file);
   }

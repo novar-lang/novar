@@ -1,6 +1,6 @@
 [package]
-name = "novar_codegen"
-description = "Novar: novar_codegen"
+name = "telvax_codegen"
+description = "Telvax: telvax_codegen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,17 +13,17 @@ workspace = true
 
 [features]
 # Object/executable generation through LLVM 22 (needs LLVM installed; see scripts/llvm-env.sh).
-llvm = ["dep:novar_hir", "dep:novar_diagnostics", "dep:novar_mlir", "novar_mlir/llvm", "dep:inkwell", "dep:melior", "dep:mlir-sys", "dep:libc"]
+llvm = ["dep:telvax_hir", "dep:telvax_diagnostics", "dep:telvax_mlir", "telvax_mlir/llvm", "dep:inkwell", "dep:melior", "dep:mlir-sys", "dep:libc"]
 
 [dependencies]
 inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-prefer-dynamic", "target-x86", "target-aarch64"], optional = true }
 libc = { version = "0.2", optional = true }
 melior = { version = "0.27", optional = true }
 mlir-sys = { version = "220", optional = true }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics", optional = true }
-novar_hir = { version = "0.0.4", path = "../semantic", optional = true }
-novar_mlir = { version = "0.0.4", path = "../ir", optional = true }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics", optional = true }
+telvax_hir = { version = "0.0.4", path = "../semantic", optional = true }
+telvax_mlir = { version = "0.0.4", path = "../ir", optional = true }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.4", path = "../parser" }
-novar_runtime = { version = "0.0.4", path = "../../runtime" }
+telvax_parser = { version = "0.0.4", path = "../parser" }
+telvax_runtime = { version = "0.0.4", path = "../../runtime" }

@@ -1,11 +1,11 @@
 // Programs offered in the playground. `run` is the function started by default.
 export const EXAMPLES = [
   {
-    name: "Hello, Novar",
+    name: "Hello, Telvax",
     run: "main",
     source: `fn main() -> i32 {
     std::io::println("hello, world");
-    let name = "Novar";
+    let name = "Telvax";
     std::io::println(f"{name} has {name.len()} letters");
     0
 }

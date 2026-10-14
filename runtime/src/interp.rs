@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 
-use novar_hir::Ty;
-use novar_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
 use serde_json::Value as Json;
+use telvax_hir::Ty;
+use telvax_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
 
 use crate::std_impl;
 
@@ -191,19 +191,19 @@ impl Interp {
     }
 
     /// Embeds `text` the way `OllamaEmbedder.embed` would: with Ollama (`OLLAMA_HOST`, model
-    /// `NOVAR_EMBED_MODEL`) when live, otherwise with the offline stand-in. Used to seed stores.
+    /// `TELVAX_EMBED_MODEL`) when live, otherwise with the offline stand-in. Used to seed stores.
     pub fn embed(&self, text: &str) -> Result<Vec<f32>, RuntimeError> {
         #[cfg(feature = "live")]
         if self.is_live() {
             let host =
                 std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into());
             let model =
-                std::env::var("NOVAR_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text".into());
+                std::env::var("TELVAX_EMBED_MODEL").unwrap_or_else(|_| "nomic-embed-text".into());
             return crate::services::ollama_embed(
                 &host,
                 &model,
                 text,
-                novar_hir::stdlib::EMBEDDING_DIM as usize,
+                telvax_hir::stdlib::EMBEDDING_DIM as usize,
             );
         }
         Ok(crate::std_impl::embed_text(text))
@@ -221,23 +221,23 @@ impl Interp {
     }
 
     /// Runs `f32` matrix multiplications at the given precision (see [`Quantization`]).
-    pub fn set_quantization(&self, q: novar_hir::Quantization) {
+    pub fn set_quantization(&self, q: telvax_hir::Quantization) {
         let v = match q {
-            novar_hir::Quantization::None => 0,
-            novar_hir::Quantization::Int8 => 1,
-            novar_hir::Quantization::Int8Channel => 2,
-            novar_hir::Quantization::Int4Channel => 3,
+            telvax_hir::Quantization::None => 0,
+            telvax_hir::Quantization::Int8 => 1,
+            telvax_hir::Quantization::Int8Channel => 2,
+            telvax_hir::Quantization::Int4Channel => 3,
         };
         self.quantization
             .store(v, std::sync::atomic::Ordering::Relaxed);
     }
 
-    pub(crate) fn quantization(&self) -> novar_hir::Quantization {
+    pub(crate) fn quantization(&self) -> telvax_hir::Quantization {
         match self.quantization.load(std::sync::atomic::Ordering::Relaxed) {
-            1 => novar_hir::Quantization::Int8,
-            2 => novar_hir::Quantization::Int8Channel,
-            3 => novar_hir::Quantization::Int4Channel,
-            _ => novar_hir::Quantization::None,
+            1 => telvax_hir::Quantization::Int8,
+            2 => telvax_hir::Quantization::Int8Channel,
+            3 => telvax_hir::Quantization::Int4Channel,
+            _ => telvax_hir::Quantization::None,
         }
     }
 
@@ -311,7 +311,7 @@ impl Interp {
         let pg = if self.is_live() && url.starts_with("postgres") {
             Some(crate::services::PgStore::connect(
                 url,
-                novar_hir::stdlib::EMBEDDING_DIM as usize,
+                telvax_hir::stdlib::EMBEDDING_DIM as usize,
             )?)
         } else {
             None
@@ -389,7 +389,7 @@ impl Interp {
         v
     }
 
-    /// Calls a Novar function by name.
+    /// Calls a Telvax function by name.
     pub fn call(&self, name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
         let f = self
             .fns
@@ -541,7 +541,7 @@ impl Interp {
     }
 
     /// Assignment, loops and arrays. Kept out of `eval` so its stack frame stays small: the
-    /// evaluator recurses once per Novar call, and debug-build frames add up quickly.
+    /// evaluator recurses once per Telvax call, and debug-build frames add up quickly.
     #[inline(never)]
     fn eval_mutation_and_loops(&self, e: &hir::Expr, ctx: &mut Ctx) -> Eval {
         match &e.kind {
@@ -1046,7 +1046,7 @@ fn update_place(current: Value, steps: &[Step], new: Value) -> Result<Value, Ctr
 /// what native code computes.
 fn round_to(ty: &Ty, v: Value) -> Value {
     match (ty, &v) {
-        (Ty::Prim(novar_hir::Prim::F32), Value::Float(x)) => Value::Float(f64::from(*x as f32)),
+        (Ty::Prim(telvax_hir::Prim::F32), Value::Float(x)) => Value::Float(f64::from(*x as f32)),
         _ => v,
     }
 }

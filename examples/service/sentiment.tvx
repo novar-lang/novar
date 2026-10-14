@@ -1,6 +1,6 @@
 // A small HTTP service that needs no external model: it validates the JSON body, scores the
 // text against two word lists and answers with JSON. Bad input becomes an HTTP 400.
-// Run: novar serve examples/service/sentiment.nv
+// Run: telvax serve examples/service/sentiment.tvx
 // Try: curl -XPOST localhost:8080/v1/sentiment -H 'content-type: application/json' -d '{"text":"great and good"}'
 
 import std::http::Status;

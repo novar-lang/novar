@@ -1,4 +1,4 @@
-//! Abstract syntax tree definitions for Novar.
+//! Abstract syntax tree definitions for Telvax.
 
 use std::ops::Range;
 

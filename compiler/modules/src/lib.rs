@@ -1,17 +1,17 @@
-//! Multi-file Novar programs.
+//! Multi-file Telvax programs.
 //!
-//! A *package* is a directory of `.nv` files. Its root module is the entry file (or `lib.nv` for
-//! a dependency); `a/b.nv` or `a/b/mod.nv` is the module `a::b`. Other modules are used with
+//! A *package* is a directory of `.tvx` files. Its root module is the entry file (or `lib.tvx` for
+//! a dependency); `a/b.tvx` or `a/b/mod.tvx` is the module `a::b`. Other modules are used with
 //! `import`:
 //!
 //! ```text
-//! import util::clamp;                 // ./util.nv, relative to the package root
+//! import util::clamp;                 // ./util.tvx, relative to the package root
 //! import crate::geometry::{Point, norm};
-//! import mathx::vec::dot;             // package `mathx`, file vec.nv
+//! import mathx::vec::dot;             // package `mathx`, file vec.tvx
 //! ```
 //!
 //! Only `pub fn` and `pub struct` items can be imported. Loading merges every module into one
-//! [`novar_ast::Program`], renaming items from other modules to unique names (`mathx__vec__dot`)
+//! [`telvax_ast::Program`], renaming items from other modules to unique names (`mathx__vec__dot`)
 //! and rewriting every reference, so the type checker and backends never see modules. All files
 //! share one offset space (see [`SourceMap`]) so diagnostics keep pointing at the right file.
 
@@ -21,8 +21,8 @@ mod source_map;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use novar_ast::{Import, Item, Program};
-use novar_diagnostics::Diagnostic;
+use telvax_ast::{Import, Item, Program};
+use telvax_diagnostics::Diagnostic;
 
 pub use source_map::{SourceFile, SourceMap};
 
@@ -245,7 +245,7 @@ impl Loader<'_> {
 
     fn add_module(&mut self, key: ModKey, name: &str, text: &str) -> usize {
         let base = self.map.add(name, text);
-        let (program, errors) = novar_parser::parse_at(text, base);
+        let (program, errors) = telvax_parser::parse_at(text, base);
         self.diags.extend(errors);
         let idx = self.modules.len();
         self.modules.push(Module {
@@ -265,17 +265,17 @@ impl Loader<'_> {
             self.deps[key.pkg - 1].src_dir.clone()
         };
         if key.path.is_empty() {
-            return (key.pkg != 0).then(|| dir.join("lib.nv"));
+            return (key.pkg != 0).then(|| dir.join("lib.tvx"));
         }
         let mut base = dir;
         for seg in &key.path {
             base.push(seg);
         }
-        let file = base.with_extension("nv");
+        let file = base.with_extension("tvx");
         if self.files.is_file(&file) {
             return Some(file);
         }
-        let nested = base.join("mod.nv");
+        let nested = base.join("mod.tvx");
         self.files.is_file(&nested).then_some(nested)
     }
 
@@ -373,7 +373,7 @@ impl Loader<'_> {
                     )
                     .with_note(match self.module_file(&key) {
                         Some(f) => format!("expected the file {}", f.display()),
-                        None => "no such file; module `a::b` lives in `a/b.nv` or `a/b/mod.nv`"
+                        None => "no such file; module `a::b` lives in `a/b.tvx` or `a/b/mod.tvx`"
                             .to_string(),
                     }),
                 );
