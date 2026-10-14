@@ -63,7 +63,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "package": "vsce package --no-dependencies=false"
   },
   "dependencies": {

@@ -51,7 +51,7 @@ jobs:
           node-version: 22
       - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - run: scripts/build-playground.sh --node
-      - run: node --test playground/test
+      - run: node --test playground/test/*.test.js
 
   vscode:
     runs-on: ubuntu-latest
