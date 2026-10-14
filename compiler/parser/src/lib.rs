@@ -308,6 +308,35 @@ where
         })
 }
 
+/// `<T, U: Shape + Other>`: the type parameters of a function, type or `impl`.
+fn generics<'a, 's: 'a, I>() -> impl Parser<'a, I, Vec<GenericParam>, Extra<'a, 's>> + Clone
+where
+    I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
+{
+    ident()
+        .then(
+            just(Token::Colon)
+                .ignore_then(
+                    ident()
+                        .separated_by(just(Token::Plus))
+                        .at_least(1)
+                        .collect::<Vec<_>>(),
+                )
+                .or_not(),
+        )
+        .map(|(name, bounds)| GenericParam {
+            name,
+            bounds: bounds.unwrap_or_default(),
+        })
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .at_least(1)
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::Lt), just(Token::Gt))
+        .or_not()
+        .map(Option::unwrap_or_default)
+}
+
 /// `(a, b, _)`: names for the parts of a tuple (`_` skips one).
 fn tuple_names<'a, 's: 'a, I>() -> impl Parser<'a, I, Vec<Ident>, Extra<'a, 's>> + Clone
 where
@@ -1094,6 +1123,7 @@ where
         .or_not()
         .then_ignore(just(Token::Struct))
         .then(ident())
+        .then(generics())
         .then(
             ident()
                 .then_ignore(just(Token::Colon))
@@ -1104,10 +1134,11 @@ where
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::LBrace), just(Token::RBrace)),
         )
-        .map_with(|((is_pub, name), fields), e| {
+        .map_with(|(((is_pub, name), generics), fields), e| {
             Item::Struct(Struct {
                 is_pub: is_pub.is_some(),
                 name,
+                generics,
                 fields,
                 span: rng(e.span()),
             })
@@ -1117,6 +1148,7 @@ where
         .or_not()
         .then_ignore(just(Token::Enum))
         .then(ident())
+        .then(generics())
         .then(
             ident()
                 .then(
@@ -1136,10 +1168,11 @@ where
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::LBrace), just(Token::RBrace)),
         )
-        .map_with(|((is_pub, name), variants), e| {
+        .map_with(|(((is_pub, name), generics), variants), e| {
             Item::Enum(Enum {
                 is_pub: is_pub.is_some(),
                 name,
+                generics,
                 variants,
                 span: rng(e.span()),
             })
@@ -1163,7 +1196,29 @@ where
             span: rng(e.span()),
         });
 
-    let param = just(Token::Mut)
+    // `self` and `mut self` take the type of the `impl` they sit in.
+    let self_param = just(Token::Mut)
+        .or_not()
+        .then(select! { Token::Ident(s) if s == "self" => s.to_string() })
+        .map_with(|(m, name), e| {
+            let span = rng(e.span());
+            Param {
+                mutable: m.is_some(),
+                name: Ident {
+                    node: name,
+                    span: span.clone(),
+                },
+                ty: Type {
+                    path: vec![Ident {
+                        node: "Self".into(),
+                        span: span.clone(),
+                    }],
+                    args: Vec::new(),
+                    span,
+                },
+            }
+        });
+    let param = self_param.or(just(Token::Mut)
         .or_not()
         .then(ident())
         .then_ignore(just(Token::Colon))
@@ -1172,7 +1227,7 @@ where
             mutable: m.is_some(),
             name,
             ty,
-        });
+        }));
 
     let func = attr
         .repeated()
@@ -1180,6 +1235,7 @@ where
         .then(just(Token::Pub).or_not())
         .then_ignore(just(Token::Fn))
         .then(ident())
+        .then(generics())
         .then(
             param
                 .separated_by(just(Token::Comma))
@@ -1188,15 +1244,87 @@ where
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
         )
         .then(just(Token::Arrow).ignore_then(type_()).or_not())
-        .then(block(expr.clone()))
-        .map_with(|(((((attrs, is_pub), name), params), ret), body), e| {
-            Item::Fn(Fn {
-                attrs,
+        .then(block(expr.clone()).map(Some).or(just(Token::Semi).to(None)))
+        .map_with(
+            |((((((attrs, is_pub), name), generics), params), ret), body), e| {
+                let span = rng(e.span());
+                Item::Fn(Fn {
+                    attrs,
+                    is_pub: is_pub.is_some(),
+                    name,
+                    generics,
+                    params,
+                    ret,
+                    required: body.is_none(),
+                    body: body.unwrap_or(Block {
+                        stmts: Vec::new(),
+                        tail: None,
+                        span: span.clone(),
+                    }),
+                    span,
+                })
+            },
+        );
+
+    let fns_block = func
+        .clone()
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .map(|items| {
+            items
+                .into_iter()
+                .filter_map(|i| match i {
+                    Item::Fn(f) => Some(f),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+    // `impl Type { .. }` or `impl Trait for Type { .. }`.
+    // The type arguments after a name: `Stack<T>`.
+    let type_args = type_()
+        .separated_by(just(Token::Comma))
+        .at_least(1)
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::Lt), just(Token::Gt))
+        .or_not()
+        .map(Option::unwrap_or_default);
+    let impl_ = just(Token::Impl)
+        .ignore_then(generics())
+        .then(ident())
+        .then(type_args.clone())
+        .then(
+            just(Token::For)
+                .ignore_then(ident())
+                .then(type_args)
+                .or_not(),
+        )
+        .then(fns_block.clone())
+        .map_with(|((((generics, first), first_args), second), fns), e| {
+            let (ty, ty_args, trait_name) = match second {
+                Some((ty, args)) => (ty, args, Some(first)),
+                None => (first, first_args, None),
+            };
+            Item::Impl(Impl {
+                generics,
+                ty,
+                ty_args,
+                trait_name,
+                fns,
+                span: rng(e.span()),
+            })
+        });
+    let trait_ = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Trait))
+        .then(ident())
+        .then(fns_block)
+        .map_with(|((is_pub, name), fns), e| {
+            Item::Trait(Trait {
                 is_pub: is_pub.is_some(),
                 name,
-                params,
-                ret,
-                body,
+                fns,
                 span: rng(e.span()),
             })
         });
@@ -1207,6 +1335,8 @@ where
         Token::Import,
         Token::Struct,
         Token::Enum,
+        Token::Impl,
+        Token::Trait,
         Token::Fn,
         Token::Pub,
         Token::At,
@@ -1214,7 +1344,7 @@ where
     ])
     .ignored();
 
-    choice((import, struct_, enum_, func, global_let))
+    choice((import, struct_, enum_, impl_, trait_, func, global_let))
         .recover_with(skip_then_retry_until(any().ignored(), item_start))
         .repeated()
         .collect::<Vec<_>>()

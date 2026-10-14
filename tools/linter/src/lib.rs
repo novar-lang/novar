@@ -130,7 +130,9 @@ impl Linter {
                 self.expr(body);
             }
             ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| self.expr(v)),
-            ExprKind::EnumCtor { args, .. } | ExprKind::Tuple(args) => {
+            ExprKind::EnumCtor { args, .. }
+            | ExprKind::Tuple(args)
+            | ExprKind::DynCall { args, .. } => {
                 args.iter().for_each(|a| self.expr(a));
             }
             ExprKind::If {

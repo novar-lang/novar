@@ -923,7 +923,9 @@ impl Collector {
                 self.expr(index);
             }
             ExprKind::Array(items) => items.iter().for_each(|i| self.expr(i)),
-            ExprKind::EnumCtor { args, .. } | ExprKind::Tuple(args) => {
+            ExprKind::EnumCtor { args, .. }
+            | ExprKind::Tuple(args)
+            | ExprKind::DynCall { args, .. } => {
                 args.iter().for_each(|a| self.expr(a));
             }
             ExprKind::Match { scrutinee, arms } => {

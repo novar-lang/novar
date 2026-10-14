@@ -1040,3 +1040,146 @@ fn tuples_and_iterator_methods() {
         json!(["x", 3])
     );
 }
+
+#[test]
+fn impl_methods_and_associated_functions() {
+    let src = "
+        struct Point { x: f64, y: f64 }
+        impl Point {
+            fn new(x: f64, y: f64) -> Point { Point { x: x, y: y } }
+            fn origin() -> Self { Self { x: 0.0, y: 0.0 } }
+            fn norm2(self) -> f64 { self.x * self.x + self.y * self.y }
+            fn plus(self, other: Point) -> Point { Point::new(self.x + other.x, self.y + other.y) }
+            fn scaled(self, k: f64) -> Self { Self::new(self.x * k, self.y * k) }
+        }
+        enum Shape { Circle(f64), Square(f64) }
+        impl Shape {
+            fn area(self) -> f64 { match self { Shape::Circle(r) => r * r * 3.0, Shape::Square(s) => s * s } }
+            fn unit_square() -> Shape { Self::Square(1.0) }
+            fn describe(self) -> String { f\"area {self.area()}\" }
+        }
+        fn run() -> f64 {
+            let p = Point::new(3.0, 4.0);
+            let q = p.plus(Point::origin()).scaled(2.0);
+            q.norm2() + Shape::unit_square().area() + Shape::Circle(1.0).area()
+        }
+        fn text() -> String { Shape::Square(2.0).describe() }
+        fn chain() -> f64 { Point::new(1.0, 1.0).plus(Point::new(2.0, 3.0)).norm2() }
+    ";
+    assert_eq!(float(run(src, "run", vec![])), 100.0 + 1.0 + 3.0);
+    assert_eq!(text(run(src, "text", vec![])), "area 4");
+    assert_eq!(float(run(src, "chain", vec![])), 9.0 + 16.0);
+}
+
+#[test]
+fn traits_with_dynamic_dispatch_and_dependency_injection() {
+    let src = "
+        trait Shape {
+            fn area(self) -> f64;
+            fn name(self) -> String;
+            fn describe(self) -> String { f\"{self.name()} with area {self.area()}\" }
+        }
+        struct Circle { r: f64 }
+        struct Square { s: f64 }
+        impl Shape for Circle {
+            fn area(self) -> f64 { self.r * self.r * 3.0 }
+            fn name(self) -> String { \"circle\" }
+        }
+        impl Shape for Square {
+            fn area(self) -> f64 { self.s * self.s }
+            fn name(self) -> String { \"square\" }
+            fn describe(self) -> String { \"a square!\" }
+        }
+        fn total(shapes: Vec<Shape>) -> f64 { shapes.map(|s| s.area()).sum() }
+        fn labels(shapes: Vec<Shape>) -> Vec<String> { shapes.map(|s| s.describe()) }
+        fn mixed() -> Vec<Shape> { [Circle { r: 1.0 }, Square { s: 2.0 }] }
+        fn direct() -> String { Circle { r: 2.0 }.describe() }
+
+        // An injected dependency: the service does not know which store it talks to.
+        trait Store { fn load(self, key: String) -> Option<String>; fn save(self, key: String, value: String); }
+        struct MemoryStore { data: Map<String, String> }
+        impl Store for MemoryStore {
+            fn load(self, key: String) -> Option<String> { self.data.get(key) }
+            fn save(self, key: String, value: String) { self.data.insert(key, value); }
+        }
+        struct Greeter { store: Store }
+        impl Greeter {
+            fn new(store: Store) -> Greeter { Greeter { store: store } }
+            fn greet(self, name: String) -> String {
+                match self.store.load(name) {
+                    Some(g) => g,
+                    None => { self.store.save(name, f\"hello, {name}\"); f\"first time, {name}\" }
+                }
+            }
+        }
+        fn visits() -> Vec<String> {
+            let g = Greeter::new(MemoryStore { data: std::map::new() });
+            [g.greet(\"ana\"), g.greet(\"ana\"), g.greet(\"bo\")]
+        }
+    ";
+    assert_eq!(
+        float(run(src, "total", vec![run(src, "mixed", vec![])])),
+        3.0 + 4.0
+    );
+    assert_eq!(
+        run(src, "labels", vec![run(src, "mixed", vec![])]).to_json(),
+        json!(["circle with area 3", "a square!"])
+    );
+    assert_eq!(text(run(src, "direct", vec![])), "circle with area 12");
+    assert_eq!(
+        run(src, "visits", vec![]).to_json(),
+        json!(["first time, ana", "hello, ana", "first time, bo"])
+    );
+}
+
+#[test]
+fn generic_functions_structs_and_impls_are_monomorphized() {
+    let src = "
+        trait Named { fn name(self) -> String; }
+        struct Dog { n: String }
+        impl Named for Dog { fn name(self) -> String { self.n } }
+        fn first<T>(xs: Vec<T>) -> T { xs[0] }
+        fn id<T>(x: T) -> T { x }
+        fn greet<T: Named>(x: T) -> String { f\"hi {x.name()}\" }
+        struct Pair<A, B> { a: A, b: B }
+        impl<A, B> Pair<A, B> {
+            fn new(a: A, b: B) -> Pair<A, B> { Pair { a: a, b: b } }
+            fn first(self) -> A { self.a }
+            fn second(self) -> B { self.b }
+        }
+        fn ints() -> i64 { let xs: Vec<i64> = [4, 5, 6]; let one: i64 = 1; first(xs) + id(one) }
+        fn texts() -> String { first([\"x\", \"y\"]) }
+        fn named() -> String { greet(Dog { n: \"rex\" }) }
+        fn pairs() -> String {
+            let p = Pair::new(7, \"seven\");
+            f\"{p.first()} {p.second()}\"
+        }
+    ";
+    assert_eq!(run(src, "ints", vec![]).to_json(), json!(5));
+    assert_eq!(text(run(src, "texts", vec![])), "x");
+    assert_eq!(text(run(src, "named", vec![])), "hi rex");
+    assert_eq!(text(run(src, "pairs", vec![])), "7 seven");
+}
+
+#[test]
+fn generic_enums_and_methods_are_monomorphized() {
+    let src = "
+        enum Tree<T> { Leaf, Node(T, Vec<T>) }
+        impl<T> Tree<T> {
+            fn size(self) -> u64 { match self { Tree::Leaf => 0, Tree::Node(_, rest) => 1 + rest.len() } }
+        }
+        struct Stack<T> { items: Vec<T> }
+        impl<T> Stack<T> {
+            fn new() -> Stack<T> { Stack { items: [] } }
+            fn count(self) -> u64 { self.items.len() }
+        }
+        fn sizes() -> u64 {
+            let t: Tree<i64> = Tree::Node(1, [2, 3]);
+            let e: Tree<String> = Tree::Leaf;
+            t.size() * 10 + e.size()
+        }
+        fn empty() -> u64 { let s: Stack<i64> = Stack::new(); s.count() }
+    ";
+    assert_eq!(run(src, "sizes", vec![]).to_json(), json!(30));
+    assert_eq!(run(src, "empty", vec![]).to_json(), json!(0));
+}

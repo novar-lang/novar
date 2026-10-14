@@ -59,6 +59,22 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
+            Item::Trait(t) => {
+                self.rename(&mut t.name);
+                for f in &mut t.fns {
+                    self.function_named(f, false);
+                }
+            }
+            Item::Impl(imp) => {
+                self.rename(&mut imp.ty);
+                if let Some(tr) = &mut imp.trait_name {
+                    self.rename(tr);
+                }
+                // The methods keep their names: they are reached through the type.
+                for f in &mut imp.fns {
+                    self.function_named(f, false);
+                }
+            }
             Item::Fn(f) => self.function(f),
         }
     }
@@ -83,7 +99,14 @@ impl<'a> Rewriter<'a> {
     }
 
     fn function(&mut self, f: &mut Fn) {
-        self.rename(&mut f.name);
+        self.function_named(f, true);
+    }
+
+    /// `rename_name`: whether the function's own name is a module-level name (not for methods).
+    fn function_named(&mut self, f: &mut Fn, rename_name: bool) {
+        if rename_name {
+            self.rename(&mut f.name);
+        }
         self.scopes.push(HashSet::new());
         for attr in &mut f.attrs {
             for (_, value) in &mut attr.args {
