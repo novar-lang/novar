@@ -94,7 +94,9 @@ impl Linter {
     fn pattern(&mut self, p: &Pat) {
         match p {
             Pat::Bind(l) => self.declare(l, false),
-            Pat::Variant { args, .. } => args.iter().for_each(|a| self.pattern(a)),
+            Pat::Variant { args, .. } | Pat::Tuple(args) => {
+                args.iter().for_each(|a| self.pattern(a))
+            }
             Pat::Wild | Pat::Lit(_) => {}
         }
     }
@@ -118,7 +120,7 @@ impl Linter {
                 args.iter().for_each(|a| self.expr(a));
             }
             ExprKind::Field { base, .. } => self.expr(base),
-            ExprKind::Unary { expr, .. } => self.expr(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs);
                 self.expr(rhs);
@@ -128,7 +130,9 @@ impl Linter {
                 self.expr(body);
             }
             ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| self.expr(v)),
-            ExprKind::EnumCtor { args, .. } => args.iter().for_each(|a| self.expr(a)),
+            ExprKind::EnumCtor { args, .. } | ExprKind::Tuple(args) => {
+                args.iter().for_each(|a| self.expr(a));
+            }
             ExprKind::If {
                 cond,
                 then,

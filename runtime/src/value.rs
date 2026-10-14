@@ -23,6 +23,23 @@ pub struct EnumVal {
     pub fields: Vec<Value>,
 }
 
+/// Orders two numbers, strings or bools (numbers compare as numbers, `NaN` last).
+pub fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering, String> {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
+        (Value::Float(x), Value::Float(y)) => Ok(x.total_cmp(y)),
+        (Value::Int(x), Value::Float(y)) => Ok((*x as f64).total_cmp(y)),
+        (Value::Float(x), Value::Int(y)) => Ok(x.total_cmp(&(*y as f64))),
+        (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
+        (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
+        _ => Err(format!(
+            "cannot compare {} with {}: this needs numbers, strings or bools",
+            a.type_name(),
+            b.type_name()
+        )),
+    }
+}
+
 /// A map key: strings, integers and booleans (what the checker allows), ordered so that
 /// iteration and JSON output are deterministic.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -223,6 +240,8 @@ pub enum Value {
     Struct(Arc<StructVal>),
     Enum(Arc<EnumVal>),
     Map(Arc<MapVal>),
+    /// Two or more values; the fields are numbered (`pair.0`).
+    Tuple(Arc<Vec<Value>>),
     Tensor(Arc<TensorVal>),
     Table(Arc<TableVal>),
     Ok(Box<Value>),
@@ -349,6 +368,7 @@ impl Value {
             Value::Enum(e) if e.name == "Option" => "Option",
             Value::Enum(_) => "enum",
             Value::Map(_) => "Map",
+            Value::Tuple(_) => "tuple",
             Value::Tensor(_) => "Tensor",
             Value::Table(_) => "Table",
             Value::Ok(_) | Value::Err(_) => "Result",
@@ -383,6 +403,9 @@ impl Value {
                 a.name == b.name
                     && a.variant == b.variant
                     && a.fields.iter().zip(&b.fields).all(|(x, y)| x.equals(y))
+            }
+            (Value::Tuple(a), Value::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
             (Value::Map(a), Value::Map(b)) => {
                 let (a, b) = (a.entries(), b.entries());
@@ -419,6 +442,7 @@ impl Value {
                 Some(v) => v.to_json(),
                 None => Json::Null,
             },
+            Value::Tuple(items) => Json::Array(items.iter().map(Value::to_json).collect()),
             Value::Map(m) => Json::Object(
                 m.entries()
                     .into_iter()
@@ -501,6 +525,16 @@ impl fmt::Display for Value {
                 Some(v) => write!(f, "Some({v})"),
                 None => f.write_str("None"),
             },
+            Value::Tuple(items) => {
+                f.write_str("(")?;
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                f.write_str(")")
+            }
             Value::Map(m) => {
                 f.write_str("{")?;
                 for (i, (k, v)) in m.entries().iter().enumerate() {
@@ -621,6 +655,22 @@ pub fn from_json(
                 name: name.clone(),
                 fields: out,
             })))
+        }
+        Ty::Tuple(parts) => {
+            let items = json.as_array().ok_or_else(|| bad("an array"))?;
+            if items.len() != parts.len() {
+                return Err(format!(
+                    "expected {} values in a tuple, found {}",
+                    parts.len(),
+                    items.len()
+                ));
+            }
+            parts
+                .iter()
+                .zip(items)
+                .map(|(t, j)| from_json(t, j, structs, enums))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|v| Value::Tuple(Arc::new(v)))
         }
         Ty::Option(inner) => {
             if json.is_null() {

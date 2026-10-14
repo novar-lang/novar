@@ -103,6 +103,8 @@ pub enum Ty {
         shape: Vec<Dim>,
     },
     Result(Box<Ty>, Box<Ty>),
+    /// `(A, B, ..)`: two or more values of different types.
+    Tuple(Vec<Ty>),
     /// `Option<T>`: `Some(value)` or `None`.
     Option(Box<Ty>),
     /// `Map<K, V>`: keys are strings, integers or booleans.
@@ -163,6 +165,9 @@ impl Ty {
             }
             (Result(a, b), Result(c, d)) => a.accepts(c) && b.accepts(d),
             (Option(a), Option(b)) => a.accepts(b),
+            (Tuple(a), Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.accepts(y))
+            }
             (Map(k1, v1), Map(k2, v2)) => k1.accepts(k2) && v1.accepts(v2),
             (Fn(p1, r1), Fn(p2, r2)) => {
                 p1.len() == p2.len()
@@ -197,6 +202,10 @@ impl fmt::Display for Ty {
             }
             Ty::Result(a, b) => write!(f, "Result<{a}, {b}>"),
             Ty::Option(t) => write!(f, "Option<{t}>"),
+            Ty::Tuple(items) => {
+                let shown: Vec<_> = items.iter().map(|t| t.to_string()).collect();
+                write!(f, "({})", shown.join(", "))
+            }
             Ty::Map(k, v) => write!(f, "Map<{k}, {v}>"),
             Ty::Fn(params, ret) => {
                 let ps: Vec<_> = params.iter().map(|p| p.to_string()).collect();

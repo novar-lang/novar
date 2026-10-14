@@ -1037,3 +1037,61 @@ fn inline_row_types_replace_throwaway_structs() {
         "mismatched types",
     );
 }
+
+#[test]
+fn question_mark_is_checked_against_the_function_result() {
+    assert_clean("fn f(r: Result<i32, String>) -> Result<i32, String> { let x = r?; Ok(x + 1) }");
+    assert_clean("fn f(o: Option<i32>) -> Option<i32> { let x = o?; Some(x + 1) }");
+    assert_err(
+        "fn f(r: Result<i32, String>) -> i32 { r? }",
+        "can only be used in a function that returns `Result`",
+    );
+    assert_err(
+        "fn f(r: Result<i32, i64>) -> Result<i32, String> { let x = r?; Ok(x) }",
+        "cannot turn the error",
+    );
+    assert_err(
+        "fn f(o: Option<i32>) -> Result<i32, String> { let x = o?; Ok(x) }",
+        "returns `Option`",
+    );
+    assert_err(
+        "fn f(n: i32) -> Result<i32, String> { let x = n?; Ok(x) }",
+        "needs a `Result` or an `Option`",
+    );
+}
+
+#[test]
+fn tuples_are_typed() {
+    assert_clean(
+        "fn f() -> (i64, String) { (1, \"a\") } fn g() -> i64 { let (n, _) = f(); n + f().0 }",
+    );
+    assert_clean("fn f(p: (bool, i64)) -> i64 { match p { (true, n) => n, (false, _) => 0 } }");
+    assert_clean(
+        "fn f(v: Vec<(i64, i64)>) -> i64 { let mut t = 0; for (a, b) in v { t += a * b; } t }",
+    );
+    assert_err("fn f(p: (i64, String)) -> i64 { p.2 }", "has no part `2`");
+    assert_err("fn f() -> (i64, String) { (1, 2) }", "mismatched types");
+    assert_err(
+        "fn f(p: (bool, i64)) -> i64 { match p { (true, n) => n } }",
+        "non-exhaustive",
+    );
+    assert_err(
+        "fn f(p: (i64, i64)) -> i64 { let (a, b) = p; a + c }",
+        "cannot find `c`",
+    );
+}
+
+#[test]
+fn iterator_methods_are_typed() {
+    assert_clean(
+        "fn f(v: Vec<i64>) -> Vec<String> { v.map(|x| f\"{x}\").filter(|s| s.len() > 0) }",
+    );
+    assert_clean("fn f(v: Vec<i64>) -> i64 { v.fold(0, |acc, x| acc + x) }");
+    assert_clean("fn f(v: Vec<i64>) -> Vec<(i64, i64)> { v.enumerate() }");
+    assert_clean("fn f(v: Vec<i64>) -> Option<i64> { v.max() }");
+    assert_err(
+        "fn f(v: Vec<String>) -> i64 { v.sum() }",
+        "needs a vector of numbers",
+    );
+    assert_err("fn f(v: Vec<i64>) -> bool { v.any(|x| x + 1) }", "bool");
+}
