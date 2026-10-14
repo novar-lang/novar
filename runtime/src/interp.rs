@@ -225,6 +225,8 @@ impl Interp {
         let v = match q {
             novar_hir::Quantization::None => 0,
             novar_hir::Quantization::Int8 => 1,
+            novar_hir::Quantization::Int8Channel => 2,
+            novar_hir::Quantization::Int4Channel => 3,
         };
         self.quantization
             .store(v, std::sync::atomic::Ordering::Relaxed);
@@ -233,6 +235,8 @@ impl Interp {
     pub(crate) fn quantization(&self) -> novar_hir::Quantization {
         match self.quantization.load(std::sync::atomic::Ordering::Relaxed) {
             1 => novar_hir::Quantization::Int8,
+            2 => novar_hir::Quantization::Int8Channel,
+            3 => novar_hir::Quantization::Int4Channel,
             _ => novar_hir::Quantization::None,
         }
     }

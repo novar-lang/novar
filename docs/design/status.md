@@ -70,7 +70,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 |---|---|
 | `nvpm` package manager | done: manifests, semver resolution with backtracking, lockfile, directory and HTTP registries, checksums, yank, `import` across files and packages (tested end to end) |
 | Distributed backends | `std::dist::map` runs on local threads, on `novar worker` processes (coordinator with retries and token auth; node loss tested with workers on one machine) or on **Ray** (tested against a real local Ray cluster). Multi-machine runs were not tried |
-| Quantization passes | `--quantize int8` lowers `f32` `matmul` to a symmetric per-tensor int8 kernel with i32 accumulation, in both the interpreter and the MLIR lowering; the two agree bit for bit (tested). Only `matmul`; dynamic scales, no calibration, no int4 |
+| Quantization passes | `--quantize int8` lowers `f32` `matmul` to a symmetric per-tensor int8 kernel with i32 accumulation, in both the interpreter and the MLIR lowering; the two agree bit for bit (tested). `--quantize int8-channel` and `--quantize int4-channel` (interpreter only; the native backend refuses them) use one scale per row of the activations and per column of the weights, the latter with 4-bit weights. With columns 1000x apart in magnitude the worst relative error is 100% per-tensor, 0.75% per-channel int8 and 18% per-channel int4 (tested). Only `matmul`; scales are computed per call, so there is **no calibration** against sample data |
 
 ## Known gaps
 

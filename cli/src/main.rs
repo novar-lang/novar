@@ -14,10 +14,10 @@ usage:
   novar check <file.nv>
   novar lint <file.nv> [--deny-warnings]                    unused variables, `mut` and functions
   novar fmt [--check] <file.nv>...                          format in place (`-` reads stdin)
-  novar run <file.nv> <function> [args...] [--quantize int8] [--device gpu]
+  novar run <file.nv> <function> [args...] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   novar lsp                                                language server over stdio
   novar worker [--listen host:port] [--token T]            run calls for a coordinator
-  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8] [--device gpu]
+  novar serve <file.nv> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   novar build --serve <file.nv> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   novar jit <file.nv> <function> [args...]                 (native, needs --features llvm)
   novar build <file.nv> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
@@ -176,7 +176,7 @@ pub fn take_device<'a>(
     Ok((device, rest))
 }
 
-/// Splits `--quantize int8|none` out of `args`.
+/// Splits `--quantize int8|int8-channel|int4-channel|none` out of `args`.
 pub fn take_quantize<'a>(
     args: &[&'a str],
 ) -> Result<(novar_hir::Quantization, Vec<&'a str>), CliError> {
@@ -187,10 +187,12 @@ pub fn take_quantize<'a>(
         if *a == "--quantize" {
             quant = match it.next().copied() {
                 Some("int8") => novar_hir::Quantization::Int8,
+                Some("int8-channel") => novar_hir::Quantization::Int8Channel,
+                Some("int4-channel") => novar_hir::Quantization::Int4Channel,
                 Some("none") => novar_hir::Quantization::None,
                 other => {
                     return failed(format!(
-                        "--quantize takes `int8` or `none`, not {}",
+                        "--quantize takes `int8`, `int8-channel`, `int4-channel` or `none`, not {}",
                         other.unwrap_or("nothing")
                     ));
                 }

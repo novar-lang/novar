@@ -180,6 +180,12 @@ pub fn lower_with<'c>(
     program: &hir::Program,
     quant: Quantization,
 ) -> Result<Module<'c>, Vec<Diagnostic>> {
+    if matches!(quant, Quantization::Int8Channel | Quantization::Int4Channel) {
+        return Err(vec![Diagnostic::error(
+            0..0,
+            "per-channel quantization runs in the interpreter only; the native backend supports `--quantize int8`",
+        )]);
+    }
     let module = Module::new(Location::unknown(ctx));
     let state = ModuleState::default();
     let cx = Cx {

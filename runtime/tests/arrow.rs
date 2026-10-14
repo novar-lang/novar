@@ -368,3 +368,56 @@ fn int8_quantization_handles_zeros_and_exact_cases() {
         [127.0, -127.0, 0.0, 127.0]
     );
 }
+
+#[test]
+fn per_channel_quantization_is_more_accurate_when_columns_differ() {
+    // One column is a thousand times larger than the others: a single per-tensor scale wastes
+    // almost every level on the small columns.
+    let src = "fn mm(a: Tensor<f32, [6, 16]>, b: Tensor<f32, [16, 4]>) -> Tensor<f32, [6, 4]> { std::tensor::matmul(a, b) }";
+    let a: Vec<f32> = (0..96)
+        .map(|i| ((i * 37 % 29) as f32 - 14.0) / 5.0)
+        .collect();
+    let b: Vec<f32> = (0..64)
+        .map(|i| {
+            let column_scale = [1.0, 0.01, 1000.0, 0.1][i % 4];
+            ((i * 53 % 31) as f32 - 15.0) / 15.0 * column_scale
+        })
+        .collect();
+    let (ta, tb) = (f32s(&[6, 16], &a), f32s(&[16, 4], &b));
+    let run_with = |q: novar_hir::Quantization| {
+        let interp = load(src);
+        interp.set_quantization(q);
+        tensor(interp.call("mm", vec![ta.clone(), tb.clone()]).unwrap()).to_f32_vec()
+    };
+    let exact = run_with(novar_hir::Quantization::None);
+    // Relative error per column, worst case over the rows.
+    let worst = |got: &[f32]| {
+        (0..4)
+            .map(|j| {
+                let scale = (0..6)
+                    .map(|i| exact[i * 4 + j].abs())
+                    .fold(0.0f32, f32::max);
+                (0..6)
+                    .map(|i| (exact[i * 4 + j] - got[i * 4 + j]).abs() / scale)
+                    .fold(0.0f32, f32::max)
+            })
+            .fold(0.0f32, f32::max)
+    };
+    let per_tensor = worst(&run_with(novar_hir::Quantization::Int8));
+    let per_channel = worst(&run_with(novar_hir::Quantization::Int8Channel));
+    let int4 = worst(&run_with(novar_hir::Quantization::Int4Channel));
+    println!(
+        "worst relative error: per-tensor {per_tensor:.4}, per-channel {per_channel:.4}, int4 {int4:.4}"
+    );
+    assert!(
+        per_tensor > 0.05,
+        "per-tensor must lose the small columns: {per_tensor}"
+    );
+    assert!(
+        per_channel < 0.05,
+        "per-channel stays accurate: {per_channel}"
+    );
+    assert!(per_channel < per_tensor / 3.0);
+    // Four bits cost accuracy, but each column still has its own scale.
+    assert!(int4 > per_channel && int4 < 0.5, "int4 error {int4}");
+}

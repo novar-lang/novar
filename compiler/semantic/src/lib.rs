@@ -18,6 +18,13 @@ pub enum Quantization {
     #[default]
     None,
     Int8,
+    /// Int8 with one scale per row of the left operand and one per column of the right one
+    /// (`--quantize int8-channel`). More accurate than [`Quantization::Int8`] when columns differ
+    /// in magnitude. Interpreter only.
+    Int8Channel,
+    /// Like `Int8Channel`, but the weights (the right operand) use 4 bits: values in `-7..=7`
+    /// (`--quantize int4-channel`). The activations stay 8-bit. Interpreter only.
+    Int4Channel,
 }
 
 use novar_diagnostics::Diagnostic;

@@ -87,6 +87,11 @@ fn all(jobs: Vec<Job>) -> Vec<Done> { std::dist::map(jobs, work) }
 per-tensor int8 arithmetic with `i32` accumulation. The interpreter and the native backend give
 identical results.
 
+`--quantize int8-channel` and `--quantize int4-channel` (`run` and `serve`; the native backend
+refuses them) give every row of the activations and every column of the weights its own scale, so
+a column that is much larger or smaller than the rest no longer loses its precision. The int4 mode
+stores the weights in 4 bits. Scales are computed on each call; there is no calibration step.
+
 ## Accelerators
 
 * `--device gpu` (on `run` and `serve`, needs `cargo build --features gpu`) runs `f32` tensor operations on the GPU through `wgpu`: Metal on macOS, Vulkan on Linux, DX12 on Windows.

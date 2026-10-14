@@ -386,12 +386,20 @@ pub(crate) fn call(
             if k != k2 {
                 return err(format!("`matmul` inner dimensions differ: {k} and {k2}"));
             }
-            if quantization == novar_hir::Quantization::Int8
+            if quantization != novar_hir::Quantization::None
                 && matches!(a.dtype(), DataType::Float32)
                 && matches!(b.dtype(), DataType::Float32)
             {
                 let (x, y) = (a.to_f32_vec(), b.to_f32_vec());
-                let out = qmatmul_f32(&x, &y, m, k, n);
+                let out = match quantization {
+                    novar_hir::Quantization::Int8Channel => {
+                        qmatmul_channel_f32(&x, &y, m, k, n, 127.0)
+                    }
+                    novar_hir::Quantization::Int4Channel => {
+                        qmatmul_channel_f32(&x, &y, m, k, n, 7.0)
+                    }
+                    _ => qmatmul_f32(&x, &y, m, k, n),
+                };
                 let shape = if vector { vec![m] } else { vec![m, n] };
                 return Ok(Value::Tensor(Arc::new(TensorVal::from_f32(shape, out))));
             }
@@ -454,6 +462,40 @@ pub(crate) fn qmatmul_f32(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) ->
                 acc += i32::from(qa[i * k + p]) * i32::from(qb[p * n + j]);
             }
             out[i * n + j] = acc as f32 * scale;
+        }
+    }
+    out
+}
+
+/// Per-channel quantized product: one scale per row of `a` (activations, 8-bit) and one per column
+/// of `b` (weights, `weight_max` is 127 for int8 and 7 for int4), `i32` accumulation.
+pub(crate) fn qmatmul_channel_f32(
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    weight_max: f32,
+) -> Vec<f32> {
+    let amax = |it: &mut dyn Iterator<Item = f32>| it.fold(0.0f32, |m, v| m.max(v.abs()));
+    let scale = |amax: f32, levels: f32| if amax == 0.0 { 1.0 } else { amax / levels };
+    let sa: Vec<f32> = (0..m)
+        .map(|i| scale(amax(&mut a[i * k..(i + 1) * k].iter().copied()), 127.0))
+        .collect();
+    let sb: Vec<f32> = (0..n)
+        .map(|j| scale(amax(&mut (0..k).map(|p| b[p * n + j])), weight_max))
+        .collect();
+    let q = |x: f32, s: f32, levels: f32| (x / s).round().clamp(-levels, levels) as i8;
+    let qa: Vec<i8> = (0..m * k).map(|i| q(a[i], sa[i / k], 127.0)).collect();
+    let qb: Vec<i8> = (0..k * n).map(|i| q(b[i], sb[i % n], weight_max)).collect();
+    let mut out = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut acc: i32 = 0;
+            for p in 0..k {
+                acc += i32::from(qa[i * k + p]) * i32::from(qb[p * n + j]);
+            }
+            out[i * n + j] = acc as f32 * (sa[i] * sb[j]);
         }
     }
     out

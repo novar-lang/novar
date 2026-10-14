@@ -893,3 +893,17 @@ fn enums_are_reported_as_unsupported_natively() {
     let err = jit_call(&h, "f", &[]).unwrap_err().to_string();
     assert!(err.contains("enums and `match`"), "{err}");
 }
+
+#[test]
+fn per_channel_quantization_is_refused_natively() {
+    let h = hir(
+        "fn f(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }",
+    );
+    for q in [
+        novar_hir::Quantization::Int8Channel,
+        novar_hir::Quantization::Int4Channel,
+    ] {
+        let err = novar_mlir::emit_mlir_with(&h, false, q).unwrap_err();
+        assert!(err[0].message.contains("interpreter only"), "{err:?}");
+    }
+}
