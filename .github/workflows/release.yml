@@ -208,3 +208,43 @@ jobs:
             ! novar run tables.nv query 2> err.txt
             grep -q "not available in this build" err.txt
           fi
+
+  # Packages the VS Code extension at the release version, attaches the .vsix to the release and,
+  # when the tokens exist, publishes it to the Visual Studio Marketplace and Open VSX.
+  # Without VSCE_PAT / OVSX_PAT those two steps are skipped, so the job also works before the
+  # publisher accounts are set up.
+  vscode:
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - name: Use the release version
+        run: npm version "${TAG#v}" --no-git-tag-version --allow-same-version
+      - run: npm run compile
+      - run: npm test
+      - name: Package
+        run: npx vsce package -o "novar-${TAG#v}.vsix"
+      - name: Attach to the release
+        run: gh release upload "$TAG" "novar-${TAG#v}.vsix" --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Visual Studio Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx vsce publish --packagePath "novar-${TAG#v}.vsix" --pat "$VSCE_PAT"
+      - name: Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx ovsx publish "novar-${TAG#v}.vsix" --pat "$OVSX_PAT"
