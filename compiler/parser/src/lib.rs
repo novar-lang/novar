@@ -214,7 +214,11 @@ enum BlockItem {
 fn is_block_like(e: &Expr) -> bool {
     matches!(
         e.node,
-        ExprKind::If { .. } | ExprKind::Block(_) | ExprKind::While { .. } | ExprKind::For { .. }
+        ExprKind::If { .. }
+            | ExprKind::Block(_)
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Match { .. }
     )
 }
 
@@ -238,6 +242,54 @@ where
             init,
             span: rng(e.span()),
         })
+}
+
+fn pattern<'a, 's: 'a, I>() -> impl Parser<'a, I, Pattern, Extra<'a, 's>> + Clone
+where
+    I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
+{
+    recursive(|pat| {
+        let int = select! { Token::Int(n) => n }.try_map(|n, span| {
+            n.replace('_', "")
+                .parse::<u64>()
+                .map(|v| PatKind::Lit(Lit::Int(v)))
+                .map_err(|_| Rich::custom(span, "integer literal out of range"))
+        });
+        let float = select! { Token::Float(n) => n }.try_map(|n, span| {
+            n.replace('_', "")
+                .parse::<f64>()
+                .map(|v| PatKind::Lit(Lit::Float(v)))
+                .map_err(|_| Rich::custom(span, "invalid float literal"))
+        });
+        let string = select! { Token::Str(s) => s }
+            .map(|s| PatKind::Lit(Lit::Str(unescape(&s[1..s.len() - 1]))));
+        let boolean = select! { Token::True => true, Token::False => false }
+            .map(|b| PatKind::Lit(Lit::Bool(b)));
+        let variant = path()
+            .then(
+                pat.separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .collect::<Vec<_>>()
+                    .delimited_by(just(Token::LParen), just(Token::RParen))
+                    .or_not(),
+            )
+            .map(|(path, args)| {
+                if path.len() == 1 && args.is_none() {
+                    let name = &path[0].node;
+                    if name == "_" {
+                        PatKind::Wild
+                    } else {
+                        PatKind::Bind(name.clone())
+                    }
+                } else {
+                    PatKind::Variant {
+                        path,
+                        args: args.unwrap_or_default(),
+                    }
+                }
+            });
+        choice((int, float, string, boolean, variant)).map_with(|k, e| spanned(k, e.span()))
+    })
 }
 
 fn expr<'a, 's: 'a, I>() -> impl Parser<'a, I, Expr, Extra<'a, 's>> + Clone
@@ -388,6 +440,29 @@ where
                 spanned(ExprKind::For { var, iter, body }, e.span())
             });
 
+        let pattern = pattern();
+        let match_ = just(Token::Match)
+            .ignore_then(expr.clone())
+            .then(
+                pattern
+                    .then_ignore(just(Token::FatArrow))
+                    .then(expr.clone())
+                    .map(|(pat, body)| Arm { pat, body })
+                    .then_ignore(just(Token::Comma).or_not())
+                    .repeated()
+                    .collect::<Vec<_>>()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+            )
+            .map_with(|(scrutinee, arms), e| {
+                spanned(
+                    ExprKind::Match {
+                        scrutinee: Box::new(scrutinee),
+                        arms,
+                    },
+                    e.span(),
+                )
+            });
+
         let array = expr
             .clone()
             .separated_by(just(Token::Comma))
@@ -415,6 +490,7 @@ where
         .or(if_)
         .or(while_)
         .or(for_)
+        .or(match_)
         .or(block.map_with(|b, e| spanned(ExprKind::Block(b), e.span())));
 
         enum Postfix {
@@ -671,6 +747,38 @@ where
             })
         });
 
+    let enum_ = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Enum))
+        .then(ident())
+        .then(
+            ident()
+                .then(
+                    type_()
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .collect::<Vec<_>>()
+                        .delimited_by(just(Token::LParen), just(Token::RParen))
+                        .or_not(),
+                )
+                .map(|(name, fields)| Variant {
+                    name,
+                    fields: fields.unwrap_or_default(),
+                })
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map_with(|((is_pub, name), variants), e| {
+            Item::Enum(Enum {
+                is_pub: is_pub.is_some(),
+                name,
+                variants,
+                span: rng(e.span()),
+            })
+        });
+
     let attr = just(Token::At)
         .ignore_then(ident())
         .then(
@@ -732,6 +840,7 @@ where
     let item_start = one_of([
         Token::Import,
         Token::Struct,
+        Token::Enum,
         Token::Fn,
         Token::Pub,
         Token::At,
@@ -739,7 +848,7 @@ where
     ])
     .ignored();
 
-    choice((import, struct_, func, global_let))
+    choice((import, struct_, enum_, func, global_let))
         .recover_with(skip_then_retry_until(any().ignored(), item_start))
         .repeated()
         .collect::<Vec<_>>()
@@ -1038,5 +1147,45 @@ mod tests {
                 ..
             })
         ));
+    }
+}
+
+#[cfg(test)]
+mod enum_tests {
+    use super::*;
+
+    #[test]
+    fn parses_enums_and_match() {
+        let src = "
+            pub enum Shape { Circle(f64), Rect(f64, f64), Empty, }
+            fn area(s: Shape) -> f64 {
+                match s {
+                    Shape::Circle(r) => r * r * 3.0,
+                    Shape::Rect(w, h) => { w * h }
+                    Shape::Empty => 0.0,
+                }
+            }
+            fn classify(n: i32) -> String {
+                match n { 0 => \"zero\", 1 => \"one\", _ => \"many\" }
+            }
+        ";
+        let (p, errs) = parse(src);
+        assert!(errs.is_empty(), "{errs:?}");
+        let items = p.unwrap().items;
+        let Item::Enum(e) = &items[0] else { panic!() };
+        assert_eq!(e.variants.len(), 3);
+        assert_eq!(e.variants[1].fields.len(), 2);
+        let Item::Fn(f) = &items[1] else { panic!() };
+        let ExprKind::Match { arms, .. } = &f.body.tail.as_ref().unwrap().node else {
+            panic!("{:?}", f.body)
+        };
+        assert_eq!(arms.len(), 3);
+        assert!(matches!(arms[2].pat.node, PatKind::Variant { .. }));
+        let Item::Fn(g) = &items[2] else { panic!() };
+        let ExprKind::Match { arms, .. } = &g.body.tail.as_ref().unwrap().node else {
+            panic!()
+        };
+        assert!(matches!(arms[2].pat.node, PatKind::Wild));
+        assert!(matches!(arms[0].pat.node, PatKind::Lit(Lit::Int(0))));
     }
 }

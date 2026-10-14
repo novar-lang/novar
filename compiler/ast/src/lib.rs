@@ -25,6 +25,7 @@ pub enum Item {
     /// Top-level `let` (global resource setup).
     Let(Let),
     Struct(Struct),
+    Enum(Enum),
     Fn(Fn),
 }
 
@@ -58,6 +59,45 @@ pub struct Struct {
 pub struct Field {
     pub name: Ident,
     pub ty: Type,
+}
+
+/// `enum Shape { Circle(f64), Rect(f64, f64), Empty }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enum {
+    pub is_pub: bool,
+    pub name: Ident,
+    pub variants: Vec<Variant>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub name: Ident,
+    /// Payload types, in order (empty for a unit variant).
+    pub fields: Vec<Type>,
+}
+
+/// One `pattern => body` arm of a `match`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arm {
+    pub pat: Pattern,
+    pub body: Expr,
+}
+
+pub type Pattern = Spanned<PatKind>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatKind {
+    /// `_`
+    Wild,
+    /// A lowercase name that binds the matched value.
+    Bind(String),
+    Lit(Lit),
+    /// `Shape::Circle(r)`, `Shape::Empty`, `Ok(v)`, `Err(e)`
+    Variant {
+        path: Vec<Ident>,
+        args: Vec<Pattern>,
+    },
 }
 
 /// `@endpoint(path = "/x", method = "POST")`
@@ -166,6 +206,10 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Break,
     Continue,
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<Arm>,
+    },
     FString(Vec<FPart>),
     /// `target = value`; compound forms (`+=`, ...) are desugared by the parser.
     Assign {
