@@ -211,3 +211,38 @@ fn main() {
 
 See `examples/dataframe/`. The pandas version of the same program is about as long, but the
 Novar one checks the column names and types before it runs.
+
+## Errors, tuples and iterators
+
+```novar
+fn split_pair(line: String) -> Result<(String, String), String> {
+    let parts = line.split("=");
+    if parts.len() != 2 { return Err(f"bad line: {line}"); }
+    Ok((parts[0].trim(), parts[1].trim()))
+}
+
+fn port_of(line: String) -> Result<i64, String> {
+    let (key, value) = split_pair(line)?;          // `?` returns the Err early
+    match value.to_int() { Some(n) => Ok(n), None => Err(f"not a number: {value}") }
+}
+
+fn main() {
+    let xs = [3, 1, 4, 1, 5];
+    let big = xs.filter(|x| x > 2).map(|x| x * 10);     // [30, 40, 50]
+    for (i, x) in xs.enumerate() { println(f"{i}: {x}"); }
+    let mut stack = [1, 2, 3];
+    while let Some(top) = stack.pop() { println(f"{top}"); }
+    if let Some(first) = xs.first() { println(f"first = {first}"); }
+}
+```
+
+* `expr?` on a `Result` or `Option` returns the error (or `None`) from the current function; the
+  function's return type must be a `Result` or `Option` too, and the error types must match.
+* `if let` and `while let` match one pattern; they work with `break` and `continue`.
+* Tuples: the type `(A, B)`, values `(1, "a")`, fields `.0` and `.1`, and destructuring in `let`,
+  `for` and closure parameters.
+* `Vec` methods `map`, `filter`, `any`, `all`, `find`, `enumerate`, `zip`, `sum`, `min`, `max`,
+  `fold`, `for_each`, `skip` and `join`, and `Map::entries`. `min`, `max` and `find` return an
+  `Option`. These run in the interpreter; the native backend does not compile them yet.
+
+See [use cases](use-cases.md) for complete programs.
