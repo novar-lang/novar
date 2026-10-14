@@ -132,14 +132,14 @@ impl Snapshot {
         previous: Option<&Snapshot>,
     ) -> Snapshot {
         let mut snap = Snapshot::analyze_in(text, path);
-        if snap.hir.is_none() {
-            if let Some(prev) = previous.filter(|p| p.hir.is_some()) {
-                snap.hir = prev.hir.clone();
-                snap.nodes = prev.nodes.clone();
-                snap.locals = prev.locals.clone();
-                snap.map = prev.map.clone();
-                snap.stale = true;
-            }
+        if snap.hir.is_none()
+            && let Some(prev) = previous.filter(|p| p.hir.is_some())
+        {
+            snap.hir = prev.hir.clone();
+            snap.nodes = prev.nodes.clone();
+            snap.locals = prev.locals.clone();
+            snap.map = prev.map.clone();
+            snap.stale = true;
         }
         snap
     }
@@ -474,12 +474,12 @@ impl Snapshot {
             return Vec::new();
         }
         // An imported name stands for its full path.
-        if let Some(prog) = self.program() {
-            if let Some(full) = prog.imports.iter().find(|p| p.last() == segments.first()) {
-                let mut resolved = full.clone();
-                resolved.extend(segments.drain(1..));
-                segments = resolved;
-            }
+        if let Some(prog) = self.program()
+            && let Some(full) = prog.imports.iter().find(|p| p.last() == segments.first())
+        {
+            let mut resolved = full.clone();
+            resolved.extend(segments.drain(1..));
+            segments = resolved;
         }
         if segments[0] != "std" {
             return Vec::new();

@@ -101,12 +101,12 @@ fn run_bundled(bundle: &bundle::Bundle, args: &[String]) -> Result<(), CliError>
         &std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
         &flags,
     )?;
-    if !flags.contains(&"--port") {
-        if let Ok(p) = std::env::var("PORT") {
-            opts.port = p
-                .parse()
-                .or_else(|_| failed(format!("invalid PORT `{p}`")))?;
-        }
+    if !flags.contains(&"--port")
+        && let Ok(p) = std::env::var("PORT")
+    {
+        opts.port = p
+            .parse()
+            .or_else(|_| failed(format!("invalid PORT `{p}`")))?;
     }
     opts.live |= std::env::var("NOVAR_LIVE").is_ok_and(|v| v == "1");
     let loaded = bundle.load();

@@ -11,7 +11,11 @@ use crate::ty::{Dim, Prim, Ty};
 
 type Span = std::ops::Range<usize>;
 
+/// A variant (or `Ok` / `Err`) with its enum name and payload types, for exhaustiveness checks.
+type Constructor = (Option<String>, String, Vec<Ty>);
+
 #[derive(Default)]
+
 pub(crate) struct Checker {
     diags: Vec<Diagnostic>,
     /// Imported name -> its full path.
@@ -215,10 +219,10 @@ impl Checker {
 
         let mut lowered = HashSet::new();
         for item in &program.items {
-            if let ast::Item::Fn(f) = item {
-                if lowered.insert(f.name.node.clone()) {
-                    out.fns.push(self.lower_fn(f));
-                }
+            if let ast::Item::Fn(f) = item
+                && lowered.insert(f.name.node.clone())
+            {
+                out.fns.push(self.lower_fn(f));
             }
         }
         out
@@ -1609,8 +1613,7 @@ impl Checker {
         let Some((first, rest_tys)) = tys.split_first() else {
             return !rows.is_empty();
         };
-        let constructors: Option<Vec<(Option<String>, String, Vec<Ty>)>> = match self.resolve(first)
-        {
+        let constructors: Option<Vec<Constructor>> = match self.resolve(first) {
             Ty::Enum(name) => self.enums.get(&name).map(|vs| {
                 vs.iter()
                     .map(|(v, f)| (Some(name.clone()), v.clone(), f.clone()))
@@ -1785,18 +1788,17 @@ impl Checker {
             return self.enum_ctor(&p[0].node, &p[1], args, span);
         }
         // `Ok(x)` / `Err(x)` build a `Result`, typed from context when available.
-        if let ast::ExprKind::Path(p) = &callee.node {
-            if p.len() == 1
-                && self.lookup_local(&p[0].node).is_none()
-                && !self.fn_sigs.contains_key(&p[0].node)
-            {
-                let ctor = p[0].node.as_str();
-                if (ctor == "Ok" || ctor == "Err") && args.len() == 1 {
-                    return self.result_ctor(ctor == "Ok", callee, &args[0], expected, span);
-                }
-                if ctor == "Ok" || ctor == "Err" {
-                    self.err(span.clone(), format!("`{ctor}` takes exactly one argument"));
-                }
+        if let ast::ExprKind::Path(p) = &callee.node
+            && p.len() == 1
+            && self.lookup_local(&p[0].node).is_none()
+            && !self.fn_sigs.contains_key(&p[0].node)
+        {
+            let ctor = p[0].node.as_str();
+            if (ctor == "Ok" || ctor == "Err") && args.len() == 1 {
+                return self.result_ctor(ctor == "Ok", callee, &args[0], expected, span);
+            }
+            if ctor == "Ok" || ctor == "Err" {
+                self.err(span.clone(), format!("`{ctor}` takes exactly one argument"));
             }
         }
 
@@ -1899,17 +1901,18 @@ impl Checker {
             checked.push(a);
         }
         // Distributed calls ship the function by name, so only top-level functions qualify.
-        if let hir::ExprKind::Extern(path) = &callee.kind {
-            if path.join("::") == "std::dist::map" {
-                if let Some(f) = checked.get(1) {
-                    if !matches!(f.kind, hir::ExprKind::Fn(_)) {
-                        self.diags.push(
-                            Diagnostic::error(f.span.clone(), "`std::dist::map` needs the name of a top-level function")
-                                .with_note("closures capture local variables and cannot be sent to other machines"),
-                        );
-                    }
-                }
-            }
+        if let hir::ExprKind::Extern(path) = &callee.kind
+            && path.join("::") == "std::dist::map"
+            && let Some(f) = checked.get(1)
+            && !matches!(f.kind, hir::ExprKind::Fn(_))
+        {
+            self.diags.push(
+                Diagnostic::error(
+                    f.span.clone(),
+                    "`std::dist::map` needs the name of a top-level function",
+                )
+                .with_note("closures capture local variables and cannot be sent to other machines"),
+            );
         }
         let tys: Vec<Ty> = tys.iter().map(|t| self.resolve(t)).collect();
         let mut ty = match (sig.check)(&tys) {

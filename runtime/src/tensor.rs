@@ -211,10 +211,10 @@ pub(crate) fn call(
     quantization: novar_hir::Quantization,
     device: crate::interp::Device,
 ) -> Res {
-    if device == crate::interp::Device::Gpu {
-        if let Some(r) = on_gpu(path, args, quantization) {
-            return r;
-        }
+    if device == crate::interp::Device::Gpu
+        && let Some(r) = on_gpu(path, args, quantization)
+    {
+        return r;
     }
     let name = path.rsplit("::").next().unwrap_or(path);
     match name {

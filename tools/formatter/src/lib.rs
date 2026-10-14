@@ -227,20 +227,18 @@ fn layout(src: &str, tokens: &[(Token<'_>, std::ops::Range<usize>)]) -> String {
             let extra = usize::from(matches!(p.kind, Kind::Pipe | Kind::Dot));
             out.push_str(&INDENT.repeat(indent_now + extra));
             at_line_start = false;
-        } else if let Some(prev) = prev {
-            if space_between(prev, p, prev_prev_kind, generic_for_space, closure_open) {
-                out.push(' ');
-            }
+        } else if let Some(prev) = prev
+            && space_between(prev, p, prev_prev_kind, generic_for_space, closure_open)
+        {
+            out.push(' ');
         }
         out.push_str(p.text);
 
         match p.kind {
             Kind::Open(_) => open_lines.push(line_no),
             Kind::Lt if is_generic_open(prev, p) => generic += 1,
-            Kind::Bar => {
-                if p.text == "|" {
-                    closure_open = !closure_open;
-                }
+            Kind::Bar if p.text == "|" => {
+                closure_open = !closure_open;
             }
             _ => {}
         }

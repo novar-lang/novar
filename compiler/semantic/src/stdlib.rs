@@ -508,16 +508,15 @@ fn reshape_check(args: &[Ty]) -> Result<Ty, String> {
 
 fn reshape_result(args: &[Ty], expected: &Ty) -> Result<Ty, String> {
     let (_, to) = expect_tensor(expected, "std::tensor::reshape")?;
-    if let Some((_, from)) = tensor_of(&args[0]) {
-        if let (Some(a), Some(b)) = (static_count(&from), static_count(&to)) {
-            if a != b {
-                return Err(format!(
-                    "cannot reshape {} ({a} elements) into {} ({b} elements)",
-                    shape_str(&from),
-                    shape_str(&to)
-                ));
-            }
-        }
+    if let Some((_, from)) = tensor_of(&args[0])
+        && let (Some(a), Some(b)) = (static_count(&from), static_count(&to))
+        && a != b
+    {
+        return Err(format!(
+            "cannot reshape {} ({a} elements) into {} ({b} elements)",
+            shape_str(&from),
+            shape_str(&to)
+        ));
     }
     Ok(expected.clone())
 }

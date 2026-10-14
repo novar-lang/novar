@@ -505,10 +505,16 @@ impl Loader<'_> {
                                     .join(",")
                             );
                             if let Some(last) = full.last() {
-                                if let Some(prev) = seen_std.get(last) {
-                                    if *prev != key && imp.group.is_empty() {
-                                        self.diags.push(Diagnostic::error(imp.span.clone(), format!("`{last}` is already imported from a different std path")));
-                                    }
+                                if let Some(prev) = seen_std.get(last)
+                                    && *prev != key
+                                    && imp.group.is_empty()
+                                {
+                                    self.diags.push(Diagnostic::error(
+                                        imp.span.clone(),
+                                        format!(
+                                            "`{last}` is already imported from a different std path"
+                                        ),
+                                    ));
                                 }
                                 seen_std.insert(last.clone(), key);
                             }
