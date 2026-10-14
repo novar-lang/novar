@@ -98,7 +98,7 @@ fn elem(args: &[Ty], i: usize) -> Result<Ty, String> {
         Ty::Vec(t) => Ok((**t).clone()),
         Ty::Unknown | Ty::Never => Ok(Ty::Unknown),
         other => Err(format!(
-            "argument {} must be a `Vec`, found `{other}`",
+            "argument {} must be a `List`, found `{other}`",
             i + 1
         )),
     }
@@ -175,9 +175,7 @@ fn filter(args: &[Ty]) -> Result<Ty, String> {
         )),
         Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(vec_of(t)),
         Ty::Unknown => Ok(vec_of(t)),
-        other => Err(format!(
-            "argument 2 must be `fn(_) -> bool`, found `{other}`"
-        )),
+        other => Err(format!("argument 2 must be `(_) -> Bool`, found `{other}`")),
     }
 }
 
@@ -199,7 +197,7 @@ fn bool_fn_over_vec(args: &[Ty], what: &str) -> Result<Ty, String> {
         Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(t),
         Ty::Unknown => Ok(t),
         other => Err(format!(
-            "argument 2 of `{what}` must be `fn(_) -> bool`, found `{other}`"
+            "argument 2 of `{what}` must be `(_) -> Bool`, found `{other}`"
         )),
     }
 }
@@ -598,7 +596,7 @@ fn static_count(shape: &[Dim]) -> Option<u64> {
 
 fn expect_tensor(expected: &Ty, what: &str) -> Result<(Ty, Vec<Dim>), String> {
     tensor_of(expected).ok_or_else(|| {
-        format!("cannot infer the tensor type of `{what}`; annotate it, e.g. `let t: Tensor<f32, [3]> = ...`")
+        format!("cannot infer the tensor type of `{what}`; annotate it, e.g. `let t: Tensor[f32, 3] = ...`")
     })
 }
 
@@ -616,7 +614,7 @@ fn map_new_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     match expected {
         Ty::Map(..) | Ty::Unknown => Ok(expected.clone()),
         other => Err(format!(
-            "`std::map::new` makes a `Map<K, V>` but the context expects `{other}`; \
+            "`std.map.new` makes a `Map<K, V>` but the context expects `{other}`; \
              write `let m: Map<String, i64> = std::map::new();`"
         )),
     }
@@ -679,7 +677,7 @@ fn expect_table(expected: &Ty, what: &str) -> Result<Ty, String> {
     match expected {
         Ty::Table(_) => Ok(expected.clone()),
         _ => Err(format!(
-            "cannot infer the schema of `{what}`; annotate the result, e.g. `let t: Table<Row> = ...`"
+            "cannot infer the schema of `{what}`; annotate the result, e.g. `let t: Table[Row] = ...`"
         )),
     }
 }
@@ -692,6 +690,30 @@ fn read_check(args: &[Ty]) -> Result<Ty, String> {
 
 fn read_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     expect_table(expected, "a table reader")
+}
+
+fn json_stringify(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(s())
+}
+
+fn json_parse(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Unknown)
+}
+
+/// `std.json.parse(text)` gives a `Result[T, Text]`; `T` is the type the context asks for.
+fn json_parse_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    match expected {
+        Ty::Result(_, e) if e.accepts(&s()) => Ok(expected.clone()),
+        Ty::Unknown => Ok(Ty::Unknown),
+        _ => Err(
+            "cannot infer the type of `std.json.parse`; annotate the result, e.g. \
+                  `let q: Result[Query, Text] = std.json.parse(body)`"
+                .to_string(),
+        ),
+    }
 }
 
 fn sql_check(args: &[Ty]) -> Result<Ty, String> {
@@ -712,12 +734,12 @@ fn from_rows(args: &[Ty]) -> Result<Ty, String> {
             Ty::Struct(s) => Ok(Ty::Table(s.clone())),
             Ty::Unknown => Ok(Ty::Unknown),
             other => Err(format!(
-                "`from_rows` needs a `Vec` of structs, found `Vec<{other}>`"
+                "`from_rows` needs a `List` of types, found `List[{other}]`"
             )),
         },
         t if is_dynamic(t) => Ok(Ty::Unknown),
         other => Err(format!(
-            "argument 1 must be a `Vec` of structs, found `{other}`"
+            "argument 1 must be a `List` of types, found `{other}`"
         )),
     }
 }
@@ -758,7 +780,7 @@ fn filter_rows(args: &[Ty]) -> Result<Ty, String> {
         Ty::Unknown => {}
         other => {
             return Err(format!(
-                "argument 2 must be `fn(row) -> bool`, found `{other}`"
+                "argument 2 must be `(row) -> Bool`, found `{other}`"
             ));
         }
     }
@@ -883,6 +905,11 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         sig_expected(read_check, read_result),
     ),
     ("std::table::sql", sig_expected(sql_check, sql_result)),
+    ("std::json::stringify", sig(json_stringify)),
+    (
+        "std::json::parse",
+        sig_expected(json_parse, json_parse_result),
+    ),
     ("std::table::from_rows", sig(from_rows)),
     ("std::table::to_rows", sig(to_rows)),
     ("std::table::len", sig(table_len)),
@@ -988,7 +1015,7 @@ pub enum ItemKind {
     Type,
 }
 
-/// The direct children of the std path `prefix` (e.g. `std::text`), sorted, without duplicates.
+/// The direct children of the std path `prefix` (e.g. `std.text`), sorted, without duplicates.
 pub fn children(prefix: &str) -> Vec<(String, ItemKind)> {
     let start = format!("{prefix}::");
     let mut out: Vec<(String, ItemKind)> = Vec::new();

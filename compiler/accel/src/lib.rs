@@ -2,7 +2,7 @@
 //!
 //! * [`stablehlo`] turns tensor functions into StableHLO text, the input of XLA / PJRT and with
 //!   it of TPUs.
-//! * `ptx` (feature `llvm`) turns the `std::tensor` operations a program uses into PTX kernels
+//! * `ptx` (feature `llvm`) turns the `std.tensor` operations a program uses into PTX kernels
 //!   through LLVM's NVPTX backend.
 //!
 //! Neither output is executed by this repository's tests: there is no TPU or NVIDIA GPU on the
@@ -18,7 +18,7 @@ mod ptx;
 #[cfg(feature = "llvm")]
 pub use ptx::{Ptx, ptx, used_ops};
 
-/// Names of the `std::tensor` operations a program calls, in first-use order.
+/// Names of the `std.tensor` operations a program calls, in first-use order.
 pub fn tensor_ops(program: &telvax_hir::hir::Program) -> Vec<String> {
     let mut out = Vec::new();
     for f in &program.fns {

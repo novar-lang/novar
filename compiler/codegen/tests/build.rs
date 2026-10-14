@@ -23,10 +23,16 @@ fn scratch(name: &str) -> PathBuf {
     dir.join(name)
 }
 
-const PROGRAM: &str = "
-    fn fib(n: i32) -> i32 { if n < 2 { return n; } fib(n - 1) + fib(n - 2) }
-    fn main() -> i32 { fib(10) }
-";
+const PROGRAM: &str = r#"
+fn fib(n: i32) -> i32:
+    if n < 2:
+        return n
+
+    fib(n - 1) + fib(n - 2)
+
+fn main() -> i32:
+    fib(10)
+"#;
 
 #[test]
 fn emits_llvm_ir() {
@@ -37,10 +43,13 @@ fn emits_llvm_ir() {
 
 #[test]
 fn optimiser_pipeline_runs() {
-    let src = "
-        fn twice(x: i32) -> i32 { x + x }
-        fn main() -> i32 { twice(twice(10)) + 2 }
-    ";
+    let src = r#"
+fn twice(x: i32) -> i32:
+    x + x
+
+fn main() -> i32:
+    twice(twice(10)) + 2
+"#;
     let ir = llvm_ir(&hir(src)).unwrap();
     let o0 = optimize_ir(&ir, OptLevel(0)).unwrap();
     let o2 = optimize_ir(&ir, OptLevel(2)).unwrap();
@@ -59,10 +68,20 @@ fn builds_and_runs_an_executable() {
 
 #[test]
 fn exit_code_reflects_control_flow() {
-    let src = "
-        fn classify(x: i32) -> i32 { if x < 0 { return 1; } else { if x == 0 { return 2; } } 3 }
-        fn main() -> i32 { classify(-5) * 100 / 100 + classify(0) * 10 + classify(9) }
-    ";
+    let src = r#"
+fn classify(x: i32) -> i32:
+    if x < 0:
+        return 1
+
+    else:
+        if x == 0:
+            return 2
+
+    3
+
+fn main() -> i32:
+    classify(-5) * 100 / 100 + classify(0) * 10 + classify(9)
+"#;
     let exe = scratch("classify");
     build_executable(&hir(src), OptLevel(0), &exe).unwrap();
     assert_eq!(Command::new(&exe).status().unwrap().code(), Some(24));
@@ -79,9 +98,27 @@ fn builds_an_object_file() {
 fn entry_point_is_validated() {
     let out = scratch("none");
     for (src, needle) in [
-        ("fn f() -> i32 { 1 }", "entry point"),
-        ("fn main() -> bool { true }", "fn main() -> i32"),
-        ("fn main(x: i32) -> i32 { x }", "fn main() -> i32"),
+        (
+            r#"
+fn f() -> i32:
+    1
+"#,
+            "entry point",
+        ),
+        (
+            r#"
+fn main() -> Bool:
+    True
+"#,
+            "def main() -> int32",
+        ),
+        (
+            r#"
+fn main(x: i32) -> i32:
+    x
+"#,
+            "def main() -> int32",
+        ),
     ] {
         match build_executable(&hir(src), OptLevel(0), &out) {
             Err(BuildError::Diagnostics(d)) => assert!(d[0].message.contains(needle), "{d:?}"),
@@ -92,7 +129,12 @@ fn entry_point_is_validated() {
 
 #[test]
 fn unsupported_code_reports_diagnostics() {
-    match llvm_ir(&hir("fn main() -> i32 { let g = |x| x; 1 }")) {
+    match llvm_ir(&hir(r#"
+fn main() -> i32:
+    let g = x => x
+    1
+"#))
+    {
         Err(BuildError::Diagnostics(d)) => assert!(d[0].message.contains("closures")),
         other => panic!("{other:?}"),
     }
@@ -132,7 +174,11 @@ fn run_interpreted(src: &str) -> (i64, String) {
 
 #[test]
 fn hello_world() {
-    let src = r#"fn main() -> i32 { std::io::println("hello, world"); 0 }"#;
+    let src = r#"
+fn main() -> i32:
+    print("hello, world")
+    0
+"#;
     assert_eq!(
         run_native(src, "hello"),
         (Some(0), "hello, world\n".to_string())
@@ -142,20 +188,33 @@ fn hello_world() {
 #[test]
 fn native_and_interpreter_print_the_same() {
     let src = r#"
-        struct Item { name: String, qty: i32 }
-        let greeting = "total";
-        fn show(i: Item) { std::io::print(i.name + ":"); }
-        fn count(n: i32) -> i32 { if n == 0 { return 0; } std::io::print("."); count(n - 1) + 1 }
-        fn main() -> i32 {
-            show(Item { name: "apple", qty: 3 });
-            show(Item { qty: 1, name: "pear" });
-            std::io::println("");
-            std::io::println(greeting + "!");
-            let n = count(4);
-            std::io::println("");
-            if "a" + "b" == "ab" { n + 40 } else { 1 }
-        }
-    "#;
+type Item:
+    name: Text
+    qty: i32
+
+let greeting = "total"
+
+fn show(i: Item):
+    std.io.print(i.name + ":")
+
+fn count(n: i32) -> i32:
+    if n == 0:
+        return 0
+    std.io.print(".")
+    count(n - 1) + 1
+
+fn main() -> i32:
+    show(Item(name: "apple", qty: 3))
+    show(Item(qty: 1, name: "pear"))
+    print("")
+    print(greeting + "!")
+    let n = count(4)
+    print("")
+    if "a" + "b" == "ab":
+        n + 40
+    else:
+        1
+"#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
         run_native(src, "differential"),
@@ -168,15 +227,20 @@ fn native_and_interpreter_print_the_same() {
 #[test]
 fn fstrings_match_the_interpreter() {
     let src = r#"
-        struct Order { id: u32, total: i64, paid: bool }
-        fn describe(o: Order) -> String { f"order #{o.id}: total={o.total} paid={o.paid}" }
-        fn main() -> i32 {
-            std::io::println(describe(Order { id: 7, total: -1250, paid: false }));
-            std::io::println(describe(Order { paid: true, total: 9000000000, id: 4000000000 }));
-            std::io::println(f"{0} {-0} {255}");
-            0
-        }
-    "#;
+type Order:
+    id: u32
+    total: Int
+    paid: Bool
+
+fn describe(o: Order) -> Text:
+    f"order #{o.id}: total={o.total} paid={o.paid}"
+
+fn main() -> i32:
+    print(describe(Order(id: 7, total: -1250, paid: False)))
+    print(describe(Order(paid: True, total: 9000000000, id: 4000000000)))
+    print(f"{0} {-0} {255}")
+    0
+"#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
         run_native(src, "fstrings"),
@@ -184,44 +248,51 @@ fn fstrings_match_the_interpreter() {
     );
     assert_eq!(
         out,
-        "order #7: total=-1250 paid=false\norder #4000000000: total=9000000000 paid=true\n0 0 255\n"
+        "order #7: total=-1250 paid=False\norder #4000000000: total=9000000000 paid=True\n0 0 255\n"
     );
 }
 
 #[test]
 fn loops_and_vectors_match_the_interpreter() {
     let src = r#"
-        fn is_prime(n: i64) -> bool {
-            if n < 2 { return false; }
-            let mut d: i64 = 2;
-            while d * d <= n {
-                if n % d == 0 { return false; }
-                d += 1;
-            }
-            true
-        }
-        fn fib(n: i32) -> i64 {
-            let mut a: i64 = 0;
-            let mut b: i64 = 1;
-            for i in 0..n { let t = a + b; a = b; b = t; }
-            a
-        }
-        fn main() -> i32 {
-            let mut primes = 0;
-            let limit: i64 = 100;
-            for n in 0..limit { if is_prime(n) { primes += 1; } }
-            std::io::println(f"primes below 100: {primes}");
-            let weights = [3, 1, 4, 1, 5, 9, 2, 6];
-            let mut total = 0;
-            for w in weights { total += w; }
-            std::io::println(f"sum of {weights.len()} weights: {total}, third: {weights[2]}");
-            std::io::println(f"fib(50) = {fib(50)}");
-            let mut line = "";
-            for i in 1..=5 { line = line + f"{i * i} "; }
-            std::io::println(line);
-            primes + total
-        }
-    "#;
+fn is_prime(n: Int) -> Bool:
+    if n < 2:
+        return False
+    var d: Int = 2
+    while d * d <= n:
+        if n % d == 0:
+            return False
+        d += 1
+    True
+
+fn fib(n: i32) -> Int:
+    var a: Int = 0
+    var b: Int = 1
+    for i in range(n):
+        let t = a + b
+        a = b
+        b = t
+    a
+
+fn main() -> i32:
+    var primes = 0
+    let limit: Int = 100
+    for n in range(limit):
+        if is_prime(n):
+            primes += 1
+    print(f"primes below 100: {primes}")
+    let weights = [3, 1, 4, 1, 5, 9, 2, 6]
+    var total = 0
+    for w in weights:
+        total += w
+    print(f"sum of {weights.len()} weights: {total}, third: {weights[2]}")
+    print(f"fib(50) = {fib(50)}")
+    var line = ""
+    for i in range(1, 6):
+        line = line + f"{i * i} "
+    print(line)
+    primes + total
+"#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
         out,
@@ -233,7 +304,15 @@ fn loops_and_vectors_match_the_interpreter() {
 
 #[test]
 fn out_of_bounds_index_aborts_with_a_message() {
-    let src = "fn at(i: i32) -> i32 { let v = [1, 2, 3]; v[i] } fn main() -> i32 { std::io::println(\"before\"); at(7) }";
+    let src = r#"
+fn at(i: i32) -> i32:
+    let v = [1, 2, 3]
+    v[i]
+
+fn main() -> i32:
+    print("before")
+    at(7)
+"#;
     let exe = scratch("oob");
     build_executable(&hir(src), OptLevel(0), &exe).unwrap();
     let out = Command::new(&exe).output().unwrap();
@@ -265,7 +344,13 @@ fn primes_example_matches_the_interpreter() {
 
 #[test]
 fn out_of_bounds_assignment_aborts() {
-    let src = "fn main() -> i32 { let mut v = [1, 2]; let k = 5; v[k] = 1; 0 }";
+    let src = r#"
+fn main() -> i32:
+    var v = [1, 2]
+    let k = 5
+    v[k] = 1
+    0
+"#;
     let exe = scratch("oob_store");
     build_executable(&hir(src), OptLevel(1), &exe).unwrap();
     let out = Command::new(&exe).output().unwrap();

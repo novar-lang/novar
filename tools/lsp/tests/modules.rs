@@ -28,9 +28,21 @@ impl Drop for Dir {
     }
 }
 
-const MAIN: &str = "import util::{double, Pair};\n\nfn main() -> i32 {\n    let p = Pair { a: 1, b: 2 };\n    double(p.a) + double(p.b)\n}\n";
-const UTIL: &str =
-    "pub struct Pair { a: i32, b: i32 }\n\npub fn double(x: i32) -> i32 {\n    x * 2\n}\n";
+const MAIN: &str = r#"
+from util import double, Pair
+
+fn main() -> i32:
+    let p = Pair(a: 1, b: 2)
+    double(p.a) + double(p.b)
+"#;
+const UTIL: &str = r#"
+type Pair:
+    a: i32
+    b: i32
+
+fn double(x: i32) -> i32:
+    x * 2
+"#;
 
 fn project(tag: &str) -> (Dir, PathBuf) {
     let d = Dir::new(tag);
@@ -65,7 +77,7 @@ fn hover_shows_the_names_the_user_wrote() {
     let s = Snapshot::analyze_in(MAIN.to_string(), Some(&main));
     let at = MAIN.find("double(p.a)").unwrap() + 2;
     let (text, _) = s.hover(at).unwrap();
-    assert!(text.contains("fn util::double(x: i32) -> i32"), "{text}");
+    assert!(text.contains("fn util.double(x: i32) -> i32"), "{text}");
     assert!(!text.contains("__"), "{text}");
 }
 
@@ -77,7 +89,7 @@ fn go_to_definition_crosses_files() {
     let (file, span) = s.definition_location(at).unwrap();
     assert!(file.ends_with("util.tvx"), "{file}");
     assert_eq!(&UTIL[span], "double");
-    let at = MAIN.find("Pair {").unwrap() + 1;
+    let at = MAIN.find("Pair(a: 1").unwrap() + 1;
     let (file, span) = s.definition_location(at).unwrap();
     assert!(
         file.ends_with("util.tvx") && UTIL[span].starts_with("Pair"),
@@ -88,8 +100,22 @@ fn go_to_definition_crosses_files() {
 #[test]
 fn only_this_documents_problems_and_symbols_are_listed() {
     let d = Dir::new("scope");
-    d.write("util.tvx", "pub fn broken() -> i32 {\n    \"nope\"\n}\n");
-    let main_text = "import util::broken;\nfn main() -> i32 { broken() }\nfn other() {}\n";
+    d.write(
+        "util.tvx",
+        r#"
+fn broken() -> i32:
+    "nope"
+"#,
+    );
+    let main_text = r#"
+import util.broken
+
+fn main() -> i32:
+    broken()
+
+fn other():
+    pass
+"#;
     let main = d.write("main.tvx", main_text);
     let s = Snapshot::analyze_in(main_text.to_string(), Some(&main));
     assert!(
@@ -110,7 +136,7 @@ fn only_this_documents_problems_and_symbols_are_listed() {
     assert!(
         u.diagnostics
             .iter()
-            .any(|x| x.message.contains("expected `i32`, found `String`"))
+            .any(|x| x.message.contains("expected `i32`, found `Text`"))
     );
 }
 
@@ -128,7 +154,7 @@ fn completion_offers_imported_items_without_mangled_names() {
     assert!(labels.iter().all(|l| !l.contains("__")), "{labels:?}");
     let double = items.iter().find(|c| c.label == "double").unwrap();
     assert!(
-        double.detail.as_deref().unwrap().contains("util::double"),
+        double.detail.as_deref().unwrap().contains("util.double"),
         "{double:?}"
     );
 }
@@ -141,14 +167,25 @@ fn project_dependencies_are_found_through_telvax_toml() {
         "shared/telvax.toml",
         "[package]\nname = \"shared\"\nversion = \"0.1.0\"\n",
     );
-    d.write("shared/src/lib.tvx", "pub fn answer() -> i32 { 42 }\n");
+    d.write(
+        "shared/src/lib.tvx",
+        r#"
+fn answer() -> i32:
+    42
+"#,
+    );
     // The locked path dependency is what the compiler consults.
     let project = telvax_pkg::Project::open(&d.0).unwrap();
     project.lock(None).unwrap();
-    let text = "import shared::answer;\nfn main() -> i32 { answer() }\n";
+    let text = r#"
+import shared.answer
+
+fn main() -> i32:
+    answer()
+"#;
     let main = d.write("src/main.tvx", text);
     let s = Snapshot::analyze_in(text.to_string(), Some(&main));
     assert!(s.diagnostics.is_empty(), "{:?}", s.diagnostics);
     let (hover, _) = s.hover(text.find("answer()").unwrap() + 1).unwrap();
-    assert!(hover.contains("fn shared::answer() -> i32"), "{hover}");
+    assert!(hover.contains("fn shared.answer() -> i32"), "{hover}");
 }

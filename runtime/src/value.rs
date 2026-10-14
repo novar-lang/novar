@@ -56,7 +56,7 @@ impl MapKey {
             Value::Int(i) => Ok(MapKey::Int(*i)),
             Value::Str(s) => Ok(MapKey::Str(s.clone())),
             other => Err(format!(
-                "a map key must be a String, an integer or a bool, found {}",
+                "a Map key must be a Text, an Int or a Bool, found {}",
                 other.type_name()
             )),
         }
@@ -358,13 +358,13 @@ impl Value {
 
     pub fn type_name(&self) -> &'static str {
         match self {
-            Value::Unit => "()",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "integer",
-            Value::Float(_) => "float",
-            Value::Str(_) => "String",
-            Value::Vec(_) => "Vec",
-            Value::Struct(_) => "struct",
+            Value::Unit => "None",
+            Value::Bool(_) => "Bool",
+            Value::Int(_) => "Int",
+            Value::Float(_) => "Float",
+            Value::Str(_) => "Text",
+            Value::Vec(_) => "List",
+            Value::Struct(_) => "type",
             Value::Enum(e) if e.name == "Option" => "Option",
             Value::Enum(_) => "enum",
             Value::Map(_) => "Map",
@@ -496,8 +496,8 @@ fn tensor_json(shape: &[usize], data: &[f64], single: bool) -> Json {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Unit => f.write_str("()"),
-            Value::Bool(b) => write!(f, "{b}"),
+            Value::Unit => f.write_str("None"),
+            Value::Bool(b) => f.write_str(if *b { "True" } else { "False" }),
             Value::Int(i) => write!(f, "{i}"),
             Value::Float(x) => write!(f, "{x}"),
             Value::Str(s) => f.write_str(s),
@@ -512,14 +512,14 @@ impl fmt::Display for Value {
                 f.write_str("]")
             }
             Value::Struct(s) => {
-                write!(f, "{} {{ ", s.name)?;
+                write!(f, "{}(", s.name)?;
                 for (i, (k, v)) in s.fields.iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
-                    write!(f, "{k}: {v}")?;
+                    write!(f, "{k}={v}")?;
                 }
-                f.write_str(" }")
+                f.write_str(")")
             }
             Value::Enum(e) if e.name == "Option" => match e.fields.first() {
                 Some(v) => write!(f, "Some({v})"),
@@ -546,7 +546,7 @@ impl fmt::Display for Value {
                 f.write_str("}")
             }
             Value::Enum(e) => {
-                write!(f, "{}::{}", e.name, e.variant)?;
+                write!(f, "{}.{}", e.name, e.variant)?;
                 if !e.fields.is_empty() {
                     f.write_str("(")?;
                     for (i, v) in e.fields.iter().enumerate() {
@@ -581,7 +581,7 @@ pub fn from_json(
     let bad = |what: &str| format!("expected {what}, found {json}");
     match ty {
         Ty::Prim(Prim::Bool) => json.as_bool().map(Value::Bool).ok_or_else(|| bad("bool")),
-        Ty::Prim(Prim::Str) => json.as_str().map(Value::str).ok_or_else(|| bad("String")),
+        Ty::Prim(Prim::Str) => json.as_str().map(Value::str).ok_or_else(|| bad("Text")),
         Ty::Prim(p) if p.is_float() => json
             .as_f64()
             .map(Value::Float)
@@ -621,7 +621,7 @@ pub fn from_json(
         Ty::Table(name) => {
             let fields = structs
                 .get(name)
-                .ok_or_else(|| format!("unknown struct `{name}`"))?;
+                .ok_or_else(|| format!("unknown type `{name}`"))?;
             let items = json.as_array().ok_or_else(|| bad("an array of rows"))?;
             let rows = items
                 .iter()
@@ -639,7 +639,7 @@ pub fn from_json(
         Ty::Struct(name) => {
             let fields = structs
                 .get(name)
-                .ok_or_else(|| format!("unknown struct `{name}`"))?;
+                .ok_or_else(|| format!("unknown type `{name}`"))?;
             let obj = json.as_object().ok_or_else(|| bad("an object"))?;
             let mut out = Vec::new();
             for (fname, fty) in fields {
@@ -725,7 +725,7 @@ pub fn from_json(
                 (n, Some(Json::Array(items))) if items.len() == n && n > 1 => {
                     items.iter().collect()
                 }
-                _ => return Err(format!("`{name}::{variant}` needs {} value(s)", tys.len())),
+                _ => return Err(format!("`{name}.{variant}` needs {} value(s)", tys.len())),
             };
             let fields = tys
                 .iter()

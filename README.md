@@ -1,27 +1,30 @@
 # Telvax
 
 Telvax is a statically typed, compiled language for data processing, ML pipelines and AI serving.
+It is easy to read for anyone who knows Python (blocks by indentation, no braces or semicolons)
+and has its own words: `fn`, `let` / `var`, `type`, `x => x + 1`, `Int?`.
 Tensor shapes are part of the type system, a pipeline operator (`|>`) composes stages, and a
 function marked `@endpoint` becomes an HTTP route with validation and JSON handling generated
 for it.
 
 ```telvax
-import std::ai::embeddings::OllamaEmbedder;
-import std::http::Status;
+import std.ai.embeddings.OllamaEmbedder
+import std.http.Status
 
-let embedder = OllamaEmbedder::new("nomic-embed-text");
+let embedder = OllamaEmbedder.new("nomic-embed-text")
 
-struct QueryPayload { query: String, top_k: i32 }
+type QueryPayload:
+    query: Text
+    top_k: i32
 
-fn embed(text: String) -> Tensor<f32, [768]> {
-    text |> std::text::clean_whitespace() |> std::text::truncate(512) |> embedder.embed()
-}
+fn embed(text: Text) -> Tensor[f32, 768]:
+    text |> std.text.clean_whitespace() |> std.text.truncate(512) |> embedder.embed()
 
-@endpoint(path = "/v1/embed", method = "POST")
-pub fn handle(payload: QueryPayload) -> Result<Tensor<f32, [768]>, Status> {
-    if payload.query.is_empty() { return Err(Status::BadRequest("empty query")); }
-    return Ok(embed(payload.query));
-}
+@endpoint(POST, "/v1/embed")
+fn handle(payload: QueryPayload) -> Result[Tensor[f32, 768], Status]:
+    if payload.query.is_empty():
+        return Err(Status.BadRequest("empty query"))
+    Ok(embed(payload.query))
 ```
 
 The full RAG service from the specification is in [`examples/rag-service.tvx`](examples/rag-service.tvx).
@@ -38,8 +41,8 @@ The full RAG service from the specification is in [`examples/rag-service.tvx`](e
 | Models whose tensor shapes are checked before they run | [`examples/ml/forward.tvx`](examples/ml/forward.tvx) |
 | Turn a function into a validated JSON HTTP route | [`examples/service/sentiment.tvx`](examples/service/sentiment.tvx) |
 | A RAG service: embeddings, vector search, an LLM | [`examples/rag-service.tvx`](examples/rag-service.tvx) |
-| Text processing with `Map`, `Vec` and iterator methods | [`examples/text/word-count.tvx`](examples/text/word-count.tvx) |
-| Errors as values: `Result`, `Option`, `?`, `if let` | [`examples/errors/parse-config.tvx`](examples/errors/parse-config.tvx) |
+| Text processing with `Map`, `List` and iterator methods | [`examples/text/word-count.tvx`](examples/text/word-count.tvx) |
+| Errors as values: `Result`, `Option`, `?`, `if x is Some(v)` | [`examples/errors/parse-config.tvx`](examples/errors/parse-config.tvx) |
 
 Each one comes with the commands to run it in [`docs/guide/use-cases.md`](docs/guide/use-cases.md).
 
@@ -55,7 +58,7 @@ The script downloads a release binary or, if there is none for your system, buil
 
 Two builds are published for each system: the full `telvax` (about 50 MB, with SQL and Parquet)
 and `telvax-lite` (about 10 MB). The lite build has everything else, in-memory tables and CSV
-included; `std::table::sql` and Parquet report a clear error there. `TELVAX_LITE=1` makes the install script pick the lite one.
+included; `std.table.sql` and Parquet report a clear error there. `TELVAX_LITE=1` makes the install script pick the lite one.
 
 On Windows (PowerShell):
 
@@ -95,7 +98,7 @@ Nightly Rust is required (`rust-toolchain.toml` selects it). More in the [tour](
 | Web playground | `playground/` | the checker and interpreter compiled to WebAssembly |
 | Accelerators | `compiler/accel/` | StableHLO and PTX generators (not run on TPU / NVIDIA hardware); GPU execution lives in `runtime` (`gpu` feature) |
 | Python | `python/` | PyO3 module; zero-copy Arrow, NumPy and CUDA-array interchange; Ray executor |
-| Distribution | `tools/cluster` | `telvax worker` + `--workers` for `std::dist::map` |
+| Distribution | `tools/cluster` | `telvax worker` + `--workers` for `std.dist.map` |
 | Benchmarks | `benchmarks/` | alpha targets: RAG overhead, memory footprint, ingestion throughput |
 
 [`docs/design/status.md`](docs/design/status.md) maps every item of the original engineering
@@ -103,16 +106,17 @@ specification to what exists, what was verified and how, and what is still open.
 
 ## Language notes
 
-* **Values.** Structs and strings are values; a `Vec` is a reference (copies share elements).
+* **Values.** Types you define and `Text` are values; a `List` is a reference (copies share elements).
   Tensors are immutable values. Untyped number literals take their type from how they are used.
-* **Tensors.** `Tensor<f32, [2, 3]>` carries its shape: `std::tensor::matmul` of mismatched
+* **Tensors.** `Tensor[f32, 2, 3]` carries its shape: `std.tensor.matmul` of mismatched
   shapes is a compile error. Symbolic dimensions (`[N]`) accept any size.
-* **Tables.** `Table<Row>` is an Arrow table whose columns are the fields of struct `Row`;
+* **Tables.** `Table[Row]` is an Arrow table whose columns are the fields of type `Row`;
   `t.score` is the column as a zero-copy tensor.
-* **Modules.** `import util::helper;`, `import crate::geometry::{Point, norm};`,
-  `import mathx::vec::dot;` (a dependency). Only `pub fn` and `pub struct` are importable.
-* **Native subset.** Integers, floats, bools, strings, structs, number vectors, static-shape
-  `f32`/`f64` tensors, loops and f-strings (ints, bools, strings). Closures, `Table`, SQL and most
+* **Modules.** `import util.helper`, `from crate.geometry import Point, norm`,
+  `from mathx.vec import dot` (a dependency). A name that starts with `_` is private and cannot
+  be imported.
+* **Native subset.** Integers, floats, bools, strings, types you define, number lists, static-shape
+  `f32`/`f64` tensors, loops and f-strings (ints, bools, strings). Arrow functions (`x => ...`), `Table`, SQL and most
   of `std` run in the interpreter only.
 
 ## Testing

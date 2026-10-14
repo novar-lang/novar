@@ -49,6 +49,9 @@ impl<'a> Rewriter<'a> {
                 self.rename(&mut s.name);
                 for f in &mut s.fields {
                     self.ty(&mut f.ty);
+                    if let Some(d) = &mut f.default {
+                        self.expr(d);
+                    }
                 }
             }
             Item::Enum(e) => {
@@ -115,6 +118,9 @@ impl<'a> Rewriter<'a> {
         }
         for p in &mut f.params {
             self.ty(&mut p.ty);
+            if let Some(d) = &mut p.default {
+                self.expr(d);
+            }
             self.bind(&p.name.node);
         }
         if let Some(r) = &mut f.ret {
@@ -189,6 +195,7 @@ impl<'a> Rewriter<'a> {
                 args.iter_mut().for_each(|a| self.expr(a));
             }
             ExprKind::Field { base, .. } => self.expr(base),
+            ExprKind::Named { value, .. } => self.expr(value),
             ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
             ExprKind::Tuple(items) => items.iter_mut().for_each(|a| self.expr(a)),
             ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {

@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.1.0
+
+**Breaking: a new syntax.** Telvax is now easy to read for anyone who knows Python (blocks by
+indentation, no braces or semicolons) and keeps its own words and ideas. The Rust-style syntax is gone.
+The design is in `docs/design/sintaxe-pythonica.md`; the checker, the interpreter and the native
+backend are unchanged except where noted.
+
+```telvax
+type Query:
+    text: Text
+    top_k: Int = 5
+
+fn embed(text: Text) -> Tensor[f32, 768]:
+    text
+        |> std.text.clean_whitespace()
+        |> std.text.truncate(512)
+        |> embedder.embed()
+
+@endpoint(POST, "/v1/rag/query")
+fn handle(q: Query) -> Result[Reply, Status]:
+    let docs = search(embed(q.text), limit: q.top_k)
+    ...
+```
+
+### Language
+* **Blocks:** a line that ends with `:` opens an indented block; `#` starts a comment.
+* **Functions and variables:** `fn name(a: Int) -> Int:`; the last expression is the value, `return`
+  leaves early. `let x = 1` cannot change, `var x = 1` can; a plain `x = 2` never declares.
+* **Types:** `Int`, `Float`, `Text`, `Bool`, `List[T]`, `Map[K, V]`, `T?` for a value that may be `None`,
+  `Result[T, E]`, `Tensor[f32, 2, 3]` (the dimensions follow the element type) and `Table[Row]`; sized
+  numbers keep `i8`..`i64`, `u8`..`u64`, `f32`, `f64`. Error messages use the same names.
+* **Your own types:** `type Point:` with fields and methods in one block, `type Circle(Shape)` to implement
+  a trait, `extend Point:`, `enum Shape:` with one variant per line, `trait Shape:` and `type Stack[T]:`.
+* **Named arguments and defaults:** `Query(text: "x")`, `search(q, limit: 3)`; a field or a parameter can
+  have a default (`top_k: Int = 5`). Names are checked against the function.
+* **Functions as values:** `x => x + 1`, `(a, b) => a + b`; an `fn` inside a function is a closure with
+  several statements.
+* **Words and operators:** `and`, `or`, `not`, `in`, `elif`, `True` / `False` / `None`, `a if c else b`,
+  `for i in range(n)`, `for i, x in items`, `pass`. `x is Some(v)` replaces `if let` and `while let`.
+* **Modules:** `.` replaces `::`; `from util import clamp`, `import util.clamp`. A name that starts with `_`
+  is private; there is no `pub`.
+* `@endpoint(POST, "/path")`; `print` ends the line (`std.io.print` does not); values print as
+  `True`, `None`, `Point(x=1, y=2)`.
+* Kept: `|>` (a line may start with it), `?`, `Some`, `Ok`, `Err`.
+
+### Tools
+* `telvax fmt` is rebuilt for indentation and checks that the tokens are unchanged.
+* `telvax lint` no longer reports "needless `mut`"; an unused private function is one whose name starts
+  with `_`.
+* The language server, the VS Code grammar and the playground follow the new syntax.
+* Syntax errors say what to write: `def` -> `fn`, a missing `:`, `;`, `..`, `x = 1` without `let`.
+* `telvax-migrate` (`tools/migrate`) converts files written in the old Rust-style syntax and keeps their
+  comments: `cargo run -p telvax_migrate -- file.tvx`. It will be removed in a later release.
+
+### Moving a program
+Run `telvax-migrate` on each file. What it cannot carry over: an `if` or `match` used as a value (write a
+conditional expression, or assign inside the branches), blocks used as expressions, closed ranges
+(`0..=n` is `range(0, n + 1)`), and typed closure parameters.
+
 ## 0.0.5
 
 The project is now called **Telvax** (it was Novar). Everything was renamed: the binaries are `telvax`

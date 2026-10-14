@@ -16,7 +16,7 @@ pub struct StableHlo {
 }
 
 /// Translates every function made of tensor and scalar `f32` arithmetic (straight-line `let`s,
-/// `std::tensor` calls, `+ - * /` and calls to other translatable functions). Anything else is
+/// `std.tensor` calls, `+ - * /` and calls to other translatable functions). Anything else is
 /// reported in [`StableHlo::skipped`].
 pub fn stablehlo(program: &hir::Program) -> Result<StableHlo, Vec<Diagnostic>> {
     let mut done: HashMap<String, String> = HashMap::new();
@@ -459,11 +459,16 @@ mod tests {
     #[test]
     fn translates_a_small_network() {
         let out = compile(
-            "fn layer(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
-                 std::tensor::softmax(std::tensor::relu(std::tensor::matmul(x, w)))
-             }
-             fn total(x: Tensor<f32, [2, 4]>) -> f32 { std::tensor::sum(x) }
-             fn twice(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> { layer(x, w) }",
+            r#"
+fn layer(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    std.tensor.softmax(std.tensor.relu(std.tensor.matmul(x, w)))
+
+fn total(x: Tensor[f32, 2, 4]) -> f32:
+    std.tensor.sum(x)
+
+fn twice(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    layer(x, w)
+"#,
         );
         assert_eq!(
             out.emitted,
@@ -492,9 +497,19 @@ mod tests {
     #[test]
     fn reports_what_it_cannot_translate() {
         let out = compile(
-            "fn looped(n: i32) -> i32 { let mut s = 0; for i in 0..n { s = s + i; } s }
-             fn fine(x: Tensor<f32, [4]>) -> f32 { std::tensor::mean(x) }
-             fn uses_loop(n: i32) -> i32 { looped(n) }",
+            r#"
+fn looped(n: i32) -> i32:
+    var s = 0
+    for i in range(n):
+        s = s + i
+    s
+
+fn fine(x: Tensor[f32, 4]) -> f32:
+    std.tensor.mean(x)
+
+fn uses_loop(n: i32) -> i32:
+    looped(n)
+"#,
         );
         assert_eq!(out.emitted, ["fine"]);
         let names: Vec<_> = out.skipped.iter().map(|(n, _)| n.as_str()).collect();

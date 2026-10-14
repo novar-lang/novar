@@ -6,23 +6,41 @@ use telvax_modules::Image;
 use telvax_runtime::{Executor, Interp, Value};
 
 const PROGRAM: &str = r#"
-    struct Job { id: i64, text: String }
-    struct Done { id: i64, words: u64, shout: String }
+type Job:
+    id: Int
+    text: Text
 
-    fn square(x: i64) -> i64 { x * x }
-    fn heavy(n: i64) -> i64 {
-        let mut acc: i64 = 0;
-        for i in 0..n { acc += (i * i) % 7; }
-        acc
-    }
-    fn process(j: Job) -> Done {
-        Done { id: j.id, words: std::iter::count(std::text::split(j.text, " ")), shout: std::text::uppercase(j.text) }
-    }
-    fn fails(x: i64) -> i64 { 100 / x }
-    fn squares(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, square) }
-    fn crunch(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, heavy) }
-    fn jobs(v: Vec<Job>) -> Vec<Done> { std::dist::map(v, process) }
-    fn risky(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, fails) }
+type Done:
+    id: Int
+    words: u64
+    shout: Text
+
+fn square(x: Int) -> Int:
+    x * x
+
+fn heavy(n: Int) -> Int:
+    var acc: Int = 0
+    for i in range(n):
+        acc += i * i % 7
+    acc
+
+fn process(j: Job) -> Done:
+    Done(id: j.id, words: std.iter.count(std.text.split(j.text, " ")), shout: std.text.uppercase(j.text))
+
+fn fails(x: Int) -> Int:
+    100 / x
+
+fn squares(v: List[Int]) -> List[Int]:
+    std.dist.map(v, square)
+
+fn crunch(v: List[Int]) -> List[Int]:
+    std.dist.map(v, heavy)
+
+fn jobs(v: List[Job]) -> List[Done]:
+    std.dist.map(v, process)
+
+fn risky(v: List[Int]) -> List[Int]:
+    std.dist.map(v, fails)
 "#;
 
 fn image(src: &str) -> Image {
@@ -225,7 +243,12 @@ fn tokens_protect_workers() {
 #[test]
 fn workers_refuse_programs_that_do_not_compile() {
     let w = spawn(None).unwrap();
-    let broken = image("fn f() -> i32 { \"nope\" }");
+    let broken = image(
+        r#"
+fn f() -> i32:
+    "nope"
+"#,
+    );
     let exec = ClusterExecutor::new(vec![w.address()], &broken, None).unwrap();
     let e = exec.map("f", vec![json!(1)]).unwrap_err();
     assert!(e.contains("does not type-check"), "{e}");

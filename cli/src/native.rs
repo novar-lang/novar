@@ -34,8 +34,8 @@ mod imp {
         match telvax_mlir::jit_call_with(&hir, func, &args, quant) {
             Ok(JitValue::Int(i)) => println!("{i}"),
             Ok(JitValue::Float(x)) => println!("{x}"),
-            Ok(JitValue::Bool(b)) => println!("{b}"),
-            Ok(JitValue::Unit) => println!("()"),
+            Ok(JitValue::Bool(b)) => println!("{}", if b { "True" } else { "False" }),
+            Ok(JitValue::Unit) => println!("None"),
             Err(e) => return failed(e),
         }
         Ok(())

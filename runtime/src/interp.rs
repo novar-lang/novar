@@ -14,7 +14,7 @@ use crate::std_impl;
 mod gpu_chain;
 use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
 
-/// Where `std::tensor` operations on `f32` tensors run.
+/// Where `std.tensor` operations on `f32` tensors run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Device {
     #[default]
@@ -24,7 +24,7 @@ pub enum Device {
     Gpu,
 }
 
-/// Runs `std::dist::map` somewhere other than the calling thread: other processes, other machines,
+/// Runs `std.dist.map` somewhere other than the calling thread: other processes, other machines,
 /// a Ray cluster. Arguments and results travel as JSON, converted with the function's static types.
 pub trait Executor: Send + Sync {
     /// Calls the top-level function `function` once per item and returns the results in order.
@@ -171,7 +171,7 @@ impl Interp {
         Ok(interp)
     }
 
-    /// Redirects `std::io::print`/`println` (stdout by default).
+    /// Redirects `std.io.print`/`println` (stdout by default).
     pub fn set_output(&self, writer: impl std::io::Write + Send + 'static) {
         *self.out.lock().unwrap_or_else(|e| e.into_inner()) = Box::new(writer);
     }
@@ -241,7 +241,7 @@ impl Interp {
         }
     }
 
-    /// Where `std::dist::map` runs its calls. Without one, calls run on this machine's threads.
+    /// Where `std.dist.map` runs its calls. Without one, calls run on this machine's threads.
     pub fn set_executor(&self, executor: Arc<dyn Executor>) {
         *self.executor.write().unwrap_or_else(|e| e.into_inner()) = Some(executor);
     }
@@ -370,7 +370,7 @@ impl Interp {
         let fields = self
             .structs
             .get(schema)
-            .ok_or_else(|| RuntimeError::new(format!("unknown struct `{schema}`")))?;
+            .ok_or_else(|| RuntimeError::new(format!("unknown type `{schema}`")))?;
         let batch = crate::table::conform(batch, fields)?;
         Ok(Value::Table(Arc::new(crate::value::TableVal {
             schema: schema.to_string(),
@@ -815,7 +815,7 @@ impl Interp {
             }))),
             ExprKind::StructLit { name, fields } => {
                 let decl = self.structs.get(name).ok_or_else(|| {
-                    Ctrl::Fail(RuntimeError::new(format!("unknown struct `{name}`")))
+                    Ctrl::Fail(RuntimeError::new(format!("unknown type `{name}`")))
                 })?;
                 let mut evaluated: HashMap<&str, Value> = HashMap::new();
                 for (fname, fe) in fields {

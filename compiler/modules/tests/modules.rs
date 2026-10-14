@@ -69,9 +69,20 @@ fn sibling_modules_are_imported_by_path() {
     let p = Project::new("sibling");
     p.file(
         "main.tvx",
-        "import util::double;\nfn main() -> i32 { double(21) }\n",
+        r#"
+import util.double
+
+fn main() -> i32:
+    double(21)
+"#,
     )
-    .file("util.tvx", "pub fn double(x: i32) -> i32 { x * 2 }\n");
+    .file(
+        "util.tvx",
+        r#"
+fn double(x: i32) -> i32:
+    x * 2
+"#,
+    );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "42");
 }
 
@@ -80,11 +91,33 @@ fn structs_group_imports_and_nested_modules() {
     let p = Project::new("nested");
     p.file(
         "main.tvx",
-        "import crate::geometry::{Point, norm2};\nimport crate::geometry::shapes::area;\n\
-         fn main() -> i32 { let p = Point { x: 3, y: 4 }; norm2(p) + area(2, 5) }\n",
+        r#"
+from crate.geometry import Point, norm2
+import crate.geometry.shapes.area
+
+fn main() -> i32:
+    let p = Point(x: 3, y: 4)
+    norm2(p) + area(2, 5)
+"#,
     )
-    .file("geometry.tvx", "pub struct Point { x: i32, y: i32 }\npub fn norm2(p: Point) -> i32 { p.x * p.x + p.y * p.y }\n")
-    .file("geometry/shapes.tvx", "pub fn area(w: i32, h: i32) -> i32 { w * h }\n");
+    .file(
+        "geometry.tvx",
+        r#"
+type Point:
+    x: i32
+    y: i32
+
+fn norm2(p: Point) -> i32:
+    p.x * p.x + p.y * p.y
+"#,
+    )
+    .file(
+        "geometry/shapes.tvx",
+        r#"
+fn area(w: i32, h: i32) -> i32:
+    w * h
+"#,
+    );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "35");
 }
 
@@ -93,18 +126,52 @@ fn mod_rs_style_directories_work() {
     let p = Project::new("modfile");
     p.file(
         "main.tvx",
-        "import tools::answer;\nfn main() -> i32 { answer() }\n",
+        r#"
+import tools.answer
+
+fn main() -> i32:
+    answer()
+"#,
     )
-    .file("tools/mod.tvx", "pub fn answer() -> i32 { 42 }\n");
+    .file(
+        "tools/mod.tvx",
+        r#"
+fn answer() -> i32:
+    42
+"#,
+    );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "42");
 }
 
 #[test]
 fn dependencies_are_imported_by_package_name() {
     let p = Project::new("deps");
-    p.file("app/main.tvx", "import mathx::dot;\nimport mathx::vec::scale;\nfn main() -> i32 { dot(2, 3) + scale(4) }\n")
-        .file("mathx/src/lib.tvx", "pub fn dot(a: i32, b: i32) -> i32 { a * b }\n")
-        .file("mathx/src/vec.tvx", "import crate::dot;\npub fn scale(x: i32) -> i32 { dot(x, 10) }\n");
+    p.file(
+        "app/main.tvx",
+        r#"
+import mathx.dot
+import mathx.vec.scale
+
+fn main() -> i32:
+    dot(2, 3) + scale(4)
+"#,
+    )
+    .file(
+        "mathx/src/lib.tvx",
+        r#"
+fn dot(a: i32, b: i32) -> i32:
+    a * b
+"#,
+    )
+    .file(
+        "mathx/src/vec.tvx",
+        r#"
+import crate.dot
+
+fn scale(x: i32) -> i32:
+    dot(x, 10)
+"#,
+    );
     let deps = [dep("mathx", &p, "mathx/src")];
     assert_eq!(ok(&load(&p.path("app/main.tvx"), &deps).unwrap()), "46");
 }
@@ -112,9 +179,39 @@ fn dependencies_are_imported_by_package_name() {
 #[test]
 fn same_private_names_in_different_modules_do_not_collide() {
     let p = Project::new("collide");
-    p.file("main.tvx", "import a::value;\nimport b::other;\nfn helper() -> i32 { 1 }\nfn main() -> i32 { helper() + value() + other() }\n")
-        .file("a.tvx", "fn helper() -> i32 { 100 }\npub fn value() -> i32 { helper() }\n")
-        .file("b.tvx", "fn helper() -> i32 { 10000 }\npub fn other() -> i32 { helper() }\n");
+    p.file(
+        "main.tvx",
+        r#"
+import a.value
+import b.other
+
+fn helper() -> i32:
+    1
+
+fn main() -> i32:
+    helper() + value() + other()
+"#,
+    )
+    .file(
+        "a.tvx",
+        r#"
+fn helper() -> i32:
+    100
+
+fn value() -> i32:
+    helper()
+"#,
+    )
+    .file(
+        "b.tvx",
+        r#"
+fn helper() -> i32:
+    10000
+
+fn other() -> i32:
+    helper()
+"#,
+    );
     assert_eq!(
         ok(&load(&p.path("main.tvx"), &[]).unwrap()),
         "10101",
@@ -127,9 +224,21 @@ fn locals_shadow_imports() {
     let p = Project::new("shadow");
     p.file(
         "main.tvx",
-        "import util::double;\nfn main() -> i32 { let double = 5; double + 1 }\n",
+        r#"
+import util.double
+
+fn main() -> i32:
+    let double = 5
+    double + 1
+"#,
     )
-    .file("util.tvx", "pub fn double(x: i32) -> i32 { x * 2 }\n");
+    .file(
+        "util.tvx",
+        r#"
+fn double(x: i32) -> i32:
+    x * 2
+"#,
+    );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "6");
 }
 
@@ -138,11 +247,19 @@ fn std_imports_survive_merging() {
     let p = Project::new("std");
     p.file(
         "main.tvx",
-        "import util::shout;\nfn main() -> String { shout(\"hi\") }\n",
+        r#"
+import util.shout
+
+fn main() -> Text:
+    shout("hi")
+"#,
     )
     .file(
         "util.tvx",
-        "pub fn shout(s: String) -> String { std::text::uppercase(s) }\n",
+        r#"
+fn shout(s: Text) -> Text:
+    std.text.uppercase(s)
+"#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "HI");
 }
@@ -150,10 +267,40 @@ fn std_imports_survive_merging() {
 #[test]
 fn import_cycles_between_modules_are_allowed() {
     let p = Project::new("cycle");
-    p.file("main.tvx", "import even::is_even;\nfn main() -> bool { is_even(10) }\n")
-        .file("even.tvx", "import odd::is_odd;\npub fn is_even(n: i32) -> bool { if n == 0 { true } else { is_odd(n - 1) } }\n")
-        .file("odd.tvx", "import even::is_even;\npub fn is_odd(n: i32) -> bool { if n == 0 { false } else { is_even(n - 1) } }\n");
-    assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "true");
+    p.file(
+        "main.tvx",
+        r#"
+import even.is_even
+
+fn main() -> Bool:
+    is_even(10)
+"#,
+    )
+    .file(
+        "even.tvx",
+        r#"
+import odd.is_odd
+
+fn is_even(n: i32) -> Bool:
+    if n == 0:
+        True
+    else:
+        is_odd(n - 1)
+"#,
+    )
+    .file(
+        "odd.tvx",
+        r#"
+import even.is_even
+
+fn is_odd(n: i32) -> Bool:
+    if n == 0:
+        False
+    else:
+        is_even(n - 1)
+"#,
+    );
+    assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "True");
 }
 
 fn messages(p: &Project, deps: &[Package]) -> Vec<String> {
@@ -163,30 +310,71 @@ fn messages(p: &Project, deps: &[Package]) -> Vec<String> {
 #[test]
 fn import_problems_are_diagnosed() {
     let p = Project::new("errors");
-    p.file("main.tvx", "import nope::f;\nfn main() {}\n");
+    p.file(
+        "main.tvx",
+        r#"
+import nope.f
+
+fn main():
+    pass
+"#,
+    );
     let m = messages(&p, &[]);
     assert!(
         m.iter()
-            .any(|m| m.contains("cannot find the module `crate::nope`")),
+            .any(|m| m.contains("cannot find the module `crate.nope`")),
         "{m:?}"
     );
 
-    p.file("main.tvx", "import util::hidden;\nfn main() {}\n")
-        .file("util.tvx", "fn hidden() {}\npub fn shown() {}\n");
+    p.file(
+        "main.tvx",
+        r#"
+import util._hidden
+
+fn main():
+    pass
+"#,
+    )
+    .file(
+        "util.tvx",
+        r#"
+fn _hidden():
+    pass
+
+fn shown():
+    pass
+"#,
+    );
     assert!(
         messages(&p, &[])
             .iter()
-            .any(|m| m.contains("`hidden` is private"))
+            .any(|m| m.contains("`_hidden` is private"))
     );
 
-    p.file("main.tvx", "import util::missing;\nfn main() {}\n");
+    p.file(
+        "main.tvx",
+        r#"
+import util.missing
+
+fn main():
+    pass
+"#,
+    );
     assert!(
         messages(&p, &[])
             .iter()
-            .any(|m| m.contains("has no function or struct `missing`"))
+            .any(|m| m.contains("has no function or type `missing`"))
     );
 
-    p.file("main.tvx", "import crate;\nfn main() {}\n");
+    p.file(
+        "main.tvx",
+        r#"
+import crate
+
+fn main():
+    pass
+"#,
+    );
     assert!(
         messages(&p, &[])
             .iter()
@@ -199,37 +387,64 @@ fn diagnostics_point_into_the_right_file_with_original_names() {
     let p = Project::new("render");
     p.file(
         "main.tvx",
-        "import util::broken;\nfn main() -> i32 { broken() }\n",
+        r#"
+import util.broken
+
+fn main() -> i32:
+    broken()
+"#,
     )
     .file(
         "util.tvx",
-        "pub fn broken() -> i32 {\n    \"not a number\"\n}\n",
+        r#"
+fn broken() -> i32:
+    "not a number"
+"#,
     );
     let loaded = load(&p.path("main.tvx"), &[]).unwrap();
     assert!(loaded.diagnostics.is_empty());
     let (_, diags) = telvax_hir::lower(&loaded.program);
     let text = loaded.map.render(&diags, false);
-    assert!(text.contains("util.tvx:2:5"), "{text}");
-    assert!(text.contains("expected `i32`, found `String`"), "{text}");
+    assert!(text.contains("util.tvx:3:5"), "{text}");
+    assert!(text.contains("expected `i32`, found `Text`"), "{text}");
 
     // Errors that mention a renamed item show the name the user wrote.
     p.file(
         "main.tvx",
-        "import util::broken;\nfn main() -> String { broken() }\n",
+        r#"
+import util.broken
+
+fn main() -> Text:
+    broken()
+"#,
     )
-    .file("util.tvx", "pub fn broken() -> i32 { 1 }\n");
+    .file(
+        "util.tvx",
+        r#"
+fn broken() -> i32:
+    1
+"#,
+    );
     let loaded = load(&p.path("main.tvx"), &[]).unwrap();
     let (_, diags) = telvax_hir::lower(&loaded.program);
     assert!(!diags.is_empty());
     let shown = loaded.map.render(&diags, false);
-    assert!(shown.contains("main.tvx:2:"), "{shown}");
+    assert!(shown.contains("main.tvx:5:"), "{shown}");
 }
 
 #[test]
 fn syntax_errors_in_a_module_are_reported_with_that_file() {
     let p = Project::new("syntax");
-    p.file("main.tvx", "import util::f;\nfn main() -> i32 { f() }\n")
-        .file("util.tvx", "pub fn f() -> i32 { let x = ; 1 }\n");
+    p.file(
+        "main.tvx",
+        r#"
+import util.f
+
+fn main() -> i32:
+    f()
+"#,
+    )
+    .file("util.tvx", "pub fn f() -> i32 { let x = ; 1 }\n");
     let loaded = load(&p.path("main.tvx"), &[]).unwrap();
     assert!(!loaded.diagnostics.is_empty());
     assert!(
@@ -243,10 +458,21 @@ fn syntax_errors_in_a_module_are_reported_with_that_file() {
 #[test]
 fn load_text_uses_the_unsaved_buffer() {
     let p = Project::new("buffer");
-    p.file("util.tvx", "pub fn one() -> i32 { 1 }\n");
+    p.file(
+        "util.tvx",
+        r#"
+fn one() -> i32:
+    1
+"#,
+    );
     let loaded = telvax_modules::load_text(
         "<buffer>",
-        "import util::one;\nfn main() -> i32 { one() + 1 }\n",
+        r#"
+import util.one
+
+fn main() -> i32:
+    one() + 1
+"#,
         Some(Path::new(&p.0)),
         &[],
     );
@@ -259,12 +485,27 @@ fn bundled_sources_rebuild_the_same_program_without_the_file_system() {
     let p = Project::new("bundle");
     p.file(
         "app/main.tvx",
-        "import mathx::dot;\nimport helper::twice;\nfn main() -> i32 { twice(dot(2, 3)) }\n",
+        r#"
+import mathx.dot
+import helper.twice
+
+fn main() -> i32:
+    twice(dot(2, 3))
+"#,
     )
-    .file("app/helper.tvx", "pub fn twice(x: i32) -> i32 { x * 2 }\n")
+    .file(
+        "app/helper.tvx",
+        r#"
+fn twice(x: i32) -> i32:
+    x * 2
+"#,
+    )
     .file(
         "mathx/src/lib.tvx",
-        "pub fn dot(a: i32, b: i32) -> i32 { a * b }\n",
+        r#"
+fn dot(a: i32, b: i32) -> i32:
+    a * b
+"#,
     );
     let deps = [dep("mathx", &p, "mathx/src")];
     let entry = p.path("app/main.tvx");
@@ -296,18 +537,37 @@ fn enums_cross_modules_and_do_not_collide() {
     let p = Project::new("enums");
     p.file(
         "main.tvx",
-        "import crate::shapes::{Shape, area};\n\
-         enum Shape2 { Dot }\n\
-         fn main() -> i32 {\n\
-             let s = Shape::Square(3);\n\
-             let n = match s { Shape::Square(k) => k, Shape::Dot => 0 };\n\
-             area(Shape::Square(4)) + n\n\
-         }\n",
+        r#"
+from crate.shapes import Shape, area
+
+enum Shape2:
+    Dot
+
+fn main() -> i32:
+    let s = Shape.Square(3)
+    var n = 0
+    match s:
+        case Shape.Square(k):
+            n = k
+        case Shape.Dot:
+            n = 0
+    area(Shape.Square(4)) + n
+"#,
     )
     .file(
         "shapes.tvx",
-        "pub enum Shape { Square(i32), Dot }\n\
-         pub fn area(s: Shape) -> i32 { match s { Shape::Square(k) => k * k, Shape::Dot => 0 } }\n",
+        r#"
+enum Shape:
+    Square(i32)
+    Dot
+
+fn area(s: Shape) -> i32:
+    match s:
+        case Shape.Square(k):
+            k * k
+        case Shape.Dot:
+            0
+"#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "19");
 }
@@ -317,20 +577,39 @@ fn impl_blocks_travel_with_their_type() {
     let p = Project::new("impls");
     p.file(
         "main.tvx",
-        "import crate::shapes::Rect;\n\
-         struct Rect2 { w: i32 }\n\
-         impl Rect2 { fn area(self) -> i32 { self.w * self.w } }\n\
-         fn area() -> i32 { 1 }\n\
-         fn main() -> i32 { Rect::new(3, 4).area() + Rect2 { w: 2 }.area() + area() }\n",
+        r#"
+import crate.shapes.Rect
+
+type Rect2:
+    w: i32
+
+    fn area(self) -> i32:
+        self.w * self.w
+
+fn area() -> i32:
+    1
+
+fn main() -> i32:
+    Rect.new(3, 4).area() + Rect2(w: 2).area() + area()
+"#,
     )
     .file(
         "shapes.tvx",
-        "pub struct Rect { w: i32, h: i32 }\n\
-         fn area() -> i32 { 100 }\n\
-         impl Rect {\n\
-             pub fn new(w: i32, h: i32) -> Rect { Rect { w: w, h: h } }\n\
-             pub fn area(self) -> i32 { self.w * self.h }\n\
-         }\n",
+        r#"
+type Rect:
+    w: i32
+    h: i32
+
+fn area() -> i32:
+    100
+
+extend Rect:
+    fn new(w: i32, h: i32) -> Rect:
+        Rect(w: w, h: h)
+
+    fn area(self) -> i32:
+        self.w * self.h
+"#,
     );
     // `area` the method, `area` the function of each module, and the one in main do not clash.
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "17");

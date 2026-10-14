@@ -37,7 +37,7 @@ pub(crate) fn runtime_err(e: impl std::fmt::Display) -> PyErr {
     TelvaxError::new_err(e.to_string())
 }
 
-/// Runs `std::dist::map` through a Python callable.
+/// Runs `std.dist.map` through a Python callable.
 struct PyExecutor {
     callable: Py<PyAny>,
 }
@@ -79,7 +79,7 @@ impl Program {
         self.interp.endpoint_names()
     }
 
-    /// Routes `std::dist::map` calls through `executor(function, items)`, where `items` is a list
+    /// Routes `std.dist.map` calls through `executor(function, items)`, where `items` is a list
     /// of JSON strings and the result is a list of JSON strings in the same order. This is how the
     /// work is handed to Ray (see `telvax.ray`) or any other scheduler.
     fn set_executor(&self, executor: Py<PyAny>) {

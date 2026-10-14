@@ -84,10 +84,15 @@ fn load_live(src: &str) -> Result<Interp, telvax_runtime::RuntimeError> {
 }
 
 const EMBED: &str = r#"
-    import std::ai::embeddings::OllamaEmbedder;
-    let e = OllamaEmbedder::new("nomic-embed-text");
-    fn dims(text: String) -> u64 { std::iter::count(std::tensor::to_vec(text |> e.embed())) }
-    fn first(text: String) -> f32 { (text |> e.embed())[0] }
+import std.ai.embeddings.OllamaEmbedder
+
+let e = OllamaEmbedder.new("nomic-embed-text")
+
+fn dims(text: Text) -> u64:
+    std.iter.count(std.tensor.to_vec(text |> e.embed()))
+
+fn first(text: Text) -> f32:
+    (text |> e.embed())[0]
 "#;
 
 #[test]
@@ -144,9 +149,12 @@ fn unreachable_services_report_a_clear_error() {
 }
 
 const LLM: &str = r#"
-    import std::ai::llm::OpenAIClient;
-    let llm = OpenAIClient::new("gpt-4o-mini");
-    fn ask(q: String) -> String { q |> llm.complete() }
+import std.ai.llm.OpenAIClient
+
+let llm = OpenAIClient.new("gpt-4o-mini")
+
+fn ask(q: Text) -> Text:
+    q |> llm.complete()
 "#;
 
 #[test]
@@ -261,15 +269,21 @@ fn pgvector_round_trip() {
     };
     let src = format!(
         r#"
-        import std::ai::embeddings::OllamaEmbedder;
-        import std::db::pgvector::PgVectorClient;
-        let db = PgVectorClient::connect("{url}");
-        fn put(id: String, text: String, v: Tensor<f32, [768]>) {{ db.insert("telvax_test_docs", id, text, v); }}
-        fn nearest(v: Tensor<f32, [768]>, k: i32) -> Vec<String> {{
-            db.search_collection("telvax_test_docs") |> db.with_vector(v) |> db.limit(k) |> db.execute()
-                |> std::iter::map(|d| d.text)
-        }}
-    "#
+import std.ai.embeddings.OllamaEmbedder
+import std.db.pgvector.PgVectorClient
+
+let db = PgVectorClient.connect("{url}")
+
+fn put(id: Text, text: Text, v: Tensor[f32, 768]):
+    db.insert("telvax_test_docs", id, text, v)
+
+fn nearest(v: Tensor[f32, 768], k: i32) -> List[Text]:
+    db.search_collection("telvax_test_docs")
+        |> db.with_vector(v)
+        |> db.limit(k)
+        |> db.execute()
+        |> std.iter.map(d => d.text)
+"#
     );
     let i = load_live(&src).unwrap();
     let vec_of = |axis: usize| {

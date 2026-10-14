@@ -2,11 +2,10 @@ use std::process::Command;
 
 const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
-const SRC: &str =
-    "fn layer(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
-    std::tensor::softmax(std::tensor::relu(std::tensor::matmul(x, w)))
-}
-";
+const SRC: &str = r#"
+fn layer(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    std.tensor.softmax(std.tensor.relu(std.tensor.matmul(x, w)))
+"#;
 
 fn emit(kind: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("telvax-accel-{}-{kind}", std::process::id()));

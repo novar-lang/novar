@@ -138,7 +138,7 @@ pub fn take_workers<'a>(args: &[&'a str]) -> (Option<Vec<String>>, Vec<&'a str>)
     )
 }
 
-/// Sends `std::dist::map` calls to `workers`.
+/// Sends `std.dist.map` calls to `workers`.
 pub fn attach_cluster(
     interp: &Interp,
     workers: Vec<String>,

@@ -7,10 +7,15 @@ use std::time::{Duration, Instant};
 const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 const APP: &str = r#"
-    struct In { name: String }
-    struct Out { greeting: String }
-    @endpoint(path = "/hello", method = "POST")
-    pub fn hello(p: In) -> Result<Out, String> { Ok(Out { greeting: f"hello, {p.name}!" }) }
+type In:
+    name: Text
+
+type Out:
+    greeting: Text
+
+@endpoint(POST, "/hello")
+fn hello(p: In) -> Result[Out, Text]:
+    Ok(Out(greeting: f"hello, {p.name}!"))
 "#;
 
 fn scratch(name: &str) -> PathBuf {
@@ -168,7 +173,14 @@ fn the_port_can_come_from_the_environment() {
 #[test]
 fn programs_without_endpoints_are_rejected() {
     let src = scratch("noep.tvx");
-    std::fs::write(&src, "fn main() -> i32 { 0 }").unwrap();
+    std::fs::write(
+        &src,
+        r#"
+fn main() -> i32:
+    0
+"#,
+    )
+    .unwrap();
     let out = Command::new(TELVAX)
         .args(["build", "--serve"])
         .arg(&src)
@@ -215,13 +227,27 @@ fn a_multi_file_program_is_bundled_with_all_its_modules() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.tvx"),
-        "import util::shout;\nstruct In { name: String }\nstruct Out { greeting: String }\n\
-         @endpoint(path = \"/hello\", method = \"POST\")\npub fn hello(p: In) -> Result<Out, String> { Ok(Out { greeting: shout(p.name) }) }\n",
+        r#"
+import util.shout
+
+type In:
+    name: Text
+
+type Out:
+    greeting: Text
+
+@endpoint(POST, "/hello")
+fn hello(p: In) -> Result[Out, Text]:
+    Ok(Out(greeting: shout(p.name)))
+"#,
     )
     .unwrap();
     std::fs::write(
         dir.join("util.tvx"),
-        "pub fn shout(s: String) -> String { f\"{s}!\" }\n",
+        r#"
+fn shout(s: Text) -> Text:
+    f"{s}!"
+"#,
     )
     .unwrap();
     let exe = scratch_exe("multi-service");
@@ -263,12 +289,20 @@ fn errors_in_a_module_are_reported_against_that_file() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.tvx"),
-        "import util::bad;\nfn main() -> i32 { bad() }\n",
+        r#"
+import util.bad
+
+fn main() -> i32:
+    bad()
+"#,
     )
     .unwrap();
     std::fs::write(
         dir.join("util.tvx"),
-        "pub fn bad() -> i32 {\n    \"nope\"\n}\n",
+        r#"
+fn bad() -> i32:
+    "nope"
+"#,
     )
     .unwrap();
     let out = Command::new(TELVAX)
@@ -279,7 +313,7 @@ fn errors_in_a_module_are_reported_against_that_file() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("util.tvx:2:5") && err.contains("expected `i32`, found `String`"),
+        err.contains("util.tvx:3:5") && err.contains("expected `i32`, found `Text`"),
         "{err}"
     );
 }
@@ -305,7 +339,10 @@ fn tvpm_projects_run_against_installed_dependencies() {
     .unwrap();
     std::fs::write(
         lib.join("src/lib.tvx"),
-        "pub fn cube(x: i64) -> i64 { x * x * x }\n",
+        r#"
+fn cube(x: Int) -> Int:
+    x * x * x
+"#,
     )
     .unwrap();
     registry::publish(&reg, &lib).unwrap();
@@ -317,7 +354,12 @@ fn tvpm_projects_run_against_installed_dependencies() {
     .unwrap();
     std::fs::write(
         app.join("src/main.tvx"),
-        "import mathx::cube;\nfn main() -> i64 { cube(3) + 1 }\n",
+        r#"
+import mathx.cube
+
+fn main() -> Int:
+    cube(3) + 1
+"#,
     )
     .unwrap();
 

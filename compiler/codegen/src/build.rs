@@ -151,7 +151,7 @@ pub fn build_object_with(
     tool(tm.write_to_file(&module, FileType::Object, path))
 }
 
-/// Checks that `program` has a usable `fn main() -> i32`.
+/// Checks that `program` has a usable `def main() -> int32`.
 pub fn check_entry_point(program: &hir::Program) -> Result<(), BuildError> {
     let diag = |span: std::ops::Range<usize>, msg: &str| {
         BuildError::Diagnostics(vec![Diagnostic::error(span, msg)])
@@ -159,11 +159,11 @@ pub fn check_entry_point(program: &hir::Program) -> Result<(), BuildError> {
     match program.fns.iter().find(|f| f.name == "main") {
         None => Err(diag(
             0..0,
-            "an executable needs an entry point: `fn main() -> i32`",
+            "an executable needs an entry point: `def main() -> int32`",
         )),
         Some(f) if !f.params.is_empty() || f.ret != Ty::Prim(telvax_hir::Prim::I32) => Err(diag(
             f.span.clone(),
-            "`main` must have the signature `fn main() -> i32`",
+            "`main` must have the signature `def main() -> int32`",
         )),
         Some(_) => Ok(()),
     }

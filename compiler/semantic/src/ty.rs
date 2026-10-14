@@ -59,20 +59,21 @@ impl Prim {
         self.is_int() || self.is_float()
     }
 
+    /// The name as a program writes it (`Int`, `Float`, `Text`, `i32`, ...).
     pub fn name(self) -> &'static str {
         match self {
             Prim::I8 => "i8",
             Prim::I16 => "i16",
             Prim::I32 => "i32",
-            Prim::I64 => "i64",
+            Prim::I64 => "Int",
             Prim::U8 => "u8",
             Prim::U16 => "u16",
             Prim::U32 => "u32",
             Prim::U64 => "u64",
             Prim::F32 => "f32",
-            Prim::F64 => "f64",
-            Prim::Bool => "bool",
-            Prim::Str => "String",
+            Prim::F64 => "Float",
+            Prim::Bool => "Bool",
+            Prim::Str => "Text",
         }
     }
 }
@@ -194,34 +195,35 @@ impl fmt::Display for Dim {
     }
 }
 
+/// Types are shown the way a program writes them: `List[Int]`, `Int?`, `Map[Text, Float]`.
 impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Ty::Unit => f.write_str("()"),
+            Ty::Unit => f.write_str("None"),
             Ty::Prim(p) => f.write_str(p.name()),
             Ty::Struct(n) | Ty::Enum(n) | Ty::Trait(n) | Ty::Param(n) | Ty::Named(n) => {
                 f.write_str(n)
             }
-            Ty::Table(n) => write!(f, "Table<{n}>"),
-            Ty::Vec(t) => write!(f, "Vec<{t}>"),
+            Ty::Table(n) => write!(f, "Table[{n}]"),
+            Ty::Vec(t) => write!(f, "List[{t}]"),
             Ty::Tensor { elem, shape } => {
                 let dims: Vec<_> = shape.iter().map(|d| d.to_string()).collect();
-                write!(f, "Tensor<{elem}, [{}]>", dims.join(", "))
+                write!(f, "Tensor[{elem}, {}]", dims.join(", "))
             }
-            Ty::Result(a, b) => write!(f, "Result<{a}, {b}>"),
-            Ty::Option(t) => write!(f, "Option<{t}>"),
+            Ty::Result(a, b) => write!(f, "Result[{a}, {b}]"),
+            Ty::Option(t) => write!(f, "{t}?"),
             Ty::Tuple(items) => {
                 let shown: Vec<_> = items.iter().map(|t| t.to_string()).collect();
                 write!(f, "({})", shown.join(", "))
             }
-            Ty::Map(k, v) => write!(f, "Map<{k}, {v}>"),
+            Ty::Map(k, v) => write!(f, "Map[{k}, {v}]"),
             Ty::Fn(params, ret) => {
                 let ps: Vec<_> = params.iter().map(|p| p.to_string()).collect();
-                write!(f, "fn({}) -> {ret}", ps.join(", "))
+                write!(f, "({}) -> {ret}", ps.join(", "))
             }
             Ty::IntVar(_) => f.write_str("{integer}"),
             Ty::FloatVar(_) => f.write_str("{float}"),
-            Ty::Never => f.write_str("!"),
+            Ty::Never => f.write_str("Never"),
             Ty::Unknown => f.write_str("_"),
         }
     }

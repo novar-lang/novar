@@ -1,16 +1,14 @@
-// Interpreter speed gates used by CI (see benchmarks/speed.sh). The limits there are about ten
-// times the time these take on a laptop, so they only trip on a real regression.
-fn fib(n: i64) -> i64 {
-    if n < 2 { return n; }
+# Interpreter speed gates used by CI (see benchmarks/speed.sh). The limits there are about ten
+# times the time these take on a laptop, so they only trip on a real regression.
+fn fib(n: Int) -> Int:
+    if n < 2:
+        return n
     fib(n - 1) + fib(n - 2)
-}
 
-fn loop_sum(n: i64) -> i64 {
-    let mut s = 0;
-    let mut i = 0;
-    while i < n {
-        s += i * 2 % 7;
-        i += 1;
-    }
+fn loop_sum(n: Int) -> Int:
+    var s = 0
+    var i = 0
+    while i < n:
+        s += i * 2 % 7
+        i += 1
     s
-}

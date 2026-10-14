@@ -19,14 +19,14 @@ fn err<T>(msg: impl Into<String>) -> Result<T, RuntimeError> {
 fn want_str(v: &Value) -> Result<Arc<str>, RuntimeError> {
     match v {
         Value::Str(s) => Ok(s.clone()),
-        other => err(format!("expected a String, found {}", other.type_name())),
+        other => err(format!("expected a Text, found {}", other.type_name())),
     }
 }
 
 fn want_vec(v: &Value) -> Result<Vec<Value>, RuntimeError> {
     match v {
         Value::Vec(items) => Ok(items.snapshot()),
-        other => err(format!("expected a Vec, found {}", other.type_name())),
+        other => err(format!("expected a List, found {}", other.type_name())),
     }
 }
 
@@ -77,6 +77,20 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
         return crate::table::call(interp, path, &args, result);
     }
     match path {
+        "std::json::stringify" => Ok(Value::str(args[0].to_json().to_string())),
+        "std::json::parse" => {
+            let Ty::Result(target, _) = result else {
+                return err("`std.json.parse` needs its result type");
+            };
+            let text = want_str(&args[0])?;
+            let parsed = serde_json::from_str::<serde_json::Value>(&text)
+                .map_err(|e| format!("not valid JSON: {e}"))
+                .and_then(|json| interp.value_from_json(target, &json));
+            Ok(match parsed {
+                Ok(v) => Value::Ok(Box::new(v)),
+                Err(e) => Value::Err(Box::new(Value::str(e))),
+            })
+        }
         "std::text::clean_whitespace" => Ok(Value::str(
             want_str(&args[0])?
                 .split_whitespace()
@@ -335,7 +349,7 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
                 }
                 Ok(Value::vec(s.split(&*sep).map(Value::str).collect()))
             }
-            _ => err(format!("String has no method `{name}`")),
+            _ => err(format!("Text has no method `{name}`")),
         },
         Value::Table(t) => match name {
             "len" => Ok(Value::Int(t.rows() as i64)),
@@ -370,7 +384,7 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
                 v.reverse();
                 Ok(Value::Unit)
             }
-            _ => err(format!("Vec has no method `{name}`")),
+            _ => err(format!("List has no method `{name}`")),
         },
         Value::Enum(e) if e.name == "Option" => match name {
             "is_some" => Ok(Value::Bool(e.variant == "Some")),
@@ -560,7 +574,7 @@ fn env_or(name: &str, default: &str) -> String {
 fn dist_map(interp: &Interp, args: &[Value]) -> Res {
     let items = want_vec(&args[0])?;
     let Value::Func(name) = &args[1] else {
-        return err("`std::dist::map` needs the name of a top-level function, not a closure");
+        return err("`std.dist.map` needs the name of a top-level function, not a closure");
     };
     if let Some(exec) = interp.executor() {
         let (_, ret) = interp

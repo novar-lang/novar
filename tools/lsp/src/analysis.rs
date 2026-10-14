@@ -97,11 +97,13 @@ pub struct Completion {
 }
 
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "struct", "pub", "if", "else", "for", "in", "while", "return", "break",
-    "continue", "import", "true", "false",
+    "fn", "let", "var", "type", "enum", "trait", "extend", "import", "from", "return", "if",
+    "elif", "else", "for", "in", "is", "while", "match", "case", "break", "continue", "pass",
+    "and", "or", "not", "True", "False",
 ];
 const PRIMS: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "String",
+    "Int", "Float", "Text", "Bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32",
+    "f64",
 ];
 
 pub fn signature(f: &hir::FnDef) -> String {
@@ -109,12 +111,11 @@ pub fn signature(f: &hir::FnDef) -> String {
         .params
         .iter()
         .map(|p| {
-            format!(
-                "{}{}: {}",
-                if p.mutable { "mut " } else { "" },
-                p.name,
-                p.ty
-            )
+            if p.name == "self" {
+                "self".to_string()
+            } else {
+                format!("{}: {}", p.name, p.ty)
+            }
         })
         .collect();
     let ret = if f.ret == Ty::Unit {
@@ -123,9 +124,8 @@ pub fn signature(f: &hir::FnDef) -> String {
         format!(" -> {}", f.ret)
     };
     format!(
-        "{}fn {}({}){ret}",
-        if f.is_pub { "pub " } else { "" },
-        f.name,
+        "fn {}({}){ret}",
+        f.name.replace("::", "."),
         params.join(", ")
     )
 }
@@ -242,13 +242,17 @@ impl Snapshot {
                 let fields: Vec<String> = s
                     .fields
                     .iter()
-                    .map(|(n, t)| format!("    {n}: {t},"))
+                    .map(|(n, t)| format!("    {n}: {t}"))
                     .collect();
                 return Some((
                     format!(
-                        "```telvax\nstruct {} {{\n{}\n}}\n```",
+                        "```telvax\ntype {}:\n{}\n```",
                         s.name,
-                        fields.join("\n")
+                        if fields.is_empty() {
+                            "    pass".to_string()
+                        } else {
+                            fields.join("\n")
+                        }
                     ),
                     s.name_span.clone(),
                 ));
@@ -257,8 +261,8 @@ impl Snapshot {
         if let Some(l) = self.locals.values().find(|l| l.span.contains(&offset)) {
             return Some((
                 format!(
-                    "```telvax\nlet {}{}: {}\n```",
-                    if l.mutable { "mut " } else { "" },
+                    "```telvax\n{} {}: {}\n```",
+                    if l.mutable { "var" } else { "let" },
                     l.name,
                     l.ty
                 ),
@@ -270,8 +274,8 @@ impl Snapshot {
             Target::Local(id) => {
                 let l = self.locals.get(id)?;
                 format!(
-                    "```telvax\nlet {}{}: {}\n```",
-                    if l.mutable { "mut " } else { "" },
+                    "```telvax\n{} {}: {}\n```",
+                    if l.mutable { "var" } else { "let" },
                     l.name,
                     node.ty
                 )
@@ -281,7 +285,7 @@ impl Snapshot {
                 format!("```telvax\n{}\n```", signature(f))
             }
             Target::Global(name) => format!("```telvax\nlet {name}: {}\n```", node.ty),
-            Target::Struct(name) => format!("```telvax\nstruct {name}\n```"),
+            Target::Struct(name) => format!("```telvax\ntype {name}\n```"),
             Target::Other => format!("```telvax\n{}\n```", node.ty),
         };
         Some((text, node.span.clone()))
@@ -470,8 +474,21 @@ impl Snapshot {
             if after.starts_with(':') {
                 continue;
             }
-            let before = self.text[..l.span.start].trim_end();
-            if before.ends_with("let") || before.ends_with("mut") || before.ends_with("for") {
+            // Only names a statement declares (`let x = ...`, `let a, b = ...`, `for x in ...`).
+            let line_start = self.text[..l.span.start].rfind('\n').map_or(0, |i| i + 1);
+            let prefix = self.text[line_start..l.span.start].trim();
+            let prefix = ["let", "var", "for"]
+                .iter()
+                .find_map(|kw| prefix.strip_prefix(kw))
+                .unwrap_or(prefix);
+            let declares = prefix
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | ',' | ' '));
+            let binds =
+                (after.starts_with('=') && !after.starts_with("==") && !after.starts_with("=>"))
+                    || after.starts_with(',')
+                    || after.starts_with("in ");
+            if declares && binds {
                 hints.push((l.span.end, format!(": {}", l.ty)));
             }
         }
@@ -493,9 +510,11 @@ impl Snapshot {
         let head = &before[..word_start];
 
         let mut items = if let Some(receiver) = head.strip_suffix('.') {
-            self.member_completions(receiver, offset)
-        } else if let Some(path) = head.strip_suffix("::") {
-            self.path_completions(path)
+            if self.starts_a_path(receiver) {
+                self.path_completions(receiver)
+            } else {
+                self.member_completions(receiver, offset)
+            }
         } else if head.ends_with('@') {
             vec![item(
                 "endpoint",
@@ -517,7 +536,7 @@ impl Snapshot {
             .map(|k| item(k, CompletionKind::Keyword, None))
             .collect();
         out.extend(PRIMS.iter().map(|p| item(p, CompletionKind::Type, None)));
-        for t in ["Vec", "Tensor", "Table", "Result"] {
+        for t in ["List", "Map", "Tensor", "Table", "Result"] {
             out.push(item(t, CompletionKind::Type, None));
         }
         out.push(item(
@@ -542,12 +561,12 @@ impl Snapshot {
             }
             for imp in &prog.imports {
                 if let Some(last) = imp.last() {
-                    out.push(item(last, CompletionKind::Module, Some(imp.join("::"))));
+                    out.push(item(last, CompletionKind::Module, Some(imp.join("."))));
                 }
             }
             // Items imported from other modules, under the names the user wrote.
             for (mangled, shown) in &self.map.display_names {
-                let Some(name) = shown.rsplit("::").next() else {
+                let Some(name) = shown.rsplit('.').next() else {
                     continue;
                 };
                 if let Some(f) = prog.fns.iter().find(|f| &f.name == mangled) {
@@ -569,15 +588,36 @@ impl Snapshot {
         out
     }
 
-    fn path_completions(&self, path_text: &str) -> Vec<Completion> {
-        // Take the trailing `a::b::c` run of identifiers.
-        let start = path_text
-            .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+    /// The run of dotted names that ends `text`: `std.text` in `x = std.text`.
+    fn dotted_tail<'t>(&self, text: &'t str) -> &'t str {
+        let start = text
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
             .map_or(0, |i| {
-                i + path_text[i..].chars().next().map_or(1, char::len_utf8)
+                i + text[i..].chars().next().map_or(1, char::len_utf8)
             });
-        let mut segments: Vec<String> = path_text[start..]
-            .split("::")
+        &text[start..]
+    }
+
+    /// Whether `receiver` (the text before a `.`) names a module or type rather than a value:
+    /// its first name is `std`, an imported name or capitalized.
+    fn starts_a_path(&self, receiver: &str) -> bool {
+        let run = self.dotted_tail(receiver);
+        let Some(first) = run.split('.').next().filter(|s| !s.is_empty()) else {
+            return false;
+        };
+        first == "std"
+            || first.starts_with(|c: char| c.is_uppercase())
+            || self.program().is_some_and(|p| {
+                p.imports
+                    .iter()
+                    .any(|i| i.last().is_some_and(|l| l == first))
+            })
+    }
+
+    fn path_completions(&self, path_text: &str) -> Vec<Completion> {
+        let mut segments: Vec<String> = self
+            .dotted_tail(path_text)
+            .split('.')
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect();

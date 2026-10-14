@@ -1,4 +1,4 @@
-//! Native `Tensor<f32|f64, [static dims]>` values and the `std::tensor` operations.
+//! Native `Tensor<f32|f64, [static dims]>` values and the `std.tensor` operations.
 //!
 //! A tensor is a pointer to a row-major buffer; its shape lives in the static type, so every
 //! dimension is a compile-time constant and indexing needs no metadata. Tensors are immutable

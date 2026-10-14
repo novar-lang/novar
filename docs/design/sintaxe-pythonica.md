@@ -1,216 +1,123 @@
-# Sintaxe do Telvax: didática, no estilo do Python
+# Sintaxe do Telvax: fácil como o Python, com personalidade própria
 
-> Decisões tomadas: blocos por **indentação** e `:`; a sintaxe antiga (estilo Rust) é **substituída**, não mantida.
-> Referência de motivação: `telvax-rumo-ao-1.0.md` (§1: "o alvo é o código de aplicação em Python"; §5.1 L1–L14).
+> **Implementada na 0.1.0.** Decisões: blocos por **indentação** e `:`; a sintaxe antiga (estilo Rust) foi
+> **substituída**. O Telvax não é "Python com outro nome": copia o que é didático e troca o que não serve a
+> dados, ML e IA.
 
 ## 1. Princípios
 
-1. **Se o Python tem uma forma, o Telvax usa a mesma.** Quem lê Python lê Telvax sem tabela de tradução.
-2. **Palavras antes de símbolos.** `and`, `or`, `not`, `is`, `in`, `elif`, `lambda`.
-3. **Uma forma só** para cada coisa (sem `let`/`let mut`, sem `;`, sem `{ }`, sem `::`, sem `->` de closure).
-4. **O que é do Telvax continua do Telvax**: tipos estáticos com inferência, `Tensor`/`Table`, `@endpoint`, e o pipeline `|>`. Eles não existem no Python, então não há o que copiar.
-5. O compilador continua com a mesma AST: tudo o que muda aqui é **lexer + parser** (e as ferramentas que leem texto). Semântica, IR, interpretador e backend nativo não mudam.
+1. **Quem lê Python lê Telvax.** Indentação, `:`, `and`/`or`/`not`, `elif`, `for x in xs`, f-strings, `#`.
+2. **Palavras próprias onde o Python é fraco.** `fn`, `let`/`var`, `type`, `x => x + 1`, `Int?`.
+3. **O que o Python deixa para a execução, o Telvax checa antes**: tipos, formas de tensor, colunas de tabela, nomes de argumentos.
+4. **O que é do Telvax continua do Telvax**: `|>`, `@endpoint`, `Tensor`, `Table`.
+5. A AST, o verificador, o interpretador e o backend nativo são os mesmos; a mudança está no lexer, no parser e nas ferramentas que leem texto.
 
-## 2. Tabela de mudanças
+## 2. Dores do Python em dados, ML e IA, e a resposta
 
-| Antes (Rust) | Agora | Observação |
-|---|---|---|
-| `fn f(x: i32) -> i32 { x }` | `def f(x: int) -> int:` + `return x` | retorno explícito, como no Python |
-| `{ ... }` | linha terminada em `:` + bloco indentado | 4 espaços; tabs são erro |
-| `;` | quebra de linha | `()`, `[]`, `{}` abertos continuam a linha |
-| `// comentário` | `# comentário` | |
-| `let x = 1;` / `let mut x = 1;` | `x = 1` | a 1ª atribuição declara; as seguintes reatribuem |
-| `let x: i64 = 1;` | `x: int = 1` | |
-| `&&`, `\|\|`, `!` | `and`, `or`, `not` | |
-| `true` / `false` | `True` / `False` | |
-| `if a { } else if b { } else { }` | `if a:` / `elif b:` / `else:` | |
-| `for i in 0..n` / `0..=n` | `for i in range(n)` / `range(0, n + 1)` | |
-| `for (i, x) in v.enumerate()` | `for i, x in v.enumerate()` | sem parênteses |
-| `let (a, b) = f();` | `a, b = f()` | |
-| `\|x\| x + 1` / `\|\| 1` | `lambda x: x + 1` / `lambda: 1` | |
-| `a::b::c()` | `a.b.c()` | `.` em tudo |
-| `import a::b::{C, D};` | `from a.b import C, D` | `import a.b.C` também vale |
-| `pub fn`, `pub struct` | `def`, `class` | privado = nome começando com `_` |
-| `struct P { x: f64 }` | `class P:` com `x: float` | |
-| `P { x: 1.0, y: 2.0 }` | `P(x=1.0, y=2.0)` | argumentos nomeados |
-| `impl P { fn norm(self) }` | método dentro do `class` | |
-| `impl Shape for Circle { }` | `class Circle(Shape):` | |
-| `enum E { A(i32), B }` | `enum E:` com uma variante por linha | |
-| `match x { A(r) => e, }` | `match x:` + `case A(r):` + bloco | |
-| `if let Some(v) = e { }` | `if e is Some(v):` | idem `while … is …` |
-| `Option<T>` | `T \| None` | |
-| `Vec<T>`, `Map<K, V>`, `String` | `list[T]`, `dict[K, V]`, `str` | `[]` para genéricos, como no Python 3.9+ |
-| `i64`, `f64` | `int`, `float` | tamanhos explícitos: `int32`, `uint8`, `float32`… (nomes do NumPy) |
-| `fn f<T: A + B>(x: T)` | `def f[T: (A, B)](x: T)` | sintaxe do Python 3.12 (PEP 695) |
-| `@endpoint(path = "/x")` | `@endpoint(path="/x")` | igual ao decorador do Python |
-| `println(...)` | `print(...)` | `print` sempre termina a linha |
-| `x \|> f(a)` | `x \|> f(a)` | **fica**: é do Telvax |
-| `expr?` | `expr?` | **fica** por enquanto (ver §6) |
+| Dor | O que o Telvax faz |
+|---|---|
+| Erro de forma de tensor só aparece rodando | `Tensor[f32, 2, 3]`: a forma é parte do tipo e `matmul` confere em compilação |
+| Coluna digitada errada num DataFrame | `Table[Row]`: nomes e tipos das colunas são checados |
+| Variável sobrescrita sem querer | `let` não muda; `var` muda. `x = 1` sem declarar é erro |
+| `None` aparecendo onde não devia | `T?` é um tipo; `match` obriga a tratar `None` |
+| Exceções escondidas em pipelines | `Result` e `?`; nada é lançado |
+| Configuração com dezenas de argumentos | argumentos nomeados e valores padrão, conferidos |
+| Encadear etapas lê de dentro para fora | `x |> f() |> g()` lê da esquerda para a direita |
+| Servir um modelo exige framework e cola | `@endpoint(POST, "/rota")` vira rota HTTP validada |
+| Tipos opcionais e ignorados | tipos estáticos com inferência; nada de `Any` |
 
-## 3. Exemplos
+## 3. A sintaxe
 
-### Funções, tipos e laços
+```telvax
+from std.ai.embeddings import OllamaEmbedder
 
-```python
-class Point:
-    x: float
-    y: float
+let embedder = OllamaEmbedder.new("nomic-embed-text")
 
-    def norm(self) -> float:
-        return self.x * self.x + self.y * self.y
+type Query:
+    text: Text
+    top_k: Int = 5
 
-def main() -> int:
-    p = Point(x=3.0, y=4.0)
-    total = 0                    # literal sem tipo: o tipo vem dos usos
-    for i in range(10):
-        total += i
-    print(f"norm = {p.norm()}, total = {total}")
-    return total
+type Reply:
+    query: Text
+    answer: Text
+
+fn embed(text: Text) -> Tensor[f32, 768]:
+    text
+        |> std.text.clean_whitespace()
+        |> std.text.truncate(512)
+        |> embedder.embed()
+
+@endpoint(POST, "/v1/rag/query")
+fn handle(q: Query) -> Result[Reply, Status]:
+    if q.text.is_empty():
+        return Err(Status.BadRequest("empty query"))
+    let docs = db.search(embed(q.text), limit: q.top_k)
+    var answer = docs |> prompt(q.text) |> llm.complete()
+    Ok(Reply(query: q.text, answer: answer.trim()))
 ```
 
-### Condições, `in`, expressão condicional
-
-```python
-def kind(n: int) -> str:
-    if n < 0:
-        return "negativo"
-    elif n == 0:
-        return "zero"
-    else:
-        return "positivo"
-
-def vowel(c: str) -> bool:
-    return c in ["a", "e", "i", "o", "u"]
-
-label = "par" if n % 2 == 0 else "ímpar"
-```
-
-### Enums e `match`
-
-```python
-enum Shape:
-    Circle(float)
-    Rect(float, float)
-    Empty
-
-def area(s: Shape) -> float:
-    match s:
-        case Shape.Circle(r):
-            return r * r * 3.14159
-        case Shape.Rect(w, h):
-            return w * h
-        case Shape.Empty:
-            return 0.0
-```
-
-### Erros e opcionais
-
-```python
-def split_pair(line: str) -> Result[(str, str), str]:
-    parts = line.split("=")
-    if parts.len() != 2:
-        return Err(f"linha inválida: {line}")
-    return Ok((parts[0].trim(), parts[1].trim()))
-
-def port_of(line: str) -> Result[int, str]:
-    key, value = split_pair(line)?          # `?` devolve o Err mais cedo
-    match value.to_int():
-        case Some(n):
-            return Ok(n)
-        case None:
-            return Err(f"não é número: {value}")
-
-def main():
-    stack = [1, 2, 3]
-    while stack.pop() is Some(top):
-        print(f"{top}")
-    if "a b c".split(" ").first() is Some(first):
-        print(f"primeira: {first}")
-```
-
-### Traits, genéricos e métodos
-
-```python
-trait Shape:
-    def area(self) -> float: ...             # sem corpo: toda implementação precisa ter
-    def describe(self) -> str:               # com corpo: valor padrão
-        return f"área {self.area()}"
-
-class Circle(Shape):
-    r: float
-    def area(self) -> float:
-        return self.r * self.r * 3.14159
-
-class Stack[T]:
-    items: list[T]
-    def push(self, x: T):
-        self.items.push(x)
-```
-
-### Dados, tensores, serviços
-
-```python
-class Sale:
-    id: int
-    region: str
-    units: int
-    price: float
-
-def main():
-    sales: Table[Sale] = read_csv("sales.csv")
-    print(f"preço médio: {sales.price.mean()}")
-    by_region: Table[{region: str, revenue: float}] = sales.sql(
-        "SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region")
-    for row in by_region:
-        print(f"{row.region}: {row.revenue}")
-
-def forward(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
-    return x |> std.tensor.matmul(w) |> std.tensor.relu()
-
-@endpoint(path="/v1/score", method="POST")
-def score(input: In) -> Result[Out, Status]:
-    if input.text.is_empty():
-        return Err(Status.BadRequest("texto vazio"))
-    answer = input.text |> llm.complete() |> std.text.trim()
-    return Ok(Out(answer=answer))
-```
-
-Um pipeline longo quebra a linha com `|>` no começo da linha seguinte:
-
-```python
-    docs = query
-        |> embed()
-        |> store.search(top_k)
-```
+| Forma | Exemplo |
+|---|---|
+| função | `fn f(a: Int, b: Int = 1) -> Int:` (o último valor é o resultado; `return` sai antes) |
+| variável | `let x = 1` (fixa), `var x = 1` (muda), `let a, b = par` |
+| tipos | `Int`, `Float`, `Text`, `Bool`, `List[T]`, `Map[K, V]`, `T?`, `Result[T, E]`, `Tensor[f32, 2, 3]`, `Table[Row]`, tuplas `(A, B)`; números de tamanho fixo `i8`..`i64`, `u8`..`u64`, `f32`, `f64` |
+| tipo próprio | `type P:` com campos (`x: Float`, `n: Int = 5`) e métodos; `type C(Trait):`; `type Pilha[T]:` |
+| enum, trait, extensão | `enum E:` (uma variante por linha), `trait T:` (`fn f(self) -> Int: ...` é obrigatório), `extend P:` |
+| construção | `P(x: 1.0, y: 2.0)` |
+| chamada com nomes | `search(q, limit: 3)` |
+| função como valor | `x => x + 1`, `(a, b) => a + b`, `() => 1`; `((i, x)) => ...` abre uma tupla; um `fn` dentro de um `fn` é um fechamento de várias linhas |
+| decisão | `if`/`elif`/`else`, `a if c else b`, `match x:` + `case Padrão:`, `if x is Some(v):`, `while x is Some(v):` |
+| laços | `for x in xs:`, `for i, x in xs:`, `for i in range(n)`, `range(a, b)`, `while`, `break`, `continue`, `pass` |
+| operadores | `and or not in`, `|>`, `?` |
+| módulos | `from a.b import C, D`, `import a.b.C`, `.` em todo caminho (`std.text.trim`, `Shape.Circle`) |
+| privado | nome começando com `_`; não existe `pub` |
+| endpoint | `@endpoint(POST, "/rota")` ou `@endpoint(method: POST, path: "/rota")` |
+| comentário | `# ...` |
 
 ## 4. Regras do lexer e do parser
 
-* **Indentação**: cada nível são 4 espaços (qualquer quantidade fixa por bloco é aceita; misturar tabs é erro). Linhas em branco e só com comentário não contam.
+* **Indentação**: cada nível são 4 espaços na saída do `telvax fmt`. Tabs na indentação são erro, e também voltar a um nível que nunca foi aberto. Linhas em branco e só com comentário não contam.
 * Dentro de `()`, `[]`, `{}` as quebras de linha são ignoradas. Uma linha que **começa** com `|>` continua a anterior.
-* Um corpo de uma linha só é permitido para `lambda` (`lambda x: x + 1`) e `case`/`if` simples não: **o corpo sempre vai na linha seguinte, indentado** (uma forma só).
-* `return` no fim do corpo vira o valor do bloco; `if`/`elif`/`else`/`match` no fim propagam isso para cada ramo. Por isso a semântica (que trabalha com "expressão final") não muda.
-* Declaração vs reatribuição: o parser guarda os nomes já atribuídos em cada função. `x = …` de um nome novo é declaração (mutável); de um nome existente é reatribuição. `x: T = …` sempre declara.
-* Caminhos: `std.text.trim`, `Shape.Circle`, `util.clamp` e `modulo.Tipo.novo` são caminhos quando o primeiro nome é `std`, um nome importado ou começa com maiúscula; caso contrário `a.b` é acesso a campo/método.
-* `P(x=1, y=2)` com argumentos nomeados constrói um struct; `Shape.Circle(2.0)` chama uma variante.
-* `a in b` equivale a `b.contains(a)`; `a not in b` a `not b.contains(a)`.
-* `x if c else y` é a expressão condicional.
-* Palavras reservadas: `def class enum trait extend import from as return if elif else while for in is match case break continue pass lambda and or not True False None`.
+* **O corpo sempre vai na linha seguinte, indentado.** Exceção: `x => x + 1` é uma expressão, e `fn f(self) -> Float: ...` num `trait` marca um método obrigatório. `...` sozinho numa linha é um corpo vazio, como `pass`.
+* **O valor de uma função** é a última expressão do corpo (ou do corpo de cada ramo de um `if`/`match` final), quando a função declara o tipo de retorno. Um `return` no meio continua sendo um `return`.
+* `let` e `var` declaram; `x = v` só muda uma variável `var` (ou um campo/elemento dela). Variáveis de `for` e nomes de padrões não mudam.
+* Caminhos: `std.text.trim`, `Shape.Circle`, `util.clamp` são caminhos quando o primeiro nome é `std`, um nome trazido por `import`/`from` ou começa com maiúscula; senão `a.b` é campo/método.
+* `Nome(campo: valor, ...)` com todos os argumentos nomeados e `Nome` maiúsculo constrói um tipo; campos com valor padrão podem ser omitidos.
+* Nomes e valores padrão em chamadas são resolvidos antes da verificação (`compiler/semantic/src/named.rs`): para funções e métodos definidos no programa os argumentos são reordenados e os padrões preenchidos; para o resto (biblioteca, métodos de valores sem tipo conhecido) o nome é só um rótulo. `x.m(...)` só usa a assinatura de `m` se um único tipo do programa tem um método com esse nome.
+* `a in b` equivale a `b.contains(a)`; `x is Padrão` só existe como condição de `if`/`elif`/`while`.
+* `type` não é palavra reservada: só abre uma declaração no começo de um item, então ainda pode ser nome de campo ou variável (`type: Text`).
+* Palavras reservadas: `fn let var enum trait extend import from return if elif else while for in is match case break continue pass and or not True False`. `None`, `Some`, `Ok` e `Err` são nomes comuns.
 
-## 5. Plano de implementação
+## 5. Mensagens de erro
 
-1. **Lexer**: `#` como comentário; tokens `Newline`, `Indent`, `Dedent`; novas palavras reservadas; remoção de `::`, `{ }` em blocos (as chaves ficam só para o tipo-linha `Table[{…}]`), `;`, `&&`, `||`, `!`, `..`, `=>`.
-2. **Parser**: reescrita das regras de item, bloco e expressão sobre a mesma AST (`telvax-ast` não muda).
-3. **Migração mecânica**: o parser antigo fica por um tempo como `tools/migrate` (`telvax migrate arquivo.tvx`), que lê a sintaxe antiga e imprime a nova a partir da AST. Com ele convertem-se os 10 exemplos `.tvx`, os ~500 trechos de código embutidos nos testes em Rust e a documentação. Depois a ferramenta é apagada.
-4. **Formatador** (`telvax fmt`): refeito sobre os novos tokens (indentação é significativa, então ele só normaliza espaços e linhas em branco).
-5. **Linter**, **LSP** (hover, definição, renomear) e a **gramática do VS Code**: adaptados. O aviso "`mut` desnecessário" some (não há mais `mut`).
-6. **Docs**: `tour.md`, `use-cases.md`, `status.md`, README, CHANGELOG, playground.
+| Escrito | Mensagem |
+|---|---|
+| `fn f()` sem `:` | ``expected `:` at the end of this line`` |
+| bloco sem indentação | `expected an indented block here` |
+| `x = 1;` | ``\`;\` is not used in Telvax`` |
+| `def`, `class`, `lambda`, `mut`, `struct`, `impl`, `pub` no começo da linha | ``\`def\` is not used in Telvax: write \`fn name(...)\` `` e equivalentes |
+| `for i in 0..3` | ``\`..\` is not used in Telvax`` (nota: `range(start, end)`) |
+| `x = 1` sem declarar | ``cannot find \`x\`...`` com a nota `declare it first with let x = ... or var x = ...` |
+| `int`, `str`, `list` como tipos | ``cannot find type \`int\`...`` com `did you mean \`Int\`?` |
+| `true`, `false`, `null` | ``did you mean \`True\`?`` |
+| nome de argumento errado | ``no parameter \`speed\`` (e a lista dos que existem) |
 
-Critério de saída: todos os testes existentes passam com os fontes migrados; `telvax fmt --check` limpo em `examples/`; os exemplos rodam com a mesma saída de antes.
+Os tipos aparecem como são escritos no programa: ``expected `i32`, found `Text` ``, `List[Int]`, `Int?`, `Map[Text, Float]`.
 
-## 6. Pontos em aberto (segui o padrão; me diga se quer mudar)
+## 6. Ferramentas
 
-* `Some(x)`, `Ok(x)`, `Err(e)` e o `?` **ficam** como estão: trocá-los por exceções (`raise`/`try`) é uma mudança de semântica, não de sintaxe, e pertence à 0.0.6 (L3 do documento "rumo ao 1.0").
-* `pair.0` para tuplas continua (o `pair[0]` do Python não distingue tupla de lista na AST atual).
-* Sem fatias (`xs[1:3]`), sem `**`, sem `//` (divisão inteira) e sem strings de várias linhas (`"""`) por enquanto; entram junto com L12.
-* `lambda` com parâmetro anotado deixa de existir; use `def`.
-* Modo script (arquivo sem `def main`) é o L13 e fica para depois; hoje o ponto de entrada continua sendo `main`.
+* **`telvax fmt`** mantém cada quebra de linha e cada bloco e normaliza espaços, continuações, comentários e linhas em branco; confere que o resultado tem os mesmos tokens (inclusive `Indent`/`Dedent`).
+* **`telvax lint`**: variáveis e funções privadas sem uso (as privadas são as que começam com `_`).
+* **LSP**: hover (`fn norm(p: Point) -> Float`, `let origin: Point`, `var total: f32`), dicas de tipo para `let`/`var`/`for`, completação de `std.` e de membros, renomear.
+* **VS Code**: gramática TextMate, regras de indentação e `#` como comentário. Playground e exemplos migrados.
+* **`telvax-migrate`** (`tools/migrate`): converte arquivos da sintaxe antiga (estilo Rust), mantendo os comentários. Sai numa versão futura.
+
+## 7. O que ficou de fora (por enquanto)
+
+* `Some`, `Ok`, `Err` e o `?` ficam: trocá-los é mudança de semântica (0.0.6 do roadmap).
+* Uniões em tipos de retorno (`Reply | Error`) no lugar de `Result`.
+* `match`/`if` como valor em qualquer posição (hoje só na posição final de uma função, e `a if c else b`).
+* Intervalos fechados (`0..=n`): use `range(0, n + 1)`.
+* Fatias (`xs[1:3]`), strings de várias linhas, `//` de divisão inteira, `**`; entram com L12 do roadmap.
+* Modo script (arquivo sem `fn main`); um executável nativo ainda exige `fn main() -> i32`.
+* Argumentos nomeados em chamadas de biblioteca são só rótulos (não reordenam).

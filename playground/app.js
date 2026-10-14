@@ -9,7 +9,7 @@ let ready = false;
 let currentExample = EXAMPLES[0];
 
 // ---- syntax highlighting (a light tokenizer; the compiler is the source of truth) ------------
-const TOKEN = /(\/\/.*)|(f?"(?:[^"\\]|\\.)*")|\b(fn|struct|let|mut|pub|import|if|else|for|while|in|return|break|continue|match|enum|true|false)\b|\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|String|Vec|Vector|Tensor|Table|Result|[A-Z]\w*)\b|\b(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)\b|(\|>|->|=>|\.\.=?|[-+*\/%=<>!&|]+)|(@\w+)|([A-Za-z_]\w*)(?=\s*\()/g;
+const TOKEN = /(#.*)|(f?"(?:[^"\\]|\\.)*"|f?'(?:[^'\\]|\\.)*')|\b(fn|let|var|type|enum|trait|extend|import|from|return|if|elif|else|while|for|in|is|match|case|break|continue|pass|and|or|not|True|False|None)\b|\b(Int|Float|Text|Bool|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|List|Map|Vector|Tensor|Table|Result|[A-Z]\w*)\b|\b(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)\b|(\|>|->|=>|\.\.\.|[-+*\/%=<>!|?]+)|(@\w+)|([A-Za-z_]\w*)(?=\s*\()/g;
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 function render(src) {

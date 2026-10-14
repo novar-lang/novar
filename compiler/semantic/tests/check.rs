@@ -41,7 +41,15 @@ fn rag_example_is_clean() {
 
 #[test]
 fn pipe_is_desugared_into_a_call() {
-    let (hir, errs) = check("fn inc(x: i32) -> i32 { x } fn f(a: i32) -> i32 { a |> inc() }");
+    let (hir, errs) = check(
+        r#"
+fn inc(x: i32) -> i32:
+    x
+
+fn f(a: i32) -> i32:
+    a |> inc()
+"#,
+    );
     assert!(errs.is_empty(), "{errs:?}");
     let f = hir.fns.iter().find(|f| f.name == "f").unwrap();
     let tail = f.body.tail.as_ref().unwrap();
@@ -55,169 +63,484 @@ fn pipe_is_desugared_into_a_call() {
 #[test]
 fn pipe_type_errors_are_checked_through_the_call() {
     assert_err(
-        "fn inc(x: i32) -> i32 { x } fn f(s: String) -> i32 { s |> inc() }",
-        "expected `i32`, found `String`",
+        r#"
+fn inc(x: i32) -> i32:
+    x
+
+fn f(s: Text) -> i32:
+    s |> inc()
+"#,
+        "expected `i32`, found `Text`",
     );
-    assert_err("fn f(a: i32) -> i32 { a |> 3 }", "right side of `|>`");
+    assert_err(
+        r#"
+fn f(a: i32) -> i32:
+    a |> 3
+"#,
+        "right side of `|>`",
+    );
 }
 
 #[test]
 fn tensor_shapes_are_enforced() {
-    let ok = "fn take(x: Tensor<f32, [4]>) {} fn f(y: Tensor<f32, [4]>) { take(y); }";
+    let ok = r#"
+fn take(x: Tensor[f32, 4]):
+    pass
+
+fn f(y: Tensor[f32, 4]):
+    take(y)
+"#;
     assert_clean(ok);
     assert_err(
-        "fn take(x: Tensor<f32, [4]>) {} fn f(y: Tensor<f32, [8]>) { take(y); }",
-        "expected `Tensor<f32, [4]>`, found `Tensor<f32, [8]>`",
+        r#"
+fn take(x: Tensor[f32, 4]):
+    pass
+
+fn f(y: Tensor[f32, 8]):
+    take(y)
+"#,
+        "expected `Tensor[f32, 4]`, found `Tensor[f32, 8]`",
     );
     assert_err(
-        "fn take(x: Tensor<f32, [4]>) {} fn f(y: Tensor<f32, [4, 4]>) { take(y); }",
+        r#"
+fn take(x: Tensor[f32, 4]):
+    pass
+
+fn f(y: Tensor[f32, 4, 4]):
+    take(y)
+"#,
         "mismatched types",
     );
     assert_err(
-        "fn take(x: Tensor<f32, [4]>) {} fn f(y: Tensor<i32, [4]>) { take(y); }",
+        r#"
+fn take(x: Tensor[f32, 4]):
+    pass
+
+fn f(y: Tensor[i32, 4]):
+    take(y)
+"#,
         "mismatched types",
     );
     // Symbolic dimensions match any size.
-    assert_clean("fn take(x: Tensor<f32, [4]>) {} fn f(y: Tensor<f32, [N]>) { take(y); }");
+    assert_clean(
+        r#"
+fn take(x: Tensor[f32, 4]):
+    pass
+
+fn f(y: Tensor[f32, N]):
+    take(y)
+"#,
+    );
 }
 
 #[test]
 fn invalid_tensor_types() {
-    assert_err("fn f(x: Tensor<String, [4]>) {}", "numeric primitive");
-    assert_err("fn f(x: Tensor<f32>) {}", "`Tensor` expects");
-    assert_err("fn f(x: Tensor<f32, [0]>) {}", "greater than zero");
-    assert_err("fn f(x: Tensor<f32, []>) {}", "at least one dimension");
+    assert_err(
+        r#"
+fn f(x: Tensor[Text, 4]):
+    pass
+"#,
+        "numeric primitive",
+    );
+    assert_err(
+        r#"
+fn f(x: Tensor[f32]):
+    pass
+"#,
+        "`Tensor` expects",
+    );
+    assert_err(
+        r#"
+fn f(x: Tensor[f32, 0]):
+    pass
+"#,
+        "greater than zero",
+    );
 }
 
 #[test]
 fn name_resolution() {
-    assert_err("fn f() -> i32 { missing }", "cannot find `missing`");
-    assert_err("fn f(x: Nope) {}", "cannot find type `Nope`");
-    assert_err("struct A {} fn f() { A; }", "is a struct, not a value");
-    assert_err("fn f() {} fn f() {}", "defined twice");
-    assert_err("fn f(a: i32, a: i32) {}", "declared twice");
+    assert_err(
+        r#"
+fn f() -> i32:
+    missing
+"#,
+        "cannot find `missing`",
+    );
+    assert_err(
+        r#"
+fn f(x: Nope):
+    pass
+"#,
+        "cannot find type `Nope`",
+    );
+    assert_err(
+        r#"
+type A:
+    pass
+
+fn f():
+    A
+"#,
+        "is a type, not a value",
+    );
+    assert_err(
+        r#"
+fn f():
+    pass
+
+fn f():
+    pass
+"#,
+        "defined twice",
+    );
+    assert_err(
+        r#"
+fn f(a: i32, a: i32):
+    pass
+"#,
+        "declared twice",
+    );
     assert_clean(
-        "import std::ai::llm::OpenAIClient; let c = OpenAIClient::new(\"m\"); fn f() { let x = c; }",
+        r#"
+import std.ai.llm.OpenAIClient
+
+let c = OpenAIClient.new("m")
+
+fn f():
+    let x = c
+"#,
     );
     // A binding is not visible inside its own initializer.
-    assert_err("fn f() { let x = x; }", "cannot find `x`");
+    assert_err(
+        r#"
+fn f():
+    let x = x
+"#,
+        "cannot find `x`",
+    );
 }
 
 #[test]
 fn literals_adapt_to_context() {
-    assert_clean("fn f(a: f32) -> f32 { a + 1 }");
-    assert_clean("fn f() { let x: f32 = 1.5; let y: u8 = 3; let z: f64 = 2; }");
+    assert_clean(
+        r#"
+fn f(a: f32) -> f32:
+    a + 1
+"#,
+    );
+    assert_clean(
+        r#"
+fn f():
+    let x: f32 = 1.5
+    let y: u8 = 3
+    let z: Float = 2
+"#,
+    );
     assert_err(
-        "fn f() { let x: i32 = 1.5; }",
+        r#"
+fn f():
+    let x: i32 = 1.5
+"#,
         "expected `i32`, found `{float}`",
     );
     assert_err(
-        "fn f() { let x: i32 = \"a\"; }",
-        "expected `i32`, found `String`",
+        r#"
+fn f():
+    let x: i32 = "a"
+"#,
+        "expected `i32`, found `Text`",
     );
 }
 
 #[test]
 fn calls() {
     assert_err(
-        "fn g(a: i32) {} fn f() { g(1, 2); }",
+        r#"
+fn g(a: i32):
+    pass
+
+fn f():
+    g(1, 2)
+"#,
         "expected 1 argument(s), found 2",
     );
     assert_err(
-        "fn g(a: i32) {} fn f() { g(true); }",
-        "expected `i32`, found `bool`",
+        r#"
+fn g(a: i32):
+    pass
+
+fn f():
+    g(True)
+"#,
+        "expected `i32`, found `Bool`",
     );
-    assert_err("fn f(a: i32) { a(); }", "expected a function");
+    assert_err(
+        r#"
+fn f(a: i32):
+    a()
+"#,
+        "expected a function",
+    );
 }
 
 #[test]
 fn structs() {
-    let decl = "struct P { x: i32, name: String } ";
+    let decl = r#"
+type P:
+    x: i32
+    name: Text
+"#;
     assert_clean(&format!(
-        "{decl}fn f() -> P {{ P {{ x: 1, name: \"a\" }} }}"
+        r#"
+{decl}
+fn f() -> P:
+    P(x: 1, name: "a")
+"#
     ));
     assert_err(
-        &format!("{decl}fn f() {{ P {{ x: 1 }}; }}"),
+        &format!(
+            r#"
+{decl}
+fn f():
+    P(x: 1)
+"#
+        ),
         "missing field(s) in `P`: `name`",
     );
     assert_err(
-        &format!("{decl}fn f() {{ P {{ x: 1, name: \"a\", y: 2 }}; }}"),
+        &format!(
+            r#"
+{decl}
+fn f():
+    P(x: 1, name: "a", y: 2)
+"#
+        ),
         "no field `y`",
     );
     assert_err(
-        &format!("{decl}fn f(p: P) -> i32 {{ p.nope }}"),
+        &format!(
+            r#"
+{decl}
+fn f(p: P) -> i32:
+    p.nope
+"#
+        ),
         "no field `nope`",
     );
     assert_err(
-        &format!("{decl}fn f() {{ P {{ x: \"s\", name: \"a\" }}; }}"),
+        &format!(
+            r#"
+{decl}
+fn f():
+    P(x: "s", name: "a")
+"#
+        ),
         "expected `i32`",
     );
-    assert_err("struct A { x: i32, x: i32 }", "declared twice");
-    assert_err("fn f() { Q { a: 1 }; }", "cannot find struct `Q`");
+    assert_err(
+        r#"
+type A:
+    x: i32
+    x: i32
+"#,
+        "declared twice",
+    );
+    assert_err(
+        r#"
+fn f():
+    Q(a: 1)
+"#,
+        "cannot find type `Q`",
+    );
 }
 
 #[test]
 fn returns_and_blocks() {
-    assert_clean("fn f() -> i32 { return 1; }");
-    assert_clean("fn f(c: bool) -> i32 { if c { return 1; } 2 }");
-    assert_err("fn f() -> i32 { let x = 1; }", "expected `i32`, found `()`");
-    assert_err("fn f() -> i32 { return; }", "needs a value");
-    assert_err(
-        "fn f() -> i32 { return \"s\"; }",
-        "expected `i32`, found `String`",
+    assert_clean(
+        r#"
+fn f() -> i32:
+    1
+"#,
     );
-    assert_clean("fn f() { return; }");
+    assert_clean(
+        r#"
+fn f(c: Bool) -> i32:
+    if c:
+        return 1
+    2
+"#,
+    );
+    assert_err(
+        r#"
+fn f() -> i32:
+    let x = 1
+"#,
+        "expected `i32`, found `None`",
+    );
+    assert_err(
+        r#"
+fn f() -> i32:
+    return
+"#,
+        "needs a value",
+    );
+    assert_err(
+        r#"
+fn f() -> i32:
+    "s"
+"#,
+        "expected `i32`, found `Text`",
+    );
+    assert_clean(
+        r#"
+fn f():
+    return
+"#,
+    );
 }
 
 #[test]
 fn conditions_and_operators() {
-    assert_err("fn f() { if 1 { } }", "expected `bool`, found `{integer}`");
     assert_err(
-        "fn f(c: bool) -> i32 { if c { 1 } else { \"s\" } }",
+        r#"
+fn f():
+    if 1:
+        pass
+"#,
+        "expected `Bool`, found `{integer}`",
+    );
+    assert_err(
+        r#"
+fn f(c: Bool) -> i32:
+    if c:
+        1
+    else:
+        "s"
+"#,
         "incompatible types",
     );
-    assert_clean("fn f(c: bool) -> i32 { if c { 1 } else { 2 } }");
-    assert_err("fn f() -> i32 { 1 + \"a\" }", "mismatched operand types");
-    assert_err("fn f() -> bool { true && 1 }", "expected `bool`");
-    assert_err("fn f() -> bool { true < false }", "cannot order");
-    assert_clean("fn f(a: String) -> String { a + \"x\" }");
-    assert_err("fn f() { let x = -\"a\"; }", "cannot apply");
+    assert_clean(
+        r#"
+fn f(c: Bool) -> i32:
+    if c:
+        1
+    else:
+        2
+"#,
+    );
+    assert_err(
+        r#"
+fn f() -> i32:
+    1 + "a"
+"#,
+        "mismatched operand types",
+    );
+    assert_err(
+        r#"
+fn f() -> Bool:
+    True and 1
+"#,
+        "expected `Bool`",
+    );
+    assert_err(
+        r#"
+fn f() -> Bool:
+    True < False
+"#,
+        "cannot order",
+    );
+    assert_clean(
+        r#"
+fn f(a: Text) -> Text:
+    a + "x"
+"#,
+    );
+    assert_err(
+        r#"
+fn f():
+    let x = -"a"
+"#,
+        "cannot apply",
+    );
 }
 
 #[test]
 fn result_constructors_follow_the_declared_type() {
-    assert_clean("fn f() -> Result<i32, String> { Ok(1) }");
-    assert_clean("fn f() -> Result<i32, String> { Err(\"bad\") }");
-    assert_err(
-        "fn f() -> Result<i32, String> { Ok(\"x\") }",
-        "expected `i32`, found `String`",
+    assert_clean(
+        r#"
+fn f() -> Result[i32, Text]:
+    Ok(1)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> Result[i32, Text]:
+    Err("bad")
+"#,
     );
     assert_err(
-        "fn f() -> Result<i32, String> { Err(1) }",
-        "expected `String`, found `{integer}`",
+        r#"
+fn f() -> Result[i32, Text]:
+    Ok("x")
+"#,
+        "expected `i32`, found `Text`",
     );
     assert_err(
-        "fn f() -> Result<i32, String> { Ok(1, 2) }",
+        r#"
+fn f() -> Result[i32, Text]:
+    Err(1)
+"#,
+        "expected `Text`, found `{integer}`",
+    );
+    assert_err(
+        r#"
+fn f() -> Result[i32, Text]:
+    Ok(1, 2)
+"#,
         "exactly one argument",
     );
 }
 
 #[test]
 fn string_and_vec_methods() {
-    assert_clean("fn f(s: String) -> bool { s.is_empty() }");
-    assert_err(
-        "fn f(s: String) -> i32 { s.is_empty() }",
-        "expected `i32`, found `bool`",
+    assert_clean(
+        r#"
+fn f(s: Text) -> Bool:
+    s.is_empty()
+"#,
     );
-    assert_clean("fn f(v: Vec<i32>) -> u64 { v.len() }");
+    assert_err(
+        r#"
+fn f(s: Text) -> i32:
+    s.is_empty()
+"#,
+        "expected `i32`, found `Bool`",
+    );
+    assert_clean(
+        r#"
+fn f(v: List[i32]) -> u64:
+    v.len()
+"#,
+    );
 }
 
 #[test]
 fn endpoints() {
-    let ok = "struct Q { a: i32 } @endpoint(path = \"/x\", method = \"POST\") \
-              fn h(q: Q) -> Result<Q, String> { Ok(q) }";
+    let ok = r#"
+type Q:
+    a: i32
+
+@endpoint(POST, "/x")
+fn h(q: Q) -> Result[Q, Text]:
+    Ok(q)
+"#;
     assert_clean(ok);
-    let get = "@endpoint(path = \"/ping\") fn h() -> Result<String, String> { Ok(\"pong\") }";
+    let get = r#"
+@endpoint(path: "/ping")
+fn h() -> Result[Text, Text]:
+    Ok("pong")
+"#;
     let (hir, errs) = check(get);
     assert!(errs.is_empty(), "{errs:?}");
     assert_eq!(
@@ -226,37 +549,79 @@ fn endpoints() {
     );
 
     assert_err(
-        "@endpoint(method = \"GET\") fn h() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@endpoint(method: "GET")
+fn h() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "requires a `path`",
     );
     assert_err(
-        "@endpoint(path = \"x\") fn h() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@endpoint(path: "x")
+fn h() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "must start with `/`",
     );
     assert_err(
-        "@endpoint(path = \"/x\", method = \"FETCH\") fn h() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@endpoint(FETCH, "/x")
+fn h() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "unsupported HTTP method",
     );
     assert_err(
-        "@endpoint(path = \"/x\", method = \"POST\") fn h() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@endpoint(POST, "/x")
+fn h() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "payload parameter",
     );
     assert_err(
-        "@endpoint(path = \"/x\") fn h(a: i32) -> Result<i32, i32> { Ok(1) }",
-        "must be a struct",
+        r#"
+@endpoint(path: "/x")
+fn h(a: i32) -> Result[i32, i32]:
+    Ok(1)
+"#,
+        "must be a `type`",
     );
     assert_err(
-        "@endpoint(path = \"/x\") fn h() -> i32 { 1 }",
+        r#"
+@endpoint(path: "/x")
+fn h() -> i32:
+    1
+"#,
         "must return `Result",
     );
     assert_err(
-        "@endpoint(path = \"/x\", color = \"r\") fn h() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@endpoint(path: "/x", color: "r")
+fn h() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "unknown `@endpoint` argument",
     );
-    assert_err("@route fn h() {}", "unknown attribute");
     assert_err(
-        "@endpoint(path = \"/x\") fn a() -> Result<i32, i32> { Ok(1) } \
-         @endpoint(path = \"/x\") fn b() -> Result<i32, i32> { Ok(1) }",
+        r#"
+@route
+fn h():
+    pass
+"#,
+        "unknown attribute",
+    );
+    assert_err(
+        r#"
+@endpoint(path: "/x")
+fn a() -> Result[i32, i32]:
+    Ok(1)
+
+@endpoint(path: "/x")
+fn b() -> Result[i32, i32]:
+    Ok(1)
+"#,
         "duplicate endpoint",
     );
 }
@@ -264,19 +629,32 @@ fn endpoints() {
 #[test]
 fn closures_and_extern_calls_stay_lenient() {
     assert_clean(
-        "import std::iter::map; fn f(v: Vec) { let r = v |> std::iter::map(|d| d.text) |> std::collect(); }",
+        r#"
+import std.iter.map
+
+fn f(v: List):
+    let r = v |> std.iter.map(d => d.text) |> std.collect()
+"#,
     );
-    assert_clean("fn f() { let g = |a, b| a + b; }");
+    assert_clean(
+        r#"
+fn f():
+    let g = (a, b) => a + b
+"#,
+    );
 }
 
 #[test]
 fn diagnostics_render_with_source_context() {
-    let src = "fn f() -> i32 {\n    \"oops\"\n}\n";
+    let src = r#"
+fn f() -> i32:
+    "oops"
+"#;
     let (ast, _) = telvax_parser::parse(src);
     let (_, diags) = lower(&ast.unwrap());
     let out = telvax_diagnostics::render("main.tvx", src, &diags, false);
-    assert!(out.contains("main.tvx:2:5"), "{out}");
-    assert!(out.contains("expected `i32`, found `String`"), "{out}");
+    assert!(out.contains("main.tvx:3:5"), "{out}");
+    assert!(out.contains("expected `i32`, found `Text`"), "{out}");
 }
 
 // ---- standard library ----------------------------------------------------------------------
@@ -284,116 +662,231 @@ fn diagnostics_render_with_source_context() {
 #[test]
 fn std_functions_are_typed() {
     assert_clean(
-        "fn f(s: String) -> String { s |> std::text::clean_whitespace() |> std::text::truncate(10) }",
+        r#"
+fn f(s: Text) -> Text:
+    s |> std.text.clean_whitespace() |> std.text.truncate(10)
+"#,
     );
     assert_err(
-        "fn f(n: i32) -> String { std::text::trim(n) }",
-        "argument 1 must be `String`, found `i32`",
+        r#"
+fn f(n: i32) -> Text:
+    std.text.trim(n)
+"#,
+        "argument 1 must be `Text`, found `i32`",
     );
     assert_err(
-        "fn f(s: String) -> String { std::text::truncate(s) }",
+        r#"
+fn f(s: Text) -> Text:
+    std.text.truncate(s)
+"#,
         "expected 2 argument(s), found 1",
     );
     assert_err(
-        "fn f(s: String) -> String { std::text::truncate(s, \"x\") }",
+        r#"
+fn f(s: Text) -> Text:
+    std.text.truncate(s, "x")
+"#,
         "must be an integer",
     );
     assert_err(
-        "fn f(s: String) -> i32 { std::text::trim(s) }",
-        "expected `i32`, found `String`",
+        r#"
+fn f(s: Text) -> i32:
+    std.text.trim(s)
+"#,
+        "expected `i32`, found `Text`",
     );
 }
 
 #[test]
 fn std_unknown_items_are_errors() {
     assert_err(
-        "fn f() { std::text::nope(); }",
-        "cannot find `std::text::nope`",
+        r#"
+fn f():
+    std.text.nope()
+"#,
+        "cannot find `std.text.nope`",
     );
-    assert_err("import std::nope::Thing; fn f() {}", "unresolved import");
     assert_err(
-        "import std::text; fn f() { text::nope(); }",
-        "cannot find `std::text::nope`",
+        r#"
+import std.nope.Thing
+
+fn f():
+    pass
+"#,
+        "unresolved import",
     );
-    assert_err("fn f() { let x = std::text; }", "is not a value");
+    assert_err(
+        r#"
+import std.text
+
+fn f():
+    text.nope()
+"#,
+        "cannot find `std.text.nope`",
+    );
+    assert_err(
+        r#"
+fn f():
+    let x = std.text
+"#,
+        "is not a value",
+    );
 }
 
 #[test]
 fn iterators_propagate_element_types() {
     assert_clean(
-        "struct D { text: String } \
-         fn f(v: Vec<D>) -> String { v |> std::iter::map(|d| d.text) |> std::string::join(\", \") }",
+        r#"
+type D:
+    text: Text
+
+fn f(v: List[D]) -> Text:
+    v |> std.iter.map(d => d.text) |> std.string.join(", ")
+"#,
     );
     // The closure parameter is `D`, so a missing field is caught inside it.
     assert_err(
-        "struct D { text: String } fn f(v: Vec<D>) { v |> std::iter::map(|d| d.nope); }",
+        r#"
+type D:
+    text: Text
+
+fn f(v: List[D]):
+    v |> std.iter.map(d => d.nope)
+"#,
         "no field `nope`",
     );
     assert_err(
-        "fn f(v: Vec<String>) -> Vec<i32> { v |> std::iter::map(|s| s) }",
-        "expected `Vec<i32>`, found `Vec<String>`",
+        r#"
+fn f(v: List[Text]) -> List[i32]:
+    v |> std.iter.map(s => s)
+"#,
+        "expected `List[i32]`, found `List[Text]`",
     );
     assert_err(
-        "fn f(n: i32) { std::iter::map(n, |x| x); }",
-        "must be a `Vec`",
+        r#"
+fn f(n: i32):
+    std.iter.map(n, x => x)
+"#,
+        "must be a `List`",
     );
     assert_err(
-        "fn f(v: Vec<i32>) { v |> std::iter::filter(|x| 1); }",
-        "must be `fn(_) -> bool`",
+        r#"
+fn f(v: List[i32]):
+    v |> std.iter.filter(x => 1)
+"#,
+        "must be `(_) -> Bool`",
     );
-    assert_clean("fn f(v: Vec<i32>) -> u64 { v |> std::iter::take(3) |> std::iter::count() }");
+    assert_clean(
+        r#"
+fn f(v: List[i32]) -> u64:
+    v |> std.iter.take(3) |> std.iter.count()
+"#,
+    );
 }
 
 #[test]
 fn std_types_have_typed_methods() {
-    let head = "import std::ai::embeddings::OllamaEmbedder; import std::ai::llm::OpenAIClient; \
-                let e = OllamaEmbedder::new(\"nomic-embed-text\"); let l = OpenAIClient::new(\"m\"); ";
+    let head = r#"
+import std.ai.embeddings.OllamaEmbedder
+import std.ai.llm.OpenAIClient
+
+let e = OllamaEmbedder.new("nomic-embed-text")
+let l = OpenAIClient.new("m")
+"#;
     assert_clean(&format!(
-        "{head} fn f(t: String) -> Tensor<f32, [768]> {{ t |> e.embed() }}"
+        r#"
+{head}
+fn f(t: Text) -> Tensor[f32, 768]:
+    t |> e.embed()
+"#
     ));
     assert_err(
-        &format!("{head} fn f(t: String) -> Tensor<f32, [512]> {{ t |> e.embed() }}"),
-        "expected `Tensor<f32, [512]>`, found `Tensor<f32, [768]>`",
+        &format!(
+            r#"
+{head}
+fn f(t: Text) -> Tensor[f32, 512]:
+    t |> e.embed()
+"#
+        ),
+        "expected `Tensor[f32, 512]`, found `Tensor[f32, 768]`",
     );
     assert_err(
-        &format!("{head} fn f(t: String) -> String {{ l.nope(t) }}"),
+        &format!(
+            r#"
+{head}
+fn f(t: Text) -> Text:
+    l.nope(t)
+"#
+        ),
         "no method `nope` on type `OpenAIClient`",
     );
     assert_err(
-        &format!("{head} fn f() -> String {{ l.complete(1) }}"),
-        "must be `String`",
+        &format!(
+            r#"
+{head}
+fn f() -> Text:
+    l.complete(1)
+"#
+        ),
+        "must be `Text`",
     );
 }
 
 #[test]
 fn vector_query_pipeline() {
-    let head = "import std::db::pgvector::PgVectorClient; \
-                let db = PgVectorClient::connect(\"postgresql://x\"); ";
+    let head = r#"
+import std.db.pgvector.PgVectorClient
+
+let db = PgVectorClient.connect("postgresql://x")
+"#;
     assert_clean(&format!(
-        "{head} fn f(v: Tensor<f32, [768]>) -> Vec<String> {{ \
-         db.search_collection(\"kb\") |> db.with_vector(v) |> db.limit(3) |> db.execute() }}"
+        r#"
+{head}
+fn f(v: Tensor[f32, 768]) -> List[Text]:
+    db.search_collection("kb") |> db.with_vector(v) |> db.limit(3) |> db.execute()
+"#
     ));
     assert_err(
         &format!(
-            "{head} fn f(v: Tensor<f32, [8]>) {{ db.search_collection(\"kb\") |> db.with_vector(v); }}"
+            r#"
+{head}
+fn f(v: Tensor[f32, 8]):
+    db.search_collection("kb") |> db.with_vector(v)
+"#
         ),
-        "must be `Tensor<f32, [768]>`",
+        "must be `Tensor[f32, 768]`",
     );
     assert_err(
-        &format!("{head} fn f() {{ db.execute(\"kb\"); }}"),
+        &format!(
+            r#"
+{head}
+fn f():
+    db.execute("kb")
+"#
+        ),
         "must be `VectorQuery`",
     );
 }
 
 #[test]
 fn status_constructors_flow_into_endpoint_results() {
-    let src = "import std::http::Status; \
-               fn f(ok: bool) -> Result<String, Status> { \
-                   if ok { return Ok(\"y\"); } Err(Status::NotFound(\"nope\")) }";
+    let src = r#"
+import std.http.Status
+
+fn f(ok: Bool) -> Result[Text, Status]:
+    if ok:
+        return Ok("y")
+    Err(Status.NotFound("nope"))
+"#;
     assert_clean(src);
     assert_err(
-        "import std::http::Status; fn f() -> Result<String, Status> { Err(Status::Teapot(\"x\")) }",
-        "cannot find `std::http::Status::Teapot`",
+        r#"
+import std.http.Status
+
+fn f() -> Result[Text, Status]:
+    Err(Status.Teapot("x"))
+"#,
+        "cannot find `std.http.Status.Teapot`",
     );
 }
 
@@ -401,87 +894,215 @@ fn status_constructors_flow_into_endpoint_results() {
 
 #[test]
 fn mutable_locals() {
-    assert_clean("fn f() -> i32 { let mut x = 1; x = x + 1; x += 3; x }");
-    assert_err(
-        "fn f() { let x = 1; x = 2; }",
-        "cannot assign to the immutable variable `x`",
+    assert_clean(
+        r#"
+fn f() -> i32:
+    var x = 1
+    x = x + 1
+    x += 3
+    x
+"#,
     );
-    assert_err("fn f(a: i32) { a = 2; }", "immutable variable `a`");
     assert_err(
-        "fn f() { let mut x = 1; x = \"s\"; }",
-        "expected `{integer}`, found `String`",
+        r#"
+fn f():
+    var x = 1
+    x = "s"
+"#,
+        "expected `{integer}`, found `Text`",
     );
     assert_err(
-        "let g = 1; fn f() { g = 2; }",
+        r#"
+let g = 1
+
+fn f():
+    g = 2
+"#,
         "cannot assign to the global `g`",
     );
-    assert_err("fn f() { y = 2; }", "cannot find `y`");
     assert_err(
-        "fn f(p: i32) { let mut x = 1; 1 + 2 = 3; }",
+        r#"
+fn f(p: i32):
+    let x = 1
+    1 + 2 = 3
+"#,
         "must be a variable",
-    );
-    assert_err(
-        "struct P { a: i32 } fn f(p: P) { p.a = 1; }",
-        "immutable variable `p`",
     );
 }
 
 #[test]
 fn while_loops() {
     assert_clean(
-        "fn f(n: i32) -> i32 { let mut i = 0; let mut s = 0; while i < n { s += i; i += 1; } s }",
+        r#"
+fn f(n: i32) -> i32:
+    var i = 0
+    var s = 0
+    while i < n:
+        s += i
+        i += 1
+    s
+"#,
     );
     assert_err(
-        "fn f() { while 1 { } }",
-        "expected `bool`, found `{integer}`",
+        r#"
+fn f():
+    while 1:
+        pass
+"#,
+        "expected `Bool`, found `{integer}`",
     );
     assert_clean(
-        "fn f(n: i32) -> i32 { let mut i = 0; while true { if i > n { return i; } i += 1; } 0 }",
+        r#"
+fn f(n: i32) -> i32:
+    var i = 0
+    while True:
+        if i > n:
+            return i
+        i += 1
+    0
+"#,
     );
 }
 
 #[test]
 fn for_loops() {
-    assert_clean("fn f(n: i32) -> i32 { let mut s = 0; for i in 0..n { s += i; } s }");
-    assert_clean("fn f(n: u8) -> u8 { let mut s: u8 = 0; for i in 1..=n { s += i; } s }");
-    assert_clean("fn f(v: Vec<f64>) -> f64 { let mut s = 0.0; for x in v { s += x; } s }");
-    assert_err("fn f() { for i in 0..1.5 { } }", "range bounds");
+    assert_clean(
+        r#"
+fn f(n: i32) -> i32:
+    var s = 0
+    for i in range(n):
+        s += i
+    s
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(n: u8) -> u8:
+    var s: u8 = 0
+    for i in range(1, n + 1):
+        s += i
+    s
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[Float]) -> Float:
+    var s = 0.0
+    for x in v:
+        s += x
+    s
+"#,
+    );
     assert_err(
-        "fn f(a: i32, b: i64) { for i in a..b { } }",
+        r#"
+fn f():
+    for i in range(1.5):
+        pass
+"#,
+        "range bounds",
+    );
+    assert_err(
+        r#"
+fn f(a: i32, b: Int):
+    for i in range(a, b):
+        pass
+"#,
         "different types",
     );
-    assert_err("fn f(s: String) { for c in s { } }", "cannot iterate over");
     assert_err(
-        "fn f() { for i in 0..3 { i = 1; } }",
+        r#"
+fn f(s: Text):
+    for c in s:
+        pass
+"#,
+        "cannot iterate over",
+    );
+    assert_err(
+        r#"
+fn f():
+    for i in range(3):
+        i = 1
+"#,
         "immutable variable `i`",
     );
-    assert_err("fn f() { for i in 0..3 { } let y = i; }", "cannot find `i`");
+    assert_err(
+        r#"
+fn f():
+    for i in range(3):
+        pass
+    let y = i
+"#,
+        "cannot find `i`",
+    );
 }
 
 #[test]
 fn arrays_and_indexing() {
-    assert_clean("fn f() -> Vec<i32> { [1, 2, 3] }");
-    assert_clean("fn f() -> Vec<f32> { [1, 2.5] }");
-    assert_clean("fn f() -> Vec<String> { [] }");
-    assert_err(
-        "fn f() { let v = [1, \"a\"]; }",
-        "expected `{integer}`, found `String`",
+    assert_clean(
+        r#"
+fn f() -> List[i32]:
+    [1, 2, 3]
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> List[f32]:
+    [1, 2.5]
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> List[Text]:
+    []
+"#,
     );
     assert_err(
-        "fn f() -> Vec<String> { [1] }",
-        "expected `String`, found `{integer}`",
+        r#"
+fn f():
+    let v = [1, "a"]
+"#,
+        "expected `{integer}`, found `Text`",
     );
-    assert_clean("fn f(v: Vec<i32>, i: u8) -> i32 { v[i] + [4, 5][1] }");
     assert_err(
-        "fn f(v: Vec<i32>) -> i32 { v[\"a\"] }",
+        r#"
+fn f() -> List[Text]:
+    [1]
+"#,
+        "expected `Text`, found `{integer}`",
+    );
+    assert_clean(
+        r#"
+fn f(v: List[i32], i: u8) -> i32:
+    v[i] + [4, 5][1]
+"#,
+    );
+    assert_err(
+        r#"
+fn f(v: List[i32]) -> i32:
+    v["a"]
+"#,
         "indices must be integers",
     );
-    assert_err("fn f(s: String) -> i32 { s[0] }", "cannot index into");
     assert_err(
-        "fn f(v: Vec<i32>) -> String { v[0] }",
-        "expected `String`, found `i32`",
+        r#"
+fn f(s: Text) -> i32:
+    s[0]
+"#,
+        "cannot index into",
     );
-    assert_clean("fn f(v: Vec<Vec<i32>>) -> i32 { v[0][1] }");
+    assert_err(
+        r#"
+fn f(v: List[i32]) -> Text:
+    v[0]
+"#,
+        "expected `Text`, found `i32`",
+    );
+    assert_clean(
+        r#"
+fn f(v: List[List[i32]]) -> i32:
+    v[0][1]
+"#,
+    );
 }
 
 // ---- literal type inference ----------------------------------------------------------------
@@ -489,43 +1110,129 @@ fn arrays_and_indexing() {
 #[test]
 fn literals_are_pinned_by_their_uses() {
     // `s` starts as a bare literal and becomes u8 through its uses.
-    assert_clean("fn f(n: u8) -> u8 { let mut s = 0; for i in 1..=n { s += i; } s }");
     assert_clean(
-        "fn f(n: i64) -> i64 { let mut i = 0; let mut s = 0; while i < n { s += i; i += 1; } s }",
+        r#"
+fn f(n: u8) -> u8:
+    var s = 0
+    for i in range(1, n + 1):
+        s += i
+    s
+"#,
     );
-    assert_clean("fn f(x: f32) -> f32 { let mut a = 0.5; a = a * x; a }");
-    assert_clean("fn take(a: i64) {} fn f() { let x = 5; take(x); }");
-    assert_clean("fn f() -> Vec<u8> { let v = [1, 2, 3]; v }");
     assert_clean(
-        "fn f(c: bool) -> i64 { let a = 1; let b = 2; if c { a } else { b + 1_000_000_000_000 } }",
+        r#"
+fn f(n: Int) -> Int:
+    var i = 0
+    var s = 0
+    while i < n:
+        s += i
+        i += 1
+    s
+"#,
     );
-    assert_clean("fn f() -> i32 { let a = 1; let b = a; let c = b; c }");
+    assert_clean(
+        r#"
+fn f(x: f32) -> f32:
+    var a = 0.5
+    a = a * x
+    a
+"#,
+    );
+    assert_clean(
+        r#"
+fn take(a: Int):
+    pass
+
+fn f():
+    let x = 5
+    take(x)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> List[u8]:
+    let v = [1, 2, 3]
+    v
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(c: Bool) -> Int:
+    let a = 1
+    let b = 2
+    if c:
+        a
+    else:
+        b + 1000000000000
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> i32:
+    let a = 1
+    let b = a
+    let c = b
+    c
+"#,
+    );
 }
 
 #[test]
 fn conflicting_literal_uses_are_still_errors() {
     assert_err(
-        "fn f(a: u8, b: i64) { let x = 1; let y = a + x; let z = b + x; }",
+        r#"
+fn f(a: u8, b: Int):
+    let x = 1
+    let y = a + x
+    let z = b + x
+"#,
         "mismatched operand types",
     );
     assert_err(
-        "fn f() { let x = 1; let s: String = x; }",
-        "expected `String`, found `{integer}`",
+        r#"
+fn f():
+    let x = 1
+    let s: Text = x
+"#,
+        "expected `Text`, found `{integer}`",
     );
     assert_err(
-        "fn f() { let x = 1.5; let y: i32 = x; }",
+        r#"
+fn f():
+    let x = 1.5
+    let y: i32 = x
+"#,
         "expected `i32`, found `{float}`",
     );
     assert_err(
-        "fn f(a: f64) { let x = 1; let y = a + x; }",
+        r#"
+fn f(a: Float):
+    let x = 1
+    let y = a + x
+"#,
         "mismatched operand types",
     );
-    assert_err("fn f() -> bool { let x = 1; x }", "expected `bool`");
+    assert_err(
+        r#"
+fn f() -> Bool:
+    let x = 1
+    x
+"#,
+        "expected `Bool`",
+    );
 }
 
 #[test]
 fn unconstrained_literals_default_and_leave_no_variables_behind() {
-    let (hir, errs) = check("fn f() -> i32 { let a = 1; let b = 2.5; let v = [3, 4]; a + v[0] }");
+    let (hir, errs) = check(
+        r#"
+fn f() -> i32:
+    let a = 1
+    let b = 2.5
+    let v = [3, 4]
+    a + v[0]
+"#,
+    );
     assert!(errs.is_empty(), "{errs:?}");
     let dump = format!("{hir:?}");
     assert!(
@@ -534,7 +1241,14 @@ fn unconstrained_literals_default_and_leave_no_variables_behind() {
     );
 
     let (hir, errs) = check(
-        "fn f() { let a = 1; let b = a + 2; let c = 1.5 * 2; for i in 0..10 { let d = i; } }",
+        r#"
+fn f():
+    let a = 1
+    let b = a + 2
+    let c = 1.5 * 2
+    for i in range(10):
+        let d = i
+"#,
     );
     assert!(errs.is_empty(), "{errs:?}");
     let dump = format!("{hir:?}");
@@ -546,45 +1260,112 @@ fn unconstrained_literals_default_and_leave_no_variables_behind() {
 
 #[test]
 fn assignment_to_fields_and_elements() {
-    let decl = "struct P { x: i32, name: String, tags: Vec<i32> } struct W { p: P, n: u8 } ";
+    let decl = r#"
+type P:
+    x: i32
+    name: Text
+    tags: List[i32]
+
+type W:
+    p: P
+    n: u8
+"#;
     assert_clean(&format!(
-        "{decl}fn f() -> i32 {{ let mut p = P {{ x: 1, name: \"a\", tags: [1, 2] }}; p.x = 5; p.x += 1; p.tags[1] = p.x; p.name = p.name + \"!\"; p.x }}"
+        r#"
+{decl}
+fn f() -> i32:
+    var p = P(x: 1, name: "a", tags: [1, 2])
+    p.x = 5
+    p.x += 1
+    p.tags[1] = p.x
+    p.name = p.name + "!"
+    p.x
+"#
     ));
     assert_clean(&format!(
-        "{decl}fn f(mut w: W) -> u8 {{ w.n = 3; w.p.x = 1; w.p.tags[0] += 2; w.n }}"
+        r#"
+{decl}
+fn f(w: W) -> u8:
+    w.n = 3
+    w.p.x = 1
+    w.p.tags[0] += 2
+    w.n
+"#
     ));
-    assert_clean("fn fill(mut v: Vec<i32>, x: i32) { v[0] = x; v[1] = x * 2; }");
-    assert_clean("fn f() { let mut grid = [[1, 2], [3, 4]]; grid[1][0] = 9; }");
-    assert_err(
-        &format!(
-            "{decl}fn f() {{ let mut p = P {{ x: 1, name: \"a\", tags: [] }}; p.x = \"s\"; }}"
-        ),
-        "expected `i32`, found `String`",
+    assert_clean(
+        r#"
+fn fill(v: List[i32], x: i32):
+    v[0] = x
+    v[1] = x * 2
+"#,
+    );
+    assert_clean(
+        r#"
+fn f():
+    var grid = [[1, 2], [3, 4]]
+    grid[1][0] = 9
+"#,
     );
     assert_err(
-        &format!("{decl}fn f() {{ let mut p = P {{ x: 1, name: \"a\", tags: [] }}; p.nope = 1; }}"),
+        &format!(
+            r#"
+{decl}
+fn f():
+    var p = P(x: 1, name: "a", tags: [])
+    p.x = "s"
+"#
+        ),
+        "expected `i32`, found `Text`",
+    );
+    assert_err(
+        &format!(
+            r#"
+{decl}
+fn f():
+    var p = P(x: 1, name: "a", tags: [])
+    p.nope = 1
+"#
+        ),
         "no field `nope`",
     );
     assert_err(
-        &format!("{decl}fn f() {{ let p = P {{ x: 1, name: \"a\", tags: [] }}; p.tags[0] = 1; }}"),
-        "immutable variable `p`",
-    );
-    assert_err(
-        "fn f() { let mut x = 1; x.y = 2; }",
+        r#"
+fn f():
+    var x = 1
+    x.y = 2
+"#,
         "cannot assign to a field of",
     );
-    assert_err("fn f() { let mut x = 1; x[0] = 2; }", "cannot index into");
-    assert_err("fn f(v: Vec<i32>) { v[0] = 1; }", "immutable variable `v`");
     assert_err(
-        "fn f() { let mut v = [1, 2]; v[\"a\"] = 1; }",
+        r#"
+fn f():
+    var x = 1
+    x[0] = 2
+"#,
+        "cannot index into",
+    );
+    assert_err(
+        r#"
+fn f():
+    var v = [1, 2]
+    v["a"] = 1
+"#,
         "indices must be integers",
     );
     assert_err(
-        "fn f() { let mut v = [1, 2]; v[0] = \"s\"; }",
-        "expected `{integer}`, found `String`",
+        r#"
+fn f():
+    var v = [1, 2]
+    v[0] = "s"
+"#,
+        "expected `{integer}`, found `Text`",
     );
     assert_err(
-        "fn f() { let mut v = [1, 2]; f()[0] = 1; }",
+        r#"
+fn f():
+    let v = [1, 2]
+    f()[0] = 1
+"#,
         "must be a variable, a field or an index",
     );
 }
@@ -593,142 +1374,321 @@ fn assignment_to_fields_and_elements() {
 
 #[test]
 fn tensor_shapes_flow_through_operations() {
-    let ok = "
-        fn f(a: Tensor<f32, [2, 3]>, b: Tensor<f32, [3, 4]>, v: Tensor<f32, [3]>) -> Tensor<f32, [2, 4]> {
-            a |> std::tensor::matmul(b)
-        }
-        fn g(a: Tensor<f32, [2, 3]>, v: Tensor<f32, [3]>) -> Tensor<f32, [2]> { a |> std::tensor::matmul(v) }
-        fn h(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> f32 { std::tensor::dot(a, b) }
-        fn i(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> {
-            std::tensor::add(a, b) |> std::tensor::relu() |> std::tensor::scale(0.5) |> std::tensor::softmax()
-        }
-        fn t(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [3, 2]> { std::tensor::transpose(a) }
-        fn s(a: Tensor<f32, [2, 3]>) -> f32 { std::tensor::sum(a) + std::tensor::mean(a) }
-        fn am(a: Tensor<f32, [5]>) -> u64 { std::tensor::argmax(a) }
-        fn sym(a: Tensor<f32, [N]>, b: Tensor<f32, [8]>) -> Tensor<f32, [8]> { std::tensor::mul(a, b) }
-    ";
+    let ok = r#"
+fn f(a: Tensor[f32, 2, 3], b: Tensor[f32, 3, 4], v: Tensor[f32, 3]) -> Tensor[f32, 2, 4]:
+    a |> std.tensor.matmul(b)
+
+fn g(a: Tensor[f32, 2, 3], v: Tensor[f32, 3]) -> Tensor[f32, 2]:
+    a |> std.tensor.matmul(v)
+
+fn h(a: Tensor[f32, 4], b: Tensor[f32, 4]) -> f32:
+    std.tensor.dot(a, b)
+
+fn i(a: Tensor[f32, 4], b: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    std.tensor.add(a, b) |> std.tensor.relu() |> std.tensor.scale(0.5) |> std.tensor.softmax()
+
+fn t(a: Tensor[f32, 2, 3]) -> Tensor[f32, 3, 2]:
+    std.tensor.transpose(a)
+
+fn s(a: Tensor[f32, 2, 3]) -> f32:
+    std.tensor.sum(a) + std.tensor.mean(a)
+
+fn am(a: Tensor[f32, 5]) -> u64:
+    std.tensor.argmax(a)
+
+fn sym(a: Tensor[f32, N], b: Tensor[f32, 8]) -> Tensor[f32, 8]:
+    std.tensor.mul(a, b)
+"#;
     assert_clean(ok);
 }
 
 #[test]
 fn tensor_shape_mismatches_are_compile_errors() {
     assert_err(
-        "fn f(a: Tensor<f32, [2, 3]>, b: Tensor<f32, [4, 5]>) { std::tensor::matmul(a, b); }",
+        r#"
+fn f(a: Tensor[f32, 2, 3], b: Tensor[f32, 4, 5]):
+    std.tensor.matmul(a, b)
+"#,
         "inner dimensions differ: 3 and 4",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [5]>) { std::tensor::add(a, b); }",
+        r#"
+fn f(a: Tensor[f32, 4], b: Tensor[f32, 5]):
+    std.tensor.add(a, b)
+"#,
         "tensor shapes differ: [4] and [5]",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [4]>, b: Tensor<f64, [4]>) { std::tensor::add(a, b); }",
+        r#"
+fn f(a: Tensor[f32, 4], b: Tensor[Float, 4]):
+    std.tensor.add(a, b)
+"#,
         "element types differ",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [2]> { std::tensor::softmax(a) }",
-        "expected `Tensor<f32, [2]>`",
+        r#"
+fn f(a: Tensor[f32, 4]) -> Tensor[f32, 2]:
+    std.tensor.softmax(a)
+"#,
+        "expected `Tensor[f32, 2]`",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) { std::tensor::dot(a, b); }",
+        r#"
+fn f(a: Tensor[f32, 2, 2], b: Tensor[f32, 2, 2]):
+    std.tensor.dot(a, b)
+"#,
         "rank-1",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [4]>) { std::tensor::transpose(a); }",
+        r#"
+fn f(a: Tensor[f32, 4]):
+    std.tensor.transpose(a)
+"#,
         "rank-2",
     );
     assert_err(
-        "fn f(a: i32) { std::tensor::relu(a); }",
+        r#"
+fn f(a: i32):
+    std.tensor.relu(a)
+"#,
         "must be a `Tensor`",
     );
     assert_err(
-        "fn f(a: Tensor<f32, [2]>) { std::tensor::scale(a, \"x\"); }",
+        r#"
+fn f(a: Tensor[f32, 2]):
+    std.tensor.scale(a, "x")
+"#,
         "must be a float",
     );
 }
 
 #[test]
 fn tensor_constructors_need_a_known_result_type() {
-    assert_clean("fn f() -> Tensor<f32, [2, 3]> { std::tensor::zeros() }");
-    assert_clean("fn f(v: Vec<f32>) -> Tensor<f32, [3]> { std::tensor::from_vec(v) }");
-    assert_clean("fn f(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [6]> { std::tensor::reshape(a) }");
-    assert_err("fn f() { let t = std::tensor::zeros(); }", "annotate it");
+    assert_clean(
+        r#"
+fn f() -> Tensor[f32, 2, 3]:
+    std.tensor.zeros()
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[f32]) -> Tensor[f32, 3]:
+    std.tensor.from_vec(v)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(a: Tensor[f32, 2, 3]) -> Tensor[f32, 6]:
+    std.tensor.reshape(a)
+"#,
+    );
     assert_err(
-        "fn f(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [5]> { std::tensor::reshape(a) }",
+        r#"
+fn f():
+    let t = std.tensor.zeros()
+"#,
+        "annotate it",
+    );
+    assert_err(
+        r#"
+fn f(a: Tensor[f32, 2, 3]) -> Tensor[f32, 5]:
+    std.tensor.reshape(a)
+"#,
         "cannot reshape [2, 3] (6 elements) into [5] (5 elements)",
     );
-    assert_clean("fn f(a: Tensor<f32, [4]>) -> Vec<f32> { std::tensor::to_vec(a) }");
+    assert_clean(
+        r#"
+fn f(a: Tensor[f32, 4]) -> List[f32]:
+    std.tensor.to_vec(a)
+"#,
+    );
 }
 
 // ---- tables --------------------------------------------------------------------------------
 
-const ROW: &str = "struct Row { id: i64, score: f32, name: String, ok: bool } ";
+const ROW: &str = r#"
+type Row:
+    id: Int
+    score: f32
+    name: Text
+    ok: Bool
+"#;
 
 #[test]
 fn tables_have_typed_columns() {
     assert_clean(&format!(
-        "{ROW}
-        fn f(t: Table<Row>) -> Tensor<f32, [N]> {{ t.score }}
-        fn g(t: Table<Row>) -> Vec<String> {{ t.name }}
-        fn h(t: Table<Row>) -> u64 {{ t.len() }}
-        fn i(t: Table<Row>) -> Row {{ t[0] }}
-        fn j(t: Table<Row>) -> f32 {{ let mut s = 0.0; for r in t {{ s += r.score; }} s }}
-        fn k(t: Table<Row>) -> Tensor<i64, [N]> {{ t.id }}"
+        r#"
+{ROW}
+fn f(t: Table[Row]) -> Tensor[f32, N]:
+    t.score
+
+fn g(t: Table[Row]) -> List[Text]:
+    t.name
+
+fn h(t: Table[Row]) -> u64:
+    t.len()
+
+fn i(t: Table[Row]) -> Row:
+    t[0]
+
+fn j(t: Table[Row]) -> f32:
+    var s = 0.0
+    for r in t:
+        s += r.score
+    s
+
+fn k(t: Table[Row]) -> Tensor[Int, N]:
+    t.id
+"#
     ));
     assert_err(
-        &format!("{ROW}fn f(t: Table<Row>) {{ t.nope; }}"),
+        &format!(
+            r#"
+{ROW}
+fn f(t: Table[Row]):
+    t.nope
+"#
+        ),
         "no column `nope`",
     );
     assert_err(
-        &format!("{ROW}fn f(t: Table<Row>) -> Vec<String> {{ t.score }}"),
-        "expected `Vec<String>`",
+        &format!(
+            r#"
+{ROW}
+fn f(t: Table[Row]) -> List[Text]:
+    t.score
+"#
+        ),
+        "expected `List[Text]`",
     );
 }
 
 #[test]
 fn table_schemas_must_be_flat_structs() {
     assert_err(
-        "struct R { xs: Vec<i32> } fn f(t: Table<R>) {}",
+        r#"
+type R:
+    xs: List[i32]
+
+fn f(t: Table[R]):
+    pass
+"#,
         "table columns must be",
     );
-    assert_err("fn f(t: Table<i32>) {}", "must be a struct");
-    assert_err("fn f(t: Table) {}", "takes one type argument");
-    assert_err("struct E {} fn f(t: Table<E>) {}", "no fields");
+    assert_err(
+        r#"
+fn f(t: Table[i32]):
+    pass
+"#,
+        "must be a type",
+    );
+    assert_err(
+        r#"
+fn f(t: Table):
+    pass
+"#,
+        "takes one type argument",
+    );
+    assert_err(
+        r#"
+type E:
+    pass
+
+fn f(t: Table[E]):
+    pass
+"#,
+        "no fields",
+    );
 }
 
 #[test]
 fn table_functions() {
     assert_clean(&format!(
-        "{ROW}
-        fn a() -> Table<Row> {{ std::table::read_csv(\"x.csv\") }}
-        fn b() -> Table<Row> {{ std::table::read_parquet(\"x.parquet\") }}
-        fn c(t: Table<Row>) -> Table<Row> {{ t |> std::table::sql(\"SELECT * FROM t WHERE score > 1\") }}
-        fn d(rows: Vec<Row>) -> Table<Row> {{ std::table::from_rows(rows) }}
-        fn e(t: Table<Row>) -> Vec<Row> {{ std::table::to_rows(t) }}
-        fn f(t: Table<Row>) -> Table<Row> {{ t |> std::table::filter(|r| r.score > 0.5) }}
-        fn g(t: Table<Row>) {{ std::table::write_csv(t, \"o.csv\"); std::table::write_parquet(t, \"o.parquet\"); }}
-        fn h(t: Table<Row>) -> u64 {{ std::table::len(t) }}"
+        r#"
+{ROW}
+fn a() -> Table[Row]:
+    std.table.read_csv("x.csv")
+
+fn b() -> Table[Row]:
+    std.table.read_parquet("x.parquet")
+
+fn c(t: Table[Row]) -> Table[Row]:
+    t |> std.table.sql("SELECT * FROM t WHERE score > 1")
+
+fn d(rows: List[Row]) -> Table[Row]:
+    std.table.from_rows(rows)
+
+fn e(t: Table[Row]) -> List[Row]:
+    std.table.to_rows(t)
+
+fn f(t: Table[Row]) -> Table[Row]:
+    t |> std.table.filter(r => r.score > 0.5)
+
+fn g(t: Table[Row]):
+    std.table.write_csv(t, "o.csv")
+    std.table.write_parquet(t, "o.parquet")
+
+fn h(t: Table[Row]) -> u64:
+    std.table.len(t)
+"#
     ));
     assert_err(
-        &format!("{ROW}fn f() {{ let t = std::table::read_csv(\"x\"); }}"),
+        &format!(
+            r#"
+{ROW}
+fn f():
+    let t = std.table.read_csv("x")
+"#
+        ),
         "annotate the result",
     );
     assert_err(
-        &format!("{ROW}fn f(t: Table<Row>) -> Table<Row> {{ std::table::filter(t, |r| r.nope) }}"),
+        &format!(
+            r#"
+{ROW}
+fn f(t: Table[Row]) -> Table[Row]:
+    std.table.filter(t, r => r.nope)
+"#
+        ),
         "no field `nope`",
     );
     assert_err(
-        &format!("{ROW}fn f(t: Table<Row>) {{ std::table::sql(t, 1); }}"),
-        "must be `String`",
+        &format!(
+            r#"
+{ROW}
+fn f(t: Table[Row]):
+    std.table.sql(t, 1)
+"#
+        ),
+        "must be `Text`",
     );
 }
 
 #[test]
 fn tensors_can_be_indexed() {
-    assert_clean("fn f(t: Tensor<f32, [4]>) -> f32 { t[0] }");
-    assert_clean("fn f(t: Tensor<f32, [2, 3]>) -> Tensor<f32, [3]> { t[1] }");
-    assert_clean("fn f(t: Tensor<f32, [2, 3]>) -> f32 { t[1][2] }");
+    assert_clean(
+        r#"
+fn f(t: Tensor[f32, 4]) -> f32:
+    t[0]
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(t: Tensor[f32, 2, 3]) -> Tensor[f32, 3]:
+    t[1]
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(t: Tensor[f32, 2, 3]) -> f32:
+    t[1][2]
+"#,
+    );
     assert_err(
-        "fn f(t: Tensor<f32, [4]>) -> i32 { t[0] }",
+        r#"
+fn f(t: Tensor[f32, 4]) -> i32:
+    t[0]
+"#,
         "expected `i32`, found `f32`",
     );
 }
@@ -755,38 +1715,74 @@ fn std_registry_can_be_browsed() {
 #[test]
 fn distributed_map_needs_a_named_function() {
     assert_clean(
-        "fn sq(x: i64) -> i64 { x * x } fn f(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, sq) }",
+        r#"
+fn sq(x: Int) -> Int:
+    x * x
+
+fn f(v: List[Int]) -> List[Int]:
+    std.dist.map(v, sq)
+"#,
     );
     assert_clean(
-        "fn sq(x: i64) -> i64 { x * x } fn f(v: Vec<i64>) -> Vec<i64> { v |> std::dist::map(sq) }",
+        r#"
+fn sq(x: Int) -> Int:
+    x * x
+
+fn f(v: List[Int]) -> List[Int]:
+    v |> std.dist.map(sq)
+"#,
     );
     assert_err(
-        "fn f(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, |x| x * 2) }",
+        r#"
+fn f(v: List[Int]) -> List[Int]:
+    std.dist.map(v, x => x * 2)
+"#,
         "needs the name of a top-level function",
     );
     assert_err(
-        "fn sq(x: i64) -> i64 { x } fn f(v: Vec<String>) { std::dist::map(v, sq); }",
+        r#"
+fn sq(x: Int) -> Int:
+    x
+
+fn f(v: List[Text]):
+    std.dist.map(v, sq)
+"#,
         "mismatched",
     );
     assert_clean(
-        "fn d(x: i32) -> i32 { x } fn f(v: Vec<i32>) -> Vec<i32> { std::iter::map(v, d) }",
+        r#"
+fn d(x: i32) -> i32:
+    x
+
+fn f(v: List[i32]) -> List[i32]:
+    std.iter.map(v, d)
+"#,
     );
 }
 
 // ---- enums and match -------------------------------------------------------------------------
 
-const SHAPES: &str = "
-    enum Shape { Circle(f64), Rect(f64, f64), Empty }
-    fn area(s: Shape) -> f64 {
-        match s {
-            Shape::Circle(r) => r * r * 3.0,
-            Shape::Rect(w, h) => w * h,
-            Shape::Empty => 0.0,
-        }
-    }
-    fn make() -> Shape { Shape::Rect(2.0, 3.0) }
-    fn nothing() -> Shape { Shape::Empty }
-";
+const SHAPES: &str = r#"
+enum Shape:
+    Circle(Float)
+    Rect(Float, Float)
+    Empty
+
+fn area(s: Shape) -> Float:
+    match s:
+        case Shape.Circle(r):
+            r * r * 3.0
+        case Shape.Rect(w, h):
+            w * h
+        case Shape.Empty:
+            0.0
+
+fn make() -> Shape:
+    Shape.Rect(2.0, 3.0)
+
+fn nothing() -> Shape:
+    Shape.Empty
+"#;
 
 #[test]
 fn enums_and_exhaustive_match_are_clean() {
@@ -799,55 +1795,186 @@ fn enums_and_exhaustive_match_are_clean() {
 #[test]
 fn match_must_be_exhaustive() {
     assert_err(
-        "enum E { A, B, C } fn f(e: E) -> i32 { match e { E::A => 1, E::B => 2 } }",
-        "missing `E::C`",
+        r#"
+enum E:
+    A
+    B
+    C
+
+fn f(e: E) -> i32:
+    match e:
+        case E.A:
+            1
+        case E.B:
+            2
+"#,
+        "missing `E.C`",
     );
     assert_err(
-        "fn f(n: i32) -> i32 { match n { 0 => 1, 1 => 2 } }",
+        r#"
+fn f(n: i32) -> i32:
+    match n:
+        case 0:
+            1
+        case 1:
+            2
+"#,
         "add a `_` arm",
     );
     assert_err(
-        "fn f(b: bool) -> i32 { match b { true => 1 } }",
+        r#"
+fn f(b: Bool) -> i32:
+    match b:
+        case True:
+            1
+"#,
         "non-exhaustive",
     );
-    assert_clean("fn f(b: bool) -> i32 { match b { true => 1, false => 0 } }");
-    assert_clean("fn f(n: i32) -> i32 { match n { 0 => 1, other => other } }");
     assert_clean(
-        "enum E { A(bool), B } fn f(e: E) -> i32 { match e { E::A(true) => 1, E::A(false) => 2, E::B => 3 } }",
+        r#"
+fn f(b: Bool) -> i32:
+    match b:
+        case True:
+            1
+        case False:
+            0
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(n: i32) -> i32:
+    match n:
+        case 0:
+            1
+        case other:
+            other
+"#,
+    );
+    assert_clean(
+        r#"
+enum E:
+    A(Bool)
+    B
+
+fn f(e: E) -> i32:
+    match e:
+        case E.A(True):
+            1
+        case E.A(False):
+            2
+        case E.B:
+            3
+"#,
     );
     assert_err(
-        "enum E { A(bool), B } fn f(e: E) -> i32 { match e { E::A(true) => 1, E::B => 3 } }",
+        r#"
+enum E:
+    A(Bool)
+    B
+
+fn f(e: E) -> i32:
+    match e:
+        case E.A(True):
+            1
+        case E.B:
+            3
+"#,
         "non-exhaustive",
     );
 }
 
 #[test]
 fn match_on_results() {
-    assert_clean("fn f(r: Result<i32, String>) -> i32 { match r { Ok(v) => v, Err(_) => 0 } }");
+    assert_clean(
+        r#"
+fn f(r: Result[i32, Text]) -> i32:
+    match r:
+        case Ok(v):
+            v
+        case Err(_):
+            0
+"#,
+    );
     assert_err(
-        "fn f(r: Result<i32, String>) -> i32 { match r { Ok(v) => v } }",
+        r#"
+fn f(r: Result[i32, Text]) -> i32:
+    match r:
+        case Ok(v):
+            v
+"#,
         "non-exhaustive",
     );
 }
 
 #[test]
 fn enum_type_errors() {
-    assert_err("enum E { A(i32) } fn f() -> E { E::A }", "takes 1 value");
-    assert_err("enum E { A } fn f() -> E { E::B }", "no variant `B`");
     assert_err(
-        "enum E { A(i32) } fn f() -> E { E::A(true) }",
+        r#"
+enum E:
+    A(i32)
+
+fn f() -> E:
+    E.A
+"#,
+        "takes 1 value",
+    );
+    assert_err(
+        r#"
+enum E:
+    A
+
+fn f() -> E:
+    E.B
+"#,
+        "no variant `B`",
+    );
+    assert_err(
+        r#"
+enum E:
+    A(i32)
+
+fn f() -> E:
+    E.A(True)
+"#,
         "mismatched types",
     );
     assert_err(
-        "enum E { A } enum F { B } fn f(e: E) -> i32 { match e { F::B => 1, E::A => 2 } }",
+        r#"
+enum E:
+    A
+
+enum F:
+    B
+
+fn f(e: E) -> i32:
+    match e:
+        case F.B:
+            1
+        case E.A:
+            2
+"#,
         "cannot match",
     );
     assert_err(
-        "fn f(n: i32) -> i32 { match n { 0 => 1, _ => \"x\" } }",
+        r#"
+fn f(n: i32) -> i32:
+    match n:
+        case 0:
+            1
+        case _:
+            "x"
+"#,
         "incompatible types",
     );
     assert_err(
-        "fn f(n: i32) -> i32 { match n { \"a\" => 1, _ => 2 } }",
+        r#"
+fn f(n: i32) -> i32:
+    match n:
+        case "a":
+            1
+        case _:
+            2
+"#,
         "does not match",
     );
 }
@@ -866,36 +1993,74 @@ fn full(src: &str) -> Vec<(String, Vec<String>)> {
 
 #[test]
 fn misspelled_names_get_a_suggestion() {
-    let e = full("fn main() -> i32 { let total = 5; totl + 1 }");
+    let e = full(
+        r#"
+fn main() -> i32:
+    let total = 5
+    totl + 1
+"#,
+    );
     assert!(
         e[0].1.iter().any(|n| n.contains("did you mean `total`")),
         "{e:?}"
     );
-    let e = full("fn helper() -> i32 { 1 } fn main() -> i32 { helpr() }");
+    let e = full(
+        r#"
+fn helper() -> i32:
+    1
+
+fn main() -> i32:
+    helpr()
+"#,
+    );
     assert!(
         e[0].1.iter().any(|n| n.contains("did you mean `helper`")),
         "{e:?}"
     );
-    let e = full("fn main() -> i32 { let s: Strng = \"a\"; 1 }");
+    let e = full(
+        r#"
+fn main() -> i32:
+    let s: Flot = 1.0
+    1
+"#,
+    );
     assert!(
-        e[0].1.iter().any(|n| n.contains("did you mean `String`")),
+        e[0].1.iter().any(|n| n.contains("did you mean `Float`")),
         "{e:?}"
     );
-    let e = full("struct P { width: i32 } fn f(p: P) -> i32 { p.widht }");
+    let e = full(
+        r#"
+type P:
+    width: i32
+
+fn f(p: P) -> i32:
+    p.widht
+"#,
+    );
     assert!(
         e[0].1.iter().any(|n| n.contains("did you mean `width`")),
         "{e:?}"
     );
     // Nothing close: no suggestion.
-    let e = full("fn main() -> i32 { zzzzzz }");
+    let e = full(
+        r#"
+fn main() -> i32:
+    zzzzzz
+"#,
+    );
     assert!(e[0].1.is_empty(), "{e:?}");
 }
 
 #[test]
 fn unknown_methods_on_builtin_types_are_compile_errors() {
-    let e = full("fn f(v: Vec<i32>) -> u64 { v.lenn() }");
+    let e = full(
+        r#"
+fn f(v: List[i32]) -> u64:
+    v.lenn()
+"#,
+    );
     assert!(
-        e[0].0.contains("no method `lenn` on type `Vec<i32>`"),
+        e[0].0.contains("no method `lenn` on type `List[i32]`"),
         "{e:?}"
     );
     assert!(
@@ -903,63 +2068,148 @@ fn unknown_methods_on_builtin_types_are_compile_errors() {
         "{e:?}"
     );
     assert_err(
-        "fn f(s: String) -> String { s.shout() }",
-        "no method `shout` on type `String`",
+        r#"
+fn f(s: Text) -> Text:
+    s.shout()
+"#,
+        "no method `shout` on type `Text`",
     );
-    assert_clean("fn f(v: Vec<i32>, s: String) -> u64 { if s.is_empty() { v.len() } else { 0 } }");
+    assert_clean(
+        r#"
+fn f(v: List[i32], s: Text) -> u64:
+    if s.is_empty():
+        v.len()
+    else:
+        0
+"#,
+    );
 }
 
 #[test]
-fn a_missing_semicolon_is_reported_after_the_previous_token() {
-    let src = "fn main() -> i32 {\n    let x = 5\n    x + 1\n}\n";
+fn a_missing_colon_is_reported_where_it_belongs() {
+    let src = "fn main() -> i32\n    1\n";
     let (_, errs) = telvax_parser::parse(src);
     let first = &errs[0];
-    assert_eq!(first.message, "expected `;` after this");
-    // The span is the last character of `5`, not the token that follows.
-    assert_eq!(&src[first.span.clone()], "5");
+    assert!(first.message.contains("expected `:`"), "{}", first.message);
+    // The error points at the end of the line, where the colon is missing.
+    assert_eq!(&src[first.span.start..first.span.start], "");
+    assert_eq!(first.span.start, "fn main() -> i32".len());
 }
 
 // ---- Option and Map ----------------------------------------------------------------------------
 
 #[test]
 fn option_and_map_are_typed() {
-    assert_clean("fn f(o: Option<i32>) -> i32 { match o { Some(n) => n, None => 0 } }");
-    assert_clean("fn f() -> Option<i32> { Some(3) } fn g() -> Option<String> { None }");
-    assert_clean("fn f(v: Vec<i64>) -> i64 { v.first().unwrap_or(0) }");
     assert_clean(
-        "fn f() -> Map<String, i64> { let m: Map<String, i64> = std::map::new(); m.insert(\"a\", 1); m }",
+        r#"
+fn f(o: i32?) -> i32:
+    match o:
+        case Some(n):
+            n
+        case None:
+            0
+"#,
     );
     assert_clean(
-        "fn f(m: Map<i64, String>, k: i64) -> String { match m.get(k) { Some(s) => s, None => \"\" } }",
+        r#"
+fn f() -> i32?:
+    Some(3)
+
+fn g() -> Text?:
+    None
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[Int]) -> Int:
+    v.first().unwrap_or(0)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> Map[Text, Int]:
+    let m: Map[Text, Int] = std.map.new()
+    m.insert("a", 1)
+    m
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(m: Map[Int, Text], k: Int) -> Text:
+    match m.get(k):
+        case Some(s):
+            s
+        case None:
+            ""
+"#,
     );
 }
 
 #[test]
 fn option_and_map_mistakes_are_reported() {
     assert_err(
-        "fn f(o: Option<i32>) -> i32 { match o { Some(n) => n } }",
+        r#"
+fn f(o: i32?) -> i32:
+    match o:
+        case Some(n):
+            n
+"#,
         "missing `None`",
     );
     assert_err(
-        "fn f(o: Option<i32>) -> i32 { match o { None => 0 } }",
+        r#"
+fn f(o: i32?) -> i32:
+    match o:
+        case None:
+            0
+"#,
         "missing `Some`",
     );
-    assert_err("fn f() -> Option<i32> { Some(\"x\") }", "mismatched types");
-    assert_err("fn f(m: Map<f64, i64>) -> u64 { m.len() }", "keys must be");
     assert_err(
-        "fn f(m: Map<String, i64>) -> i64 { m.insert(1, 2); 0 }",
+        r#"
+fn f() -> i32?:
+    Some("x")
+"#,
         "mismatched types",
     );
     assert_err(
-        "fn f(o: Option<i32>) -> i32 { o.unwarp() }",
+        r#"
+fn f(m: Map[Float, Int]) -> u64:
+    m.len()
+"#,
+        "keys must be",
+    );
+    assert_err(
+        r#"
+fn f(m: Map[Text, Int]) -> Int:
+    m.insert(1, 2)
+    0
+"#,
+        "mismatched types",
+    );
+    assert_err(
+        r#"
+fn f(o: i32?) -> i32:
+    o.unwarp()
+"#,
         "no method `unwarp`",
     );
     assert_err(
-        "fn f() -> Map<String, i64> { std::map::new(1) }",
+        r#"
+fn f() -> Map[Text, Int]:
+    std.map.new(1)
+"#,
         "expected 0 argument",
     );
     assert_err(
-        "fn f(n: i32) -> i32 { match n { Some(x) => x, _ => 0 } }",
+        r#"
+fn f(n: i32) -> i32:
+    match n:
+        case Some(x):
+            x
+        case _:
+            0
+"#,
         "need an `Option`",
     );
 }
@@ -967,57 +2217,139 @@ fn option_and_map_mistakes_are_reported() {
 #[test]
 fn closures_cannot_assign_to_captured_variables() {
     assert_err(
-        "fn f() -> i64 { let mut n = 0; let inc = |d: i64| { n += d; }; inc(1); n }",
+        r#"
+fn f() -> Int:
+    var n = 0
+    fn inc(d: Int):
+        n += d
+    inc(1)
+    n
+"#,
         "cannot assign to `n` from inside a closure",
     );
     // A closure's own variables and shared containers are fine.
-    assert_clean("fn f() -> i64 { let inc = |d: i64| { let mut t = 0; t += d; t }; inc(1) }");
-    assert_clean("fn f(mut v: Vec<i64>) -> i64 { let set = |x: i64| { v[0] = x; }; set(3); v[0] }");
+    assert_clean(
+        r#"
+fn f() -> Int:
+    fn inc(d: Int):
+        var t = 0
+        t += d
+        t
+    inc(1)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[Int]) -> Int:
+    fn set(x: Int):
+        v[0] = x
+    set(3)
+    v[0]
+"#,
+    );
 }
 
 // ---- friendlier syntax -------------------------------------------------------------------------
 
 #[test]
 fn prelude_names_work_without_std() {
-    assert_clean("fn main() { println(\"hi\"); print(\"a\"); }");
-    // A function or variable of the same name wins over the prelude.
-    assert_clean("fn println(s: String) -> i32 { 1 } fn main() -> i32 { println(\"x\") }");
     assert_clean(
-        "struct R { a: i64 } fn f() -> Table<R> { let t: Table<R> = read_csv(\"x.csv\"); t }",
+        r#"
+fn main():
+    print("hi")
+    std.io.print("a")
+"#,
+    );
+    // A function or variable of the same name wins over the prelude.
+    assert_clean(
+        r#"
+fn print(s: Text) -> i32:
+    1
+
+fn main() -> i32:
+    print("x")
+"#,
+    );
+    assert_clean(
+        r#"
+type R:
+    a: Int
+
+fn f() -> Table[R]:
+    let t: Table[R] = read_csv("x.csv")
+    t
+"#,
     );
 }
 
 #[test]
 fn tensor_methods_and_operators_are_checked() {
     assert_clean(
-        "fn f(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> { x.matmul(w).relu().softmax() }",
+        r#"
+fn f(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    x.matmul(w).relu().softmax()
+"#,
     );
     assert_clean(
-        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a * 2.0 + b - a / b }",
+        r#"
+fn f(a: Tensor[f32, 4], b: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    a * 2.0 + b - a / b
+"#,
     );
-    assert_clean("fn f(a: Tensor<f32, [4]>) -> f32 { a.sum() }");
+    assert_clean(
+        r#"
+fn f(a: Tensor[f32, 4]) -> f32:
+    a.sum()
+"#,
+    );
     // The shape rules are the ones of the function forms.
     assert_err(
-        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [5]>) -> Tensor<f32, [4]> { a + b }",
+        r#"
+fn f(a: Tensor[f32, 4], b: Tensor[f32, 5]) -> Tensor[f32, 4]:
+    a + b
+"#,
         "shape",
     );
     assert_err(
-        "fn f(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [4, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w) }",
+        r#"
+fn f(x: Tensor[f32, 2, 3], w: Tensor[f32, 4, 2]) -> Tensor[f32, 2, 2]:
+    x.matmul(w)
+"#,
         "inner dimensions",
     );
-    let e = full("fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a + 1.0 }");
+    let e = full(
+        r#"
+fn f(a: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    a + 1.0
+"#,
+    );
     assert!(e[0].0.contains("cannot apply this operator"), "{e:?}");
     assert!(e[0].1.iter().any(|n| n.contains("two tensors")), "{e:?}");
-    let e = full("fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a / 2.0 }");
+    let e = full(
+        r#"
+fn f(a: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    a / 2.0
+"#,
+    );
     assert!(e[0].1.iter().any(|n| n.contains("reciprocal")), "{e:?}");
 }
 
 #[test]
 fn inline_row_types_replace_throwaway_structs() {
-    let src = "struct Sale { id: i64, units: i64 }
-        fn f(t: Table<Sale>) -> Table<{ units: i64 }> { t.sql(\"SELECT units FROM t\") }
-        fn g(t: Table<{ units: i64 }>) -> u64 { t.len() }
-        fn h(t: Table<Sale>) -> u64 { g(f(t)) }";
+    let src = r#"
+type Sale:
+    id: Int
+    units: Int
+
+fn f(t: Table[Sale]) -> Table[{units: Int}]:
+    t.sql("SELECT units FROM t")
+
+fn g(t: Table[{units: Int}]) -> u64:
+    t.len()
+
+fn h(t: Table[Sale]) -> u64:
+    g(f(t))
+"#;
     assert_clean(src);
     let (hir, _) = check(src);
     // Both mentions of the same columns are one struct.
@@ -1028,34 +2360,87 @@ fn inline_row_types_replace_throwaway_structs() {
             .count(),
         1
     );
-    assert_err("fn f(t: Table<{ a: i64, a: i64 }>) {}", "declared twice");
-    assert_err("fn f(t: Table<{ a: Vec<i64> }>) {}", "column");
-    assert_err("fn f(t: Table<{ }>) {}", "at least one column");
     assert_err(
-        "struct Sale { id: i64 } fn f(t: Table<Sale>) -> Table<{ id: String }> { t.sql(\"SELECT id FROM t\") }
-         fn g(t: Table<Sale>) -> Table<Sale> { f(t) }",
+        r#"
+fn f(t: Table[{a: Int, a: Int}]):
+    pass
+"#,
+        "declared twice",
+    );
+    assert_err(
+        r#"
+fn f(t: Table[{a: List[Int]}]):
+    pass
+"#,
+        "column",
+    );
+    assert_err(
+        r#"
+fn f(t: Table[{}]):
+    pass
+"#,
+        "at least one column",
+    );
+    assert_err(
+        r#"
+type Sale:
+    id: Int
+
+fn f(t: Table[Sale]) -> Table[{id: Text}]:
+    t.sql("SELECT id FROM t")
+
+fn g(t: Table[Sale]) -> Table[Sale]:
+    f(t)
+"#,
         "mismatched types",
     );
 }
 
 #[test]
 fn question_mark_is_checked_against_the_function_result() {
-    assert_clean("fn f(r: Result<i32, String>) -> Result<i32, String> { let x = r?; Ok(x + 1) }");
-    assert_clean("fn f(o: Option<i32>) -> Option<i32> { let x = o?; Some(x + 1) }");
+    assert_clean(
+        r#"
+fn f(r: Result[i32, Text]) -> Result[i32, Text]:
+    let x = r?
+    Ok(x + 1)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(o: i32?) -> i32?:
+    let x = o?
+    Some(x + 1)
+"#,
+    );
     assert_err(
-        "fn f(r: Result<i32, String>) -> i32 { r? }",
+        r#"
+fn f(r: Result[i32, Text]) -> i32:
+    r?
+"#,
         "can only be used in a function that returns `Result`",
     );
     assert_err(
-        "fn f(r: Result<i32, i64>) -> Result<i32, String> { let x = r?; Ok(x) }",
+        r#"
+fn f(r: Result[i32, Int]) -> Result[i32, Text]:
+    let x = r?
+    Ok(x)
+"#,
         "cannot turn the error",
     );
     assert_err(
-        "fn f(o: Option<i32>) -> Result<i32, String> { let x = o?; Ok(x) }",
+        r#"
+fn f(o: i32?) -> Result[i32, Text]:
+    let x = o?
+    Ok(x)
+"#,
         "returns `Option`",
     );
     assert_err(
-        "fn f(n: i32) -> Result<i32, String> { let x = n?; Ok(x) }",
+        r#"
+fn f(n: i32) -> Result[i32, Text]:
+    let x = n?
+    Ok(x)
+"#,
         "needs a `Result` or an `Option`",
     );
 }
@@ -1063,20 +2448,63 @@ fn question_mark_is_checked_against_the_function_result() {
 #[test]
 fn tuples_are_typed() {
     assert_clean(
-        "fn f() -> (i64, String) { (1, \"a\") } fn g() -> i64 { let (n, _) = f(); n + f().0 }",
+        r#"
+fn f() -> (Int, Text):
+    (1, "a")
+
+fn g() -> Int:
+    let n, _ = f()
+    n + f().0
+"#,
     );
-    assert_clean("fn f(p: (bool, i64)) -> i64 { match p { (true, n) => n, (false, _) => 0 } }");
     assert_clean(
-        "fn f(v: Vec<(i64, i64)>) -> i64 { let mut t = 0; for (a, b) in v { t += a * b; } t }",
+        r#"
+fn f(p: (Bool, Int)) -> Int:
+    match p:
+        case (True, n):
+            n
+        case (False, _):
+            0
+"#,
     );
-    assert_err("fn f(p: (i64, String)) -> i64 { p.2 }", "has no part `2`");
-    assert_err("fn f() -> (i64, String) { (1, 2) }", "mismatched types");
+    assert_clean(
+        r#"
+fn f(v: List[(Int, Int)]) -> Int:
+    var t = 0
+    for a, b in v:
+        t += a * b
+    t
+"#,
+    );
     assert_err(
-        "fn f(p: (bool, i64)) -> i64 { match p { (true, n) => n } }",
+        r#"
+fn f(p: (Int, Text)) -> Int:
+    p.2
+"#,
+        "has no part `2`",
+    );
+    assert_err(
+        r#"
+fn f() -> (Int, Text):
+    (1, 2)
+"#,
+        "mismatched types",
+    );
+    assert_err(
+        r#"
+fn f(p: (Bool, Int)) -> Int:
+    match p:
+        case (True, n):
+            n
+"#,
         "non-exhaustive",
     );
     assert_err(
-        "fn f(p: (i64, i64)) -> i64 { let (a, b) = p; a + c }",
+        r#"
+fn f(p: (Int, Int)) -> Int:
+    let a, b = p
+    a + c
+"#,
         "cannot find `c`",
     );
 }
@@ -1084,23 +2512,63 @@ fn tuples_are_typed() {
 #[test]
 fn iterator_methods_are_typed() {
     assert_clean(
-        "fn f(v: Vec<i64>) -> Vec<String> { v.map(|x| f\"{x}\").filter(|s| s.len() > 0) }",
+        r#"
+fn f(v: List[Int]) -> List[Text]:
+    v.map(x => f"{x}").filter(s => s.len() > 0)
+"#,
     );
-    assert_clean("fn f(v: Vec<i64>) -> i64 { v.fold(0, |acc, x| acc + x) }");
-    assert_clean("fn f(v: Vec<i64>) -> Vec<(i64, i64)> { v.enumerate() }");
-    assert_clean("fn f(v: Vec<i64>) -> Option<i64> { v.max() }");
+    assert_clean(
+        r#"
+fn f(v: List[Int]) -> Int:
+    v.fold(0, (acc, x) => acc + x)
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[Int]) -> List[(Int, Int)]:
+    v.enumerate()
+"#,
+    );
+    assert_clean(
+        r#"
+fn f(v: List[Int]) -> Int?:
+    v.max()
+"#,
+    );
     assert_err(
-        "fn f(v: Vec<String>) -> i64 { v.sum() }",
+        r#"
+fn f(v: List[Text]) -> Int:
+    v.sum()
+"#,
         "needs a vector of numbers",
     );
-    assert_err("fn f(v: Vec<i64>) -> bool { v.any(|x| x + 1) }", "bool");
+    assert_err(
+        r#"
+fn f(v: List[Int]) -> Bool:
+    v.any(x => x + 1)
+"#,
+        "Bool",
+    );
 }
 
 #[test]
 fn impl_blocks_are_checked() {
-    let src = "struct P { x: i64 }
-        impl P { fn get(self) -> i64 { self.x } fn make(x: i64) -> P { P { x: x } } fn add(self, n: i64) -> P { Self { x: self.x + n } } }
-        fn f() -> i64 { P::make(1).add(2).get() }";
+    let src = r#"
+type P:
+    x: Int
+
+    fn get(self) -> Int:
+        self.x
+
+    fn make(x: Int) -> P:
+        P(x: x)
+
+    fn add(self, n: Int) -> P:
+        Self(x: self.x + n)
+
+fn f() -> Int:
+    P.make(1).add(2).get()
+"#;
     assert_clean(src);
     let (hir, _) = check(src);
     assert!(
@@ -1108,96 +2576,381 @@ fn impl_blocks_are_checked() {
         "methods are functions named Type::name"
     );
     assert_err(
-        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.y } }",
+        r#"
+type P:
+    x: Int
+
+    fn get(self) -> Int:
+        self.y
+"#,
         "no field `y`",
     );
     assert_err(
-        "impl Nothing { fn f() {} }",
-        "cannot find the struct or enum `Nothing`",
+        r#"
+extend Nothing:
+    fn f():
+        pass
+"#,
+        "cannot find the type or enum `Nothing`",
     );
     assert_err(
-        "struct P { x: i64 } impl P { fn make() -> P { P { x: 1 } } } fn f(p: P) -> P { p.make() }",
+        r#"
+type P:
+    x: Int
+
+    fn make() -> P:
+        P(x: 1)
+
+fn f(p: P) -> P:
+    p.make()
+"#,
         "has no `self` parameter",
     );
     assert_err(
-        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.x } } fn f(p: P) -> i64 { p.get(1) }",
+        r#"
+type P:
+    x: Int
+
+    fn get(self) -> Int:
+        self.x
+
+fn f(p: P) -> Int:
+    p.get(1)
+"#,
         "expected 0 argument",
     );
-    assert_err("fn f() -> Self { 1 }", "only be used inside an `impl`");
     assert_err(
-        "struct P { x: i64 } impl P { fn a(self) {} fn a(self) {} }",
+        r#"
+fn f() -> Self:
+    1
+"#,
+        "only be used inside a `type`",
+    );
+    assert_err(
+        r#"
+type P:
+    x: Int
+
+    fn a(self):
+        pass
+
+    fn a(self):
+        pass
+"#,
         "defined twice",
     );
 }
 
 #[test]
 fn traits_are_checked() {
-    let base = "trait Shape { fn area(self) -> f64; fn name(self) -> String { \"shape\" } }
-        struct Sq { s: f64 }";
+    let base = r#"
+trait Shape:
+    fn area(self) -> Float: ...
+
+    fn name(self) -> Text:
+        "shape"
+
+type Sq:
+    s: Float
+"#;
     assert_clean(&format!(
-        "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ self.s }} }}
-         fn total(v: Vec<Shape>) -> f64 {{ v.map(|x| x.area()).sum() }}
-         fn make() -> Vec<Shape> {{ [Sq {{ s: 1.0 }}] }}"
+        r#"
+{base}
+extend Sq(Shape):
+    fn area(self) -> Float:
+        self.s
+
+fn total(v: List[Shape]) -> Float:
+    v.map(x => x.area()).sum()
+
+fn make() -> List[Shape]:
+    [Sq(s: 1.0)]
+"#
     ));
     assert_err(
-        &format!("{base} impl Shape for Sq {{ fn name(self) -> String {{ \"sq\" }} }}"),
+        &format!(
+            r#"
+{base}
+extend Sq(Shape):
+    fn name(self) -> Text:
+        "sq"
+"#
+        ),
         "is missing the method `area`",
     );
     assert_err(
-        &format!("{base} impl Shape for Sq {{ fn area(self) -> i64 {{ 1 }} }}"),
+        &format!(
+            r#"
+{base}
+extend Sq(Shape):
+    fn area(self) -> Int:
+        1
+"#
+        ),
         "has the signature",
     );
     assert_err(
         &format!(
-            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} fn extra(self) {{}} }}"
+            r#"
+{base}
+extend Sq(Shape):
+    fn area(self) -> Float:
+        1.0
+
+    fn extra(self):
+        pass
+"#
         ),
         "is not a method of the trait `Shape`",
     );
     assert_err(
-        "struct S {} impl Missing for S { fn f(self) {} }",
+        r#"
+type S(Missing):
+    fn f(self):
+        pass
+"#,
         "cannot find the trait `Missing`",
     );
     assert_err(
-        &format!("{base} struct Other {{ x: i64 }} fn f() -> Shape {{ Other {{ x: 1 }} }}"),
+        &format!(
+            r#"
+{base}
+type Other:
+    x: Int
+
+fn f() -> Shape:
+    Other(x: 1)
+"#
+        ),
         "mismatched types",
     );
     assert_err(
         &format!(
-            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} }} fn f(s: Shape) -> f64 {{ s.volume() }}"
+            r#"
+{base}
+extend Sq(Shape):
+    fn area(self) -> Float:
+        1.0
+
+fn f(s: Shape) -> Float:
+    s.volume()
+"#
         ),
         "has no method `volume`",
     );
-    assert_err("fn f() -> i32 ;", "needs a body");
+    assert_err("fn f() -> i32: ...\n", "needs a body");
 }
 
 #[test]
 fn generics_are_checked_and_instantiated() {
-    let base = "trait Named { fn name(self) -> String; }
-        struct Dog { n: String }
-        impl Named for Dog { fn name(self) -> String { self.n } }
-        fn id<T>(x: T) -> T { x }
-        fn greet<T: Named>(x: T) -> String { x.name() }
-        struct Boxed<T> { v: T }
-        enum Maybe<T> { Nothing, Just(T) }";
+    let base = r#"
+trait Named:
+    fn name(self) -> Text: ...
+
+type Dog(Named):
+    n: Text
+
+    fn name(self) -> Text:
+        self.n
+
+fn id[T](x: T) -> T:
+    x
+
+fn greet[T: Named](x: T) -> Text:
+    x.name()
+
+type Boxed[T]:
+    v: T
+
+enum Maybe[T]:
+    Nothing
+    Just(T)
+"#;
     assert_clean(&format!(
-        "{base} fn a() -> String {{ greet(Dog {{ n: \"r\" }}) }}
-         fn b() -> String {{ let m: Maybe<String> = Maybe::Just(id(\"x\")); match m {{ Maybe::Just(s) => s, Maybe::Nothing => \"\" }} }}
-         fn c() -> Boxed<String> {{ Boxed {{ v: \"s\" }} }}"
+        r#"
+{base}
+fn a() -> Text:
+    greet(Dog(n: "r"))
+
+fn b() -> Text:
+    let m: Maybe[Text] = Maybe.Just(id("x"))
+    match m:
+        case Maybe.Just(s):
+            s
+        case Maybe.Nothing:
+            ""
+
+fn c() -> Boxed[Text]:
+    Boxed(v: "s")
+"#
     ));
     assert_err(
-        &format!("{base} fn a() -> i32 {{ greet(3) }}"),
+        &format!(
+            r#"
+{base}
+fn a() -> i32:
+    greet(3)
+"#
+        ),
         "does not implement `Named`",
     );
     assert_err(
-        &format!("{base} fn a() -> i32 {{ let f = id; 0 }}"),
+        &format!(
+            r#"
+{base}
+fn a() -> i32:
+    let f = id
+    0
+"#
+        ),
         "has to be called",
     );
     assert_err(
-        &format!("{base} fn a() -> i32 {{ let m = Maybe::Nothing; 0 }}"),
+        &format!(
+            r#"
+{base}
+fn a() -> i32:
+    let m = Maybe.Nothing
+    0
+"#
+        ),
         "cannot infer the type parameter `T`",
     );
     assert_err(
-        &format!("{base} fn a(b: Boxed<i32, i32>) -> i32 {{ 0 }}"),
+        &format!(
+            r#"
+{base}
+fn a(b: Boxed[i32, i32]) -> i32:
+    0
+"#
+        ),
         "takes 1 type argument",
+    );
+}
+
+#[test]
+fn lowercase_constants_get_a_hint() {
+    let e = {
+        let (ast, _) = telvax_parser::parse(
+            r#"
+fn f() -> Bool:
+    true
+"#,
+        );
+        let (_, diags) = lower(&ast.unwrap());
+        diags
+    };
+    assert!(
+        e.iter()
+            .any(|d| d.notes.iter().any(|n| n.contains("did you mean `True`"))),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn let_is_fixed_and_var_can_change() {
+    assert_clean(
+        r#"
+fn f() -> i32:
+    var x = 1
+    x = x + 1
+    x += 2
+    x
+"#,
+    );
+    assert_err(
+        r#"
+fn f():
+    let x = 1
+    x = 2
+"#,
+        "cannot assign to the immutable variable `x`",
+    );
+    // A plain assignment never declares a name.
+    assert_err(
+        r#"
+fn f():
+    y = 2
+"#,
+        "cannot find `y`",
+    );
+}
+
+#[test]
+fn named_arguments_and_defaults_are_checked() {
+    let decls = r#"
+type Query:
+    text: Text
+    top_k: i32 = 5
+
+fn search(q: Query, limit: i32 = 10, rerank: Bool = False) -> i32:
+    limit
+
+type Box:
+    n: i32
+
+    fn scaled(self, by: i32 = 2, add: i32 = 0) -> i32:
+        self.n * by + add
+"#;
+    assert_clean(&format!(
+        "{decls}\nfn main() -> i32:\n    let q = Query(text: \"x\")\n    let b = Box(n: 1)\n    \
+         search(q) + search(q, rerank: True) + search(rerank: True, q: q, limit: 3) + b.scaled() \
+         + b.scaled(add: 1) + b.scaled(3)\n"
+    ));
+    for (call, needle) in [
+        ("search(q, speed: 1)", "no parameter `speed`"),
+        ("search(q, limit: 1, limit: 2)", "`limit` is given twice"),
+        ("search(limit: 1)", "missing the argument `q`"),
+        ("search(q, limit: \"3\")", "expected `i32`"),
+    ] {
+        assert_err(
+            &format!("{decls}\nfn main() -> i32:\n    let q = Query(text: \"x\")\n    {call}\n"),
+            needle,
+        );
+    }
+    // A missing field without a default is still an error.
+    assert_err(
+        &format!("{decls}\nfn main():\n    let q = Query(top_k: 1)\n"),
+        "text",
+    );
+}
+
+#[test]
+fn names_on_calls_the_program_does_not_define_are_labels() {
+    assert_clean(
+        r#"
+fn main() -> Text:
+    std.text.truncate("hello", n: 2)
+"#,
+    );
+}
+
+#[test]
+fn optional_types_and_inline_tensor_shapes() {
+    assert_clean(
+        r#"
+fn f(o: i32?) -> i32:
+    match o:
+        case Some(n):
+            n
+        case None:
+            0
+
+fn g(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    x.matmul(w)
+"#,
+    );
+    assert_err(
+        r#"
+fn g(x: Tensor[f32, 2, 3], w: Tensor[f32, 4, 4]) -> Tensor[f32, 2, 4]:
+    x.matmul(w)
+"#,
+        "inner dimensions differ",
+    );
+    // The spellings other languages use are corrected.
+    let e = errors("fn f(x: int):\n    pass\n");
+    assert!(
+        e.iter().any(|m| m.contains("cannot find type `int`")),
+        "{e:?}"
     );
 }

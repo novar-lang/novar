@@ -1,24 +1,32 @@
 use lsp_types::Position;
 use telvax_lsp::analysis::{CompletionKind, Snapshot, SymbolKind};
 
-const SRC: &str = r#"import std::http::Status;
-import std::ai::embeddings::OllamaEmbedder;
+const SRC: &str = r#"
+import std.http.Status
+import std.ai.embeddings.OllamaEmbedder
 
-struct Point { x: f64, y: f64 }
-struct Row { id: i64, score: f32, name: String }
+type Point:
+    x: Float
+    y: Float
 
-let embedder = OllamaEmbedder::new("nomic-embed-text");
+type Row:
+    id: Int
+    score: f32
+    name: Text
 
-fn norm(p: Point) -> f64 { p.x * p.x + p.y * p.y }
+let embedder = OllamaEmbedder.new("nomic-embed-text")
 
-fn demo(t: Table<Row>, v: Vec<i32>) -> f64 {
-    let origin = Point { x: 0.0, y: 0.0 };
-    let mut total = 0.0;
-    let count = 3;
-    for r in t { total += r.score; }
-    let n = norm(origin);
+fn norm(p: Point) -> Float:
+    p.x * p.x + p.y * p.y
+
+fn demo(t: Table[Row], v: List[i32]) -> Float:
+    let origin = Point(x: 0.0, y: 0.0)
+    var total = 0.0
+    let count = 3
+    for r in t:
+        total += r.score
+    let n = norm(origin)
     n
-}
 "#;
 
 fn snap() -> Snapshot {
@@ -40,7 +48,7 @@ fn a_valid_file_has_no_diagnostics() {
 
 #[test]
 fn diagnostics_point_at_the_error() {
-    let s = Snapshot::analyze("fn f() -> i32 {\n    \"oops\"\n}\n".into());
+    let s = Snapshot::analyze("fn f() -> i32:\n    \"oops\"\n".into());
     assert_eq!(s.diagnostics.len(), 1);
     let r = s.index.range(&s.diagnostics[0].span);
     assert_eq!(
@@ -50,15 +58,15 @@ fn diagnostics_point_at_the_error() {
     assert!(
         s.diagnostics[0]
             .message
-            .contains("expected `i32`, found `String`")
+            .contains("expected `i32`, found `Text`")
     );
 
     // Syntax errors are reported too, and the rest of the file is still analysed.
-    let s = Snapshot::analyze("fn a() { let x = ; }\nfn b() -> i32 { 1 }\n".into());
+    let s = Snapshot::analyze("fn a():\n    let x =\n\nfn b() -> i32:\n    1\n".into());
     assert!(
         s.diagnostics
             .iter()
-            .any(|d| s.index.range(&d.span).start.line == 0)
+            .any(|d| s.index.range(&d.span).start.line == 1)
     );
     assert!(s.symbols().iter().any(|sym| sym.name == "b"));
 }
@@ -66,34 +74,38 @@ fn diagnostics_point_at_the_error() {
 #[test]
 fn hover_shows_types() {
     let s = snap();
-    let (text, _) = s.hover(at(&s, "origin);", 1)).unwrap();
+    let (text, _) = s.hover(at(&s, "origin = ", 1)).unwrap();
     assert!(text.contains("let origin: Point"), "{text}");
     let (text, _) = s.hover(at(&s, "norm(origin)", 1)).unwrap();
-    assert!(text.contains("fn norm(p: Point) -> f64"), "{text}");
+    assert!(text.contains("fn norm(p: Point) -> Float"), "{text}");
     let (text, _) = s.hover(at(&s, "r.score", 3)).unwrap();
     assert!(text.contains("f32"), "{text}");
     let (text, _) = s.hover(at(&s, "total = 0.0", 1)).unwrap();
-    assert!(text.contains("let mut total: f32"), "{text}");
-    let (text, _) = s.hover(at(&s, "struct Point", 8)).unwrap();
-    assert!(text.contains("x: f64") && text.contains("y: f64"), "{text}");
+    assert!(text.contains("var total: f32"), "{text}");
+    let (text, _) = s.hover(at(&s, "type Point", 8)).unwrap();
+    assert!(
+        text.contains("x: Float") && text.contains("y: Float"),
+        "{text}"
+    );
     assert!(s.hover(0).is_none() || s.hover(0).is_some());
 }
 
 #[test]
 fn definitions() {
     let s = snap();
-    // A call jumps to the function's name, a variable to its `let`, a struct literal to the struct.
+    // A call jumps to the function's name, a variable to where it is declared, a construction to
+    // the type.
     let def = s.definition(at(&s, "norm(origin)", 1)).unwrap();
     assert_eq!(&s.text[def.clone()], "norm");
     assert!(s.text[..def.start].ends_with("fn "));
     let def = s.definition(at(&s, "(origin)", 2)).unwrap();
     assert_eq!(&s.text[def.clone()], "origin");
     assert!(def.end < at(&s, "(origin)", 0));
-    let def = s.definition(at(&s, "Point { x: 0.0", 2)).unwrap();
+    let def = s.definition(at(&s, "Point(x: 0.0", 2)).unwrap();
     assert_eq!(&s.text[def.clone()], "Point");
-    assert!(s.text[..def.start].ends_with("struct "));
+    assert!(s.text[..def.start].ends_with("type "));
     assert!(
-        s.definition(at(&s, "0.0;", 1)).is_none(),
+        s.definition(at(&s, "0.0)", 1)).is_none(),
         "literals have no definition"
     );
 }
@@ -178,8 +190,7 @@ fn complete_after_edit(before: &str, typed: &str) -> Vec<telvax_lsp::analysis::C
 
 #[test]
 fn completes_fields_after_a_dot() {
-    let src =
-        "struct Point { x: f64, y: f64 }\nfn f(p: Point) -> f64 {\n    /*here*/\n    0.0\n}\n";
+    let src = "type Point:\n    x: Float\n    y: Float\n\nfn f(p: Point) -> Float:\n    /*here*/\n    0.0\n";
     let items = complete_after_edit(src, "p.");
     assert_eq!(labels(&items), ["x", "y"]);
     assert!(items.iter().all(|c| c.kind == CompletionKind::Field));
@@ -189,7 +200,7 @@ fn completes_fields_after_a_dot() {
 
 #[test]
 fn completes_table_columns_and_methods() {
-    let src = "struct Row { id: i64, score: f32 }\nfn f(t: Table<Row>) -> u64 {\n    /*here*/\n    0\n}\n";
+    let src = "type Row:\n    id: Int\n    score: f32\n\nfn f(t: Table[Row]) -> u64:\n    /*here*/\n    0\n";
     let items = complete_after_edit(src, "t.");
     let l = labels(&items);
     assert!(
@@ -205,7 +216,7 @@ fn completes_table_columns_and_methods() {
 
 #[test]
 fn completes_through_chains_and_strings() {
-    let src = "struct W { name: String, p: P }\nstruct P { x: f64 }\nfn f(w: W) -> f64 {\n    /*here*/\n    0.0\n}\n";
+    let src = "type P:\n    x: Float\n\ntype W:\n    name: Text\n    p: P\n\nfn f(w: W) -> Float:\n    /*here*/\n    0.0\n";
     assert_eq!(labels(&complete_after_edit(src, "w.p.")), ["x"]);
     let items = complete_after_edit(src, "w.name.");
     let s = labels(&items);
@@ -214,7 +225,7 @@ fn completes_through_chains_and_strings() {
 
 #[test]
 fn completes_std_paths() {
-    let items = complete_in("fn f() { std::|");
+    let items = complete_in("fn f():\n    std.|");
     let l = labels(&items);
     assert!(
         l.contains(&"text")
@@ -223,34 +234,44 @@ fn completes_std_paths() {
             && l.contains(&"collect"),
         "{l:?}"
     );
-    let items = complete_in("fn f() { std::text::tr|");
+    let items = complete_in("fn f():\n    std.text.tr|");
     assert_eq!(labels(&items), ["trim", "truncate"]);
     let items = complete_after_edit(
-        "import std::db::pgvector::PgVectorClient;\nfn f() {\n    /*here*/\n}\n",
-        "PgVectorClient::",
+        "from std.db.pgvector import PgVectorClient\n\nfn f():\n    /*here*/\n    pass\n",
+        "PgVectorClient.",
     );
     assert_eq!(labels(&items), ["connect"]);
-    assert!(complete_in("fn f() { nope::|").is_empty());
+    assert!(complete_in("fn f():\n    nope.|").is_empty());
 }
 
 #[test]
 fn completes_names_in_scope() {
-    let src = "struct Point { x: f64 }\nfn helper() -> i32 { 1 }\nfn f(alpha: i32) -> i32 {\n    let beta = 2;\n    |\n    0\n}\n";
+    let src = "type Point:\n    x: Float\n\nfn helper() -> i32:\n    1\n\nfn f(alpha: i32) -> i32:\n    let beta = 2\n    |\n    0\n";
     let l = complete_in(src);
     let names = labels(&l);
     for want in [
-        "alpha", "beta", "helper", "Point", "let", "return", "std", "i32",
+        "alpha", "beta", "helper", "Point", "fn", "let", "var", "return", "std", "i32", "Int",
     ] {
         assert!(names.contains(&want), "missing {want}: {names:?}");
     }
     let narrowed = complete_in(&src.replace('|', "he|"));
     assert_eq!(labels(&narrowed), ["helper"]);
-    assert_eq!(labels(&complete_in("@|\nfn f() {}")), ["endpoint"]);
+    assert_eq!(
+        labels(&complete_in("@|\nfn f():\n    pass\n")),
+        ["endpoint"]
+    );
 }
 
 #[test]
 fn positions_are_utf16() {
-    let s = Snapshot::analyze("fn f() -> i32 { let s = \"é😀\"; \"x\" }".into());
+    let s = Snapshot::analyze(
+        r#"
+fn f() -> i32:
+    let s = "é😀"
+    "x"
+"#
+        .into(),
+    );
     let d = &s.diagnostics[0];
     let r = s.index.range(&d.span);
     // The emoji counts as two UTF-16 units, so the column differs from the byte offset.
