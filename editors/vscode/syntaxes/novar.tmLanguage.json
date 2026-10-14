@@ -68,7 +68,7 @@
       "patterns": [
         {
           "name": "keyword.control.novar",
-          "match": "\\b(?:if|else|for|while|in|return|break|continue)\\b"
+          "match": "\\b(?:if|else|for|while|in|return|break|continue|match)\\b"
         },
         {
           "name": "storage.modifier.novar",
@@ -94,7 +94,7 @@
           }
         },
         {
-          "match": "\\b(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.struct.novar" },
             "2": { "name": "entity.name.type.struct.novar" }

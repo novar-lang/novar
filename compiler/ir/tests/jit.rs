@@ -886,3 +886,10 @@ fn break_outside_a_loop_is_an_error() {
         "{msgs:?}"
     );
 }
+
+#[test]
+fn enums_are_reported_as_unsupported_natively() {
+    let h = hir("enum E { A, B } fn f() -> i32 { match E::A { E::A => 1, E::B => 2 } }");
+    let err = jit_call(&h, "f", &[]).unwrap_err().to_string();
+    assert!(err.contains("enums and `match`"), "{err}");
+}

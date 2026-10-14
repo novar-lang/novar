@@ -812,6 +812,22 @@ impl Collector {
                 self.expr(index);
             }
             ExprKind::Array(items) => items.iter().for_each(|i| self.expr(i)),
+            ExprKind::EnumCtor { args, .. } => args.iter().for_each(|a| self.expr(a)),
+            ExprKind::Match { scrutinee, arms } => {
+                self.expr(scrutinee);
+                for arm in arms {
+                    self.pattern(&arm.pat);
+                    self.expr(&arm.body);
+                }
+            }
+        }
+    }
+
+    fn pattern(&mut self, p: &hir::Pat) {
+        match p {
+            hir::Pat::Bind(l) => self.local(l),
+            hir::Pat::Variant { args, .. } => args.iter().for_each(|a| self.pattern(a)),
+            hir::Pat::Wild | hir::Pat::Lit(_) => {}
         }
     }
 }
