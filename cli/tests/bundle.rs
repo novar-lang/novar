@@ -19,6 +19,11 @@ fn scratch(name: &str) -> PathBuf {
     dir.join(name)
 }
 
+/// A scratch path for an executable written by `novar build --serve` (`.exe` on Windows).
+fn scratch_exe(name: &str) -> PathBuf {
+    scratch(&format!("{name}{}", std::env::consts::EXE_SUFFIX))
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -66,7 +71,7 @@ fn wait_for(port: u16) {
 fn a_bundled_binary_serves_its_program() {
     let src = scratch("hello.nv");
     std::fs::write(&src, APP).unwrap();
-    let exe = scratch("hello-service");
+    let exe = scratch_exe("hello-service");
     let out = Command::new(NOVAR)
         .args(["build", "--serve"])
         .arg(&src)
@@ -102,7 +107,7 @@ fn a_bundled_binary_serves_its_program() {
 fn the_port_can_come_from_the_environment() {
     let src = scratch("env.nv");
     std::fs::write(&src, APP).unwrap();
-    let exe = scratch("env-service");
+    let exe = scratch_exe("env-service");
     assert!(
         Command::new(NOVAR)
             .args(["build", "--serve"])
@@ -134,7 +139,7 @@ fn programs_without_endpoints_are_rejected() {
         .args(["build", "--serve"])
         .arg(&src)
         .arg("-o")
-        .arg(scratch("noep"))
+        .arg(scratch_exe("noep"))
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -183,7 +188,7 @@ fn a_multi_file_program_is_bundled_with_all_its_modules() {
         "pub fn shout(s: String) -> String { f\"{s}!\" }\n",
     )
     .unwrap();
-    let exe = scratch("multi-service");
+    let exe = scratch_exe("multi-service");
     let out = Command::new(NOVAR)
         .args(["build", "--serve"])
         .arg(dir.join("main.nv"))

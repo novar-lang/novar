@@ -124,7 +124,11 @@ pub fn build_serve(file: &str, flags: &[&str]) -> Result<(), CliError> {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("service");
-    let out = out.unwrap_or_else(|| stem.to_string());
+    let mut out = out.unwrap_or_else(|| stem.to_string());
+    // Windows only runs files that end in `.exe`.
+    if !std::env::consts::EXE_SUFFIX.is_empty() && !out.ends_with(std::env::consts::EXE_SUFFIX) {
+        out.push_str(std::env::consts::EXE_SUFFIX);
+    }
     write_bundle(&checked.bundle, Path::new(&out))
         .or_else(|e| failed(format!("cannot write `{out}`: {e}")))?;
     eprintln!("wrote {out}  (single binary; run it with --port N, --host H, --seed FILE, --live)");
