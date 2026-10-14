@@ -27,6 +27,7 @@ project = ["dep:novar_pkg"]
 [dependencies]
 lsp-server = "0.7"
 lsp-types = "0.97"
+novar_fmt = { version = "0.0.1", path = "../formatter" }
 novar_diagnostics = { version = "0.0.1", path = "../../compiler/diagnostics" }
 novar_hir = { version = "0.0.1", path = "../../compiler/semantic" }
 novar_modules = { version = "0.0.1", path = "../../compiler/modules" }

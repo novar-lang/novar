@@ -9,7 +9,8 @@ use lsp_types::notification::{
     PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRequest, Request as _,
+    Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, InlayHintRequest,
+    Request as _,
 };
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
@@ -18,7 +19,7 @@ use lsp_types::{
     HoverParams, HoverProviderCapability, InitializeParams, InlayHint, InlayHintKind,
     InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind, OneOf,
     PublishDiagnosticsParams, ServerCapabilities, SymbolKind, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri,
+    TextDocumentSyncKind, TextEdit, Uri,
 };
 
 use crate::analysis::{CompletionKind, Snapshot, SymbolKind as Sym};
@@ -32,6 +33,7 @@ pub fn capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         inlay_hint_provider: Some(OneOf::Left(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec![".".into(), ":".into(), "@".into()]),
             ..CompletionOptions::default()
@@ -297,6 +299,21 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 })
                 .collect();
             reply(id, DocumentSymbolResponse::Nested(symbols))
+        }
+        Formatting::METHOD => {
+            let p = params!(lsp_types::DocumentFormattingParams);
+            let Some(snap) = state.docs.get(&p.text_document.uri) else {
+                return unknown(id);
+            };
+            // Source that does not tokenise is left alone rather than reported as an error.
+            let edits: Vec<TextEdit> = match novar_fmt::format(&snap.text) {
+                Ok(formatted) if formatted != snap.text => vec![TextEdit {
+                    range: snap.index.range(&(0..snap.text.len())),
+                    new_text: formatted,
+                }],
+                _ => Vec::new(),
+            };
+            reply(id, edits)
         }
         InlayHintRequest::METHOD => {
             let p = params!(InlayHintParams);

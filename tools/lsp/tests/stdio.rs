@@ -115,6 +115,7 @@ fn advertises_its_capabilities() {
     assert_eq!(caps["hoverProvider"], true);
     assert_eq!(caps["definitionProvider"], true);
     assert_eq!(caps["inlayHintProvider"], true);
+    assert_eq!(caps["documentFormattingProvider"], true);
     assert_eq!(caps["textDocumentSync"], 1);
     assert!(
         caps["completionProvider"]["triggerCharacters"]
@@ -192,6 +193,13 @@ fn answers_editor_requests() {
     assert_eq!(hints[0]["label"], ": Point");
     assert_eq!(hints[0]["position"], json!({"line": 3, "character": 14}));
 
+    // The sample is already formatted, so there is nothing to change.
+    let fmt = c.request(
+        "textDocument/formatting",
+        json!({"textDocument": {"uri": URI}, "options": {"tabSize": 4, "insertSpaces": true}}),
+    );
+    assert_eq!(fmt["result"], json!([]));
+
     let items = c.request("textDocument/completion", at(4, 9));
     let labels: Vec<_> = items["result"]
         .as_array()
@@ -236,4 +244,22 @@ fn unknown_requests_get_an_error_not_a_hang() {
     initialize(&mut c);
     let r = c.request("textDocument/rename", json!({}));
     assert_eq!(r["error"]["code"], -32601);
+}
+
+#[test]
+fn formats_a_messy_document() {
+    let mut c = Client::start();
+    initialize(&mut c);
+    open(&mut c, "fn main()->i32{let x=1;x+2}\n");
+    let r = c.request(
+        "textDocument/formatting",
+        json!({"textDocument": {"uri": URI}, "options": {"tabSize": 4, "insertSpaces": true}}),
+    );
+    let edits = r["result"].as_array().unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0]["newText"],
+        "fn main() -> i32 { let x = 1; x + 2 }\n"
+    );
+    c.request("shutdown", json!(null));
 }
