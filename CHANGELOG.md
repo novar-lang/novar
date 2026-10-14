@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.0.2
+
+### Language
+* `break` and `continue` in `while` and `for` loops (interpreter and native backend).
+* Enums with tuple and unit variants, and `match` over enums, `Result`, integers, strings and
+  booleans, with exhaustiveness checking. Enums cross module boundaries and travel as JSON.
+  They run in the interpreter; the native backend reports them as unsupported.
+
+### Tools
+* `novar fmt [--check]`: a token-based formatter that keeps comments and your line breaks. The
+  language server formats documents too.
+* `novar lint [--deny-warnings]`: unused variables, needless `mut`, unused private functions.
+* `novar --version` and `--help`.
+
+### Platforms and releases
+* Windows: CI builds and tests it, releases include a `.zip`, and `scripts/install.ps1` installs
+  it. Windows builds have not been run on a real machine by the author.
+* Release binaries for Linux arm64 and macOS Intel; pushing a higher `version` to `main` tags and
+  publishes a release automatically.
+* Dependabot covers Cargo, pip, npm and GitHub Actions; the `time` advisories are fixed (Rust
+  1.88 or newer is required).
+
+### Measurements and docs
+* The RAG endpoint was measured against a real Ollama and PostgreSQL+pgvector: about 1.9 ms mean
+  overhead (`benchmarks/README.md`).
+* `CONTRIBUTING.md`, issue templates, a CI job that builds the generated Dockerfile (not run yet).
+
 ## 0.0.1 - first public alpha
 
 A first version for trying the language out. Expect rough edges and breaking changes.

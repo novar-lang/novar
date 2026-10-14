@@ -2626,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "novar_accel"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "inkwell",
  "novar_diagnostics",
@@ -2636,11 +2636,11 @@ dependencies = [
 
 [[package]]
 name = "novar_ast"
-version = "0.0.1"
+version = "0.0.2"
 
 [[package]]
 name = "novar_bench"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_hir",
  "novar_parser",
@@ -2650,7 +2650,7 @@ dependencies = [
 
 [[package]]
 name = "novar_cli"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "novar_accel",
@@ -2674,7 +2674,7 @@ dependencies = [
 
 [[package]]
 name = "novar_cluster"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "novar_hir",
@@ -2688,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "novar_codegen"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "inkwell",
  "libc",
@@ -2703,21 +2703,21 @@ dependencies = [
 
 [[package]]
 name = "novar_diagnostics"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "ariadne",
 ]
 
 [[package]]
 name = "novar_fmt"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_lexer",
 ]
 
 [[package]]
 name = "novar_hir"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_ast",
  "novar_diagnostics",
@@ -2726,14 +2726,14 @@ dependencies = [
 
 [[package]]
 name = "novar_lexer"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "novar_lint"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_diagnostics",
  "novar_hir",
@@ -2742,11 +2742,12 @@ dependencies = [
 
 [[package]]
 name = "novar_lsp"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "lsp-server",
  "lsp-types",
  "novar_diagnostics",
+ "novar_fmt",
  "novar_hir",
  "novar_modules",
  "novar_parser",
@@ -2757,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "novar_mlir"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "melior",
  "novar_diagnostics",
@@ -2768,7 +2769,7 @@ dependencies = [
 
 [[package]]
 name = "novar_modules"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_ast",
  "novar_diagnostics",
@@ -2780,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "novar_parser"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chumsky",
  "novar_ast",
@@ -2790,7 +2791,7 @@ dependencies = [
 
 [[package]]
 name = "novar_pkg"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "flate2",
  "novar_ast",
@@ -2808,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "novar_runtime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "arrow",
  "bytemuck",
@@ -2827,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "novar_server"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "http-body-util",
@@ -2840,7 +2841,7 @@ dependencies = [
 
 [[package]]
 name = "novar_wasm"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "novar_diagnostics",
  "novar_hir",
