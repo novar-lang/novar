@@ -1,13 +1,22 @@
 ---
 name: Bug report
-about: Something is broken
+about: Something is broken or behaves unexpectedly
 labels: bug
 ---
 
 **What happened**
 
-**Expected**
+**What you expected**
 
-**Reproduction** (minimal `.nv` snippet)
+**Smallest `.nv` program that shows it**
 
-**Version / OS**
+```novar
+
+```
+
+**Command and output**
+
+```
+```
+
+**Version and system** (`novar --version`, OS, how you installed)
