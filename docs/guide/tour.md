@@ -183,3 +183,31 @@ fn demo(text: String) -> i64 {
   so assigning to a variable from outside is a compile error; shared `Vec` and `Map` values can
   still be changed from inside one.
 * These run in the interpreter; the native backend does not compile them yet.
+
+## Tables and tensors, the short way
+
+```novar
+struct Sale { id: i64, region: String, units: i64, price: f64 }
+
+fn main() {
+    let sales: Table<Sale> = read_csv("sales.csv");
+    println(f"mean price: {sales.price.mean()}");
+
+    let by_region: Table<{ region: String, revenue: f64 }> =
+        sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region");
+    for row in by_region { println(f"{row.region}: {row.revenue}"); }
+}
+```
+
+* `println`, `print`, `read_csv` and `read_parquet` need no `std::` prefix.
+* Methods on tensors are the `std::tensor` functions: `x.matmul(w).relu().softmax()`,
+  `sales.price.mean()`. A table has `sql`. They are the same calls underneath, so
+  `std::tensor::relu(x)` still works.
+* Operators on tensors: `a + b`, `a - b`, `a * b`, `a / b` (same shape) and `a * k`, `k * a` to
+  scale by a number.
+* `Table<{ region: String, revenue: f64 }>` writes the row type in place; no throwaway `struct` for
+  the result of a query. The same columns mean the same type everywhere.
+* `fn main()` may return nothing.
+
+See `examples/dataframe/`. The pandas version of the same program is about as long, but the
+Novar one checks the column names and types before it runs.

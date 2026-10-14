@@ -974,3 +974,66 @@ fn closures_cannot_assign_to_captured_variables() {
     assert_clean("fn f() -> i64 { let inc = |d: i64| { let mut t = 0; t += d; t }; inc(1) }");
     assert_clean("fn f(mut v: Vec<i64>) -> i64 { let set = |x: i64| { v[0] = x; }; set(3); v[0] }");
 }
+
+// ---- friendlier syntax -------------------------------------------------------------------------
+
+#[test]
+fn prelude_names_work_without_std() {
+    assert_clean("fn main() { println(\"hi\"); print(\"a\"); }");
+    // A function or variable of the same name wins over the prelude.
+    assert_clean("fn println(s: String) -> i32 { 1 } fn main() -> i32 { println(\"x\") }");
+    assert_clean(
+        "struct R { a: i64 } fn f() -> Table<R> { let t: Table<R> = read_csv(\"x.csv\"); t }",
+    );
+}
+
+#[test]
+fn tensor_methods_and_operators_are_checked() {
+    assert_clean(
+        "fn f(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> { x.matmul(w).relu().softmax() }",
+    );
+    assert_clean(
+        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a * 2.0 + b - a / b }",
+    );
+    assert_clean("fn f(a: Tensor<f32, [4]>) -> f32 { a.sum() }");
+    // The shape rules are the ones of the function forms.
+    assert_err(
+        "fn f(a: Tensor<f32, [4]>, b: Tensor<f32, [5]>) -> Tensor<f32, [4]> { a + b }",
+        "shape",
+    );
+    assert_err(
+        "fn f(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [4, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w) }",
+        "inner dimensions",
+    );
+    let e = full("fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a + 1.0 }");
+    assert!(e[0].0.contains("cannot apply this operator"), "{e:?}");
+    assert!(e[0].1.iter().any(|n| n.contains("two tensors")), "{e:?}");
+    let e = full("fn f(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a / 2.0 }");
+    assert!(e[0].1.iter().any(|n| n.contains("reciprocal")), "{e:?}");
+}
+
+#[test]
+fn inline_row_types_replace_throwaway_structs() {
+    let src = "struct Sale { id: i64, units: i64 }
+        fn f(t: Table<Sale>) -> Table<{ units: i64 }> { t.sql(\"SELECT units FROM t\") }
+        fn g(t: Table<{ units: i64 }>) -> u64 { t.len() }
+        fn h(t: Table<Sale>) -> u64 { g(f(t)) }";
+    assert_clean(src);
+    let (hir, _) = check(src);
+    // Both mentions of the same columns are one struct.
+    assert_eq!(
+        hir.structs
+            .iter()
+            .filter(|s| s.name.starts_with('{'))
+            .count(),
+        1
+    );
+    assert_err("fn f(t: Table<{ a: i64, a: i64 }>) {}", "declared twice");
+    assert_err("fn f(t: Table<{ a: Vec<i64> }>) {}", "column");
+    assert_err("fn f(t: Table<{ }>) {}", "at least one column");
+    assert_err(
+        "struct Sale { id: i64 } fn f(t: Table<Sale>) -> Table<{ id: String }> { t.sql(\"SELECT id FROM t\") }
+         fn g(t: Table<Sale>) -> Table<Sale> { f(t) }",
+        "mismatched types",
+    );
+}

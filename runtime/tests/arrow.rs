@@ -421,3 +421,63 @@ fn per_channel_quantization_is_more_accurate_when_columns_differ() {
     // Four bits cost accuracy, but each column still has its own scale.
     assert!(int4 > per_channel && int4 < 0.5, "int4 error {int4}");
 }
+
+#[test]
+fn tensor_methods_and_operators_match_the_function_forms() {
+    let src = "
+        fn methods(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w).relu() }
+        fn functions(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::relu(std::tensor::matmul(x, w)) }
+        fn chain(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w).sigmoid().scale(2.0) }
+        fn total(x: Tensor<f32, [2, 3]>) -> f32 { x.sum() + x.mean() }
+        fn ops(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> { (a + b) * a - b / a }
+        fn ops_by_hand(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> {
+            std::tensor::sub(std::tensor::mul(std::tensor::add(a, b), a), std::tensor::div(b, a))
+        }
+        fn scaled(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a * 3.0 + a * 0.5 }
+        fn flipped(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { 2.0 * a }
+    ";
+    let x = f32s(&[2, 3], &[1.0, -2.0, 3.0, -4.0, 5.0, -6.0]);
+    let w = f32s(&[3, 2], &[0.5, -1.0, 1.5, 2.0, -0.25, 1.0]);
+    let get = |f: &str, args: Vec<Value>| tensor(run(src, f, args)).to_f32_vec();
+    assert_eq!(
+        get("methods", vec![x.clone(), w.clone()]),
+        get("functions", vec![x.clone(), w.clone()])
+    );
+    assert_eq!(get("chain", vec![x.clone(), w.clone()]).len(), 4);
+    assert!(float(run(src, "total", vec![x])) != 0.0);
+
+    let a = f32s(&[4], &[1.0, 2.0, 4.0, 8.0]);
+    let b = f32s(&[4], &[2.0, 4.0, 8.0, 16.0]);
+    assert_eq!(
+        get("ops", vec![a.clone(), b.clone()]),
+        get("ops_by_hand", vec![a.clone(), b])
+    );
+    assert_eq!(get("scaled", vec![a.clone()]), vec![3.5, 7.0, 14.0, 28.0]);
+    assert_eq!(get("flipped", vec![a]), vec![2.0, 4.0, 8.0, 16.0]);
+}
+
+#[test]
+fn inline_row_types_prelude_and_table_methods() {
+    let src = "
+        struct Sale { id: i64, region: String, units: i64 }
+        fn totals(t: Table<Sale>) -> Table<{ region: String, units: i64 }> {
+            t.sql(\"SELECT region, SUM(units) AS units FROM t GROUP BY region ORDER BY region\")
+        }
+        fn count(t: Table<{ region: String, units: i64 }>) -> u64 { t.len() }
+        fn run_it(t: Table<Sale>) -> u64 { count(totals(t)) }
+        fn shout() { println(\"hello\"); }
+    ";
+    let interp = load(src);
+    let out = interp
+        .call_json(
+            "run_it",
+            &[json!([
+                {"id": 1, "region": "n", "units": 4},
+                {"id": 2, "region": "s", "units": 5},
+                {"id": 3, "region": "n", "units": 6},
+            ])],
+        )
+        .unwrap();
+    assert_eq!(out, json!(2));
+    interp.call("shout", vec![]).unwrap();
+}

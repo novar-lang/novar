@@ -1,0 +1,16 @@
+struct Sale { id: i64, region: String, units: i64, price: f64 }
+
+fn main() {
+    let sales: Table<Sale> = read_csv("examples/dataframe/sales.csv");
+    println(f"rows: {sales.len()}");
+    println(f"mean price: {sales.price.mean()}");
+
+    let by_region: Table<{ region: String, revenue: f64 }> =
+        sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC");
+    for row in by_region {
+        println(f"{row.region}: {row.revenue}");
+    }
+
+    let big: Table<Sale> = sales.sql("SELECT * FROM t WHERE units >= 9");
+    println(f"big sales: {big.len()}");
+}

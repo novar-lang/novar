@@ -140,6 +140,8 @@ pub enum TypeArg {
     Type(Type),
     /// Tensor shape such as `[768]` or `[N, 4]`.
     Shape(Vec<Dim>),
+    /// An inline row type: `Table<{ region: String, revenue: f64 }>`.
+    Row(Vec<Field>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

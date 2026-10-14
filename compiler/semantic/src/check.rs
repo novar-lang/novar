@@ -23,6 +23,8 @@ pub(crate) struct Checker {
     struct_fields: HashMap<String, Vec<(String, Ty)>>,
     /// Enum name -> its variants and their payload types.
     enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
+    /// Row types written inline (`Table<{ a: i64 }>`), turned into structs named by their text.
+    anon_structs: Vec<hir::StructDef>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
     globals: HashMap<String, Ty>,
     scopes: Vec<HashMap<String, (LocalId, Ty, bool)>>,
@@ -44,6 +46,49 @@ pub(crate) fn lower(program: &ast::Program) -> (hir::Program, Vec<Diagnostic>) {
     let mut c = Checker::default();
     let out = c.run(program);
     (out, c.diags)
+}
+
+/// The std module whose functions are available as methods on a value of type `ty`.
+fn method_module(ty: &Ty, name: &str) -> Option<&'static str> {
+    match ty {
+        Ty::Tensor { .. }
+            if matches!(
+                name,
+                "add"
+                    | "sub"
+                    | "mul"
+                    | "div"
+                    | "scale"
+                    | "relu"
+                    | "sigmoid"
+                    | "softmax"
+                    | "sum"
+                    | "mean"
+                    | "argmax"
+                    | "dot"
+                    | "matmul"
+                    | "transpose"
+                    | "reshape"
+                    | "to_vec"
+            ) =>
+        {
+            Some("tensor")
+        }
+        Ty::Table(_) if name == "sql" => Some("table"),
+        _ => None,
+    }
+}
+
+/// Names usable without `std::`: the ones nearly every program needs.
+fn prelude(name: &str) -> Option<Vec<String>> {
+    let path: &[&str] = match name {
+        "println" => &["std", "io", "println"],
+        "print" => &["std", "io", "print"],
+        "read_csv" => &["std", "table", "read_csv"],
+        "read_parquet" => &["std", "table", "read_parquet"],
+        _ => return None,
+    };
+    Some(path.iter().map(|s| (*s).to_string()).collect())
 }
 
 /// The candidate closest to `name` by edit distance (at most 2, and well under the name's length).
@@ -273,6 +318,7 @@ impl Checker {
                 out.fns.push(self.lower_fn(f));
             }
         }
+        out.structs.append(&mut self.anon_structs);
         out
     }
 
@@ -296,7 +342,7 @@ impl Checker {
             .iter()
             .filter_map(|a| match a {
                 ast::TypeArg::Type(t) => Some(t),
-                ast::TypeArg::Shape(_) => None,
+                ast::TypeArg::Shape(_) | ast::TypeArg::Row(_) => None,
             })
             .collect();
         let no_args = |this: &mut Self| {
@@ -314,6 +360,12 @@ impl Checker {
         }
         match name {
             "Tensor" => self.resolve_tensor(t),
+            "Table" if matches!(t.args.as_slice(), [ast::TypeArg::Row(_)]) => {
+                let ast::TypeArg::Row(fields) = &t.args[0] else {
+                    unreachable!("matched above")
+                };
+                self.row_type(fields, &t.span)
+            }
             "Table" => match type_args.as_slice() {
                 [inner] if t.args.len() == 1 => match self.resolve_type(inner) {
                     Ty::Struct(sname) => {
@@ -420,6 +472,47 @@ impl Checker {
                 Ty::Unknown
             }
         }
+    }
+
+    /// `Table<{ region: String, revenue: f64 }>`: the row is a struct named by its own text, so
+    /// two tables written with the same columns share one type.
+    fn row_type(&mut self, fields: &[ast::Field], span: &Span) -> Ty {
+        if fields.is_empty() {
+            self.err(span.clone(), "a row type needs at least one column");
+            return Ty::Unknown;
+        }
+        let mut columns: Vec<(String, Ty)> = Vec::new();
+        for f in fields {
+            if columns.iter().any(|(n, _)| *n == f.name.node) {
+                self.err(
+                    f.name.span.clone(),
+                    format!("column `{}` is declared twice", f.name.node),
+                );
+                continue;
+            }
+            let ty = self.resolve_type(&f.ty);
+            columns.push((f.name.node.clone(), ty));
+        }
+        let name = format!(
+            "{{ {} }}",
+            columns
+                .iter()
+                .map(|(n, t)| format!("{n}: {t}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if !self.struct_fields.contains_key(&name) {
+            self.struct_fields.insert(name.clone(), columns.clone());
+            self.anon_structs.push(hir::StructDef {
+                name: name.clone(),
+                name_span: span.clone(),
+                is_pub: false,
+                fields: columns,
+                span: span.clone(),
+            });
+        }
+        self.check_table_schema(&name, span);
+        Ty::Table(name)
     }
 
     /// Every column of a table must be a primitive (number, bool or string).
@@ -1876,6 +1969,10 @@ impl Checker {
         }
         let resolved = if first == "std" {
             Some(names.clone())
+        } else if names.len() == 1
+            && let Some(full) = prelude(first)
+        {
+            Some(full)
         } else {
             self.imports.get(first).map(|base| {
                 let mut full = base.clone();
@@ -2050,6 +2147,8 @@ impl Checker {
                 }
             },
             Ty::Table(s) => match n {
+                // A method call: `call` turns it into `std::table::sql(table, ..)`.
+                "sql" => Ty::Unknown,
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 _ => {
@@ -2117,6 +2216,18 @@ impl Checker {
         }
 
         let callee = self.expr(callee, None);
+        // `t.relu()`, `x.matmul(w)`, `sales.sql("..")`: a method on a tensor or table is the std
+        // function of the same name with the receiver as its first argument.
+        if let hir::ExprKind::Field { base, name } = &callee.kind
+            && let Some(module) = method_module(&self.resolve(&base.ty), name)
+        {
+            let path = ["std", module, name.as_str()].map(String::from).to_vec();
+            if let Some(sig) = stdlib::function(&path.join("::")) {
+                let receiver = (**base).clone();
+                let func = Self::mk(hir::ExprKind::Extern(path), Ty::Unknown, &callee.span);
+                return self.std_call_with(func, sig, Some(receiver), args, expected, span);
+            }
+        }
         if let Some(sig) = self.std_sig(&callee) {
             return self.std_call(callee, sig, args, expected, span);
         }
@@ -2206,8 +2317,25 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
-        let mut checked: Vec<hir::Expr> = Vec::with_capacity(args.len());
-        let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
+        self.std_call_with(callee, sig, None, args, expected, span)
+    }
+
+    /// Like `std_call`; `receiver` is an already checked first argument (`x.f(a)` is `f(x, a)`).
+    fn std_call_with(
+        &mut self,
+        callee: hir::Expr,
+        sig: Sig,
+        receiver: Option<hir::Expr>,
+        args: &[ast::Expr],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> hir::Expr {
+        let mut checked: Vec<hir::Expr> = Vec::with_capacity(args.len() + 1);
+        let mut tys: Vec<Ty> = Vec::with_capacity(args.len() + 1);
+        if let Some(r) = receiver {
+            tys.push(r.ty.clone());
+            checked.push(r);
+        }
         for a in args {
             let hint = (sig.hint)(checked.len(), &tys);
             let a = self.expr(a, hint.as_ref());
@@ -2380,6 +2508,68 @@ impl Checker {
         self.expr(&desugared, expected)
     }
 
+    /// `a + b` and friends when at least one side is a tensor.
+    fn tensor_operator(
+        &mut self,
+        op: ast::BinOp,
+        l: hir::Expr,
+        r: hir::Expr,
+        span: &Span,
+    ) -> hir::Expr {
+        use ast::BinOp::{Add, Div, Mul, Sub};
+        let is_tensor = |t: &Ty| matches!(t, Ty::Tensor { .. });
+        let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
+        let is_number = |t: &Ty| {
+            matches!(t, Ty::Prim(p) if p.is_numeric())
+                || matches!(t, Ty::IntVar(_) | Ty::FloatVar(_))
+        };
+        let (name, args) = match (op, is_tensor(&lt), is_tensor(&rt)) {
+            (Add, true, true) => ("add", vec![l, r]),
+            (Sub, true, true) => ("sub", vec![l, r]),
+            (Mul, true, true) => ("mul", vec![l, r]),
+            (Div, true, true) => ("div", vec![l, r]),
+            (Mul, true, false) if is_number(&rt) => ("scale", vec![l, r]),
+            (Mul, false, true) if is_number(&lt) => ("scale", vec![r, l]),
+            _ => {
+                let hint = match op {
+                    Div => {
+                        "to divide a tensor by a number, multiply by its reciprocal: `t * (1.0 / k)`"
+                    }
+                    _ => {
+                        "operators on tensors need two tensors of the same shape, or `*` with a number"
+                    }
+                };
+                self.diags.push(
+                    Diagnostic::error(
+                        span.clone(),
+                        format!("cannot apply this operator to `{lt}` and `{rt}`"),
+                    )
+                    .with_note(hint),
+                );
+                return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+            }
+        };
+        let path: Vec<String> = ["std", "tensor", name].map(String::from).to_vec();
+        let sig = stdlib::function(&path.join("::")).expect("tensor function exists");
+        let tys: Vec<Ty> = args.iter().map(|a| self.resolve(&a.ty)).collect();
+        let ty = match (sig.check)(&tys) {
+            Ok(t) => t,
+            Err(msg) => {
+                self.err(span.clone(), msg);
+                Ty::Unknown
+            }
+        };
+        let callee = Self::mk(hir::ExprKind::Extern(path), Ty::Unknown, span);
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            ty,
+            span,
+        )
+    }
+
     fn binary(
         &mut self,
         op: ast::BinOp,
@@ -2397,6 +2587,15 @@ impl Checker {
         } else {
             l
         };
+        // Operators on tensors are the elementwise std functions: `a + b`, `a - b`, `a * b`,
+        // `a / b` for tensors of the same shape, and `a * k` / `k * a` to scale by a number.
+        if matches!(op, Add | Sub | Mul | Div) {
+            let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
+            let is_tensor = |t: &Ty| matches!(t, Ty::Tensor { .. });
+            if is_tensor(&lt) || is_tensor(&rt) {
+                return self.tensor_operator(op, l, r, span);
+            }
+        }
         let compatible = self.unify(&l.ty, &r.ty);
         if !compatible {
             let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));

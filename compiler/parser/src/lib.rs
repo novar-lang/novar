@@ -147,7 +147,16 @@ where
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
             .map(TypeArg::Shape);
-        let arg = ty.map(TypeArg::Type).or(shape);
+        let row = ident()
+            .then_ignore(just(Token::Colon))
+            .then(ty.clone())
+            .map(|(name, ty)| Field { name, ty })
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LBrace), just(Token::RBrace))
+            .map(TypeArg::Row);
+        let arg = ty.map(TypeArg::Type).or(shape).or(row);
         let args = arg
             .separated_by(just(Token::Comma))
             .allow_trailing()

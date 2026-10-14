@@ -290,7 +290,10 @@ fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     let value = interp
         .call(func, args.iter().map(|a| parse_arg(a)).collect())
         .or_else(|e| failed(e.to_string()))?;
-    println!("{value}");
+    // A function that returns nothing has nothing to show.
+    if !matches!(value, Value::Unit) {
+        println!("{value}");
+    }
     Ok(())
 }
 

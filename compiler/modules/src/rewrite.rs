@@ -119,8 +119,10 @@ impl<'a> Rewriter<'a> {
             self.rename(&mut t.path[0]);
         }
         for a in &mut t.args {
-            if let TypeArg::Type(inner) = a {
-                self.ty(inner);
+            match a {
+                TypeArg::Type(inner) => self.ty(inner),
+                TypeArg::Row(fields) => fields.iter_mut().for_each(|f| self.ty(&mut f.ty)),
+                TypeArg::Shape(_) => {}
             }
         }
     }
