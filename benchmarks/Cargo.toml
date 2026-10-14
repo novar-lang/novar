@@ -12,7 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_hir = { version = "0.0.2", path = "../compiler/semantic" }
-novar_parser = { version = "0.0.2", path = "../compiler/parser" }
-novar_runtime = { version = "0.0.2", path = "../runtime" }
+novar_hir = { version = "0.0.3", path = "../compiler/semantic" }
+novar_parser = { version = "0.0.3", path = "../compiler/parser" }
+novar_runtime = { version = "0.0.3", path = "../runtime" }
 serde_json = "1"

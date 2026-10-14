@@ -672,13 +672,35 @@ fn string_and_vec_methods() {
         }
         fn shares(n: i64) -> bool { let v = [1, 2]; v.push(n); v.contains(n) }
     ";
-    assert!(matches!(run(src, "has", vec![Value::str("hello world"), Value::str("o w")]), Value::Bool(true)));
-    assert!(matches!(run(src, "has", vec![Value::str("hello"), Value::str("xyz")]), Value::Bool(false)));
-    assert!(matches!(run(src, "edges", vec![Value::str("ab...yz")]), Value::Bool(true)));
-    assert!(matches!(run(src, "edges", vec![Value::str("ab...")]), Value::Bool(false)));
-    assert_eq!(text(run(src, "fix", vec![Value::str("a cat and a cat")])), "a dog and a dog");
+    assert!(matches!(
+        run(
+            src,
+            "has",
+            vec![Value::str("hello world"), Value::str("o w")]
+        ),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        run(src, "has", vec![Value::str("hello"), Value::str("xyz")]),
+        Value::Bool(false)
+    ));
+    assert!(matches!(
+        run(src, "edges", vec![Value::str("ab...yz")]),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        run(src, "edges", vec![Value::str("ab...")]),
+        Value::Bool(false)
+    ));
+    assert_eq!(
+        text(run(src, "fix", vec![Value::str("a cat and a cat")])),
+        "a dog and a dog"
+    );
     assert_eq!(int(run(src, "words", vec![Value::str("one two three")])), 3);
     assert_eq!(text(run(src, "second", vec![Value::str("a,b,c")])), "b");
     assert_eq!(int(run(src, "collect", vec![Value::Int(5)])), 5);
-    assert!(matches!(run(src, "shares", vec![Value::Int(9)]), Value::Bool(true)));
+    assert!(matches!(
+        run(src, "shares", vec![Value::Int(9)]),
+        Value::Bool(true)
+    ));
 }

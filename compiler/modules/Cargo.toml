@@ -12,11 +12,11 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_ast = { version = "0.0.2", path = "../ast" }
-novar_diagnostics = { version = "0.0.2", path = "../diagnostics" }
-novar_parser = { version = "0.0.2", path = "../parser" }
+novar_ast = { version = "0.0.3", path = "../ast" }
+novar_diagnostics = { version = "0.0.3", path = "../diagnostics" }
+novar_parser = { version = "0.0.3", path = "../parser" }
 serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
-novar_hir = { version = "0.0.2", path = "../semantic" }
-novar_runtime = { version = "0.0.2", path = "../../runtime", default-features = false }
+novar_hir = { version = "0.0.3", path = "../semantic" }
+novar_runtime = { version = "0.0.3", path = "../../runtime", default-features = false }

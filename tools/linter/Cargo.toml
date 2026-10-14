@@ -12,8 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_diagnostics = { version = "0.0.2", path = "../../compiler/diagnostics" }
-novar_hir = { version = "0.0.2", path = "../../compiler/semantic" }
+novar_diagnostics = { version = "0.0.3", path = "../../compiler/diagnostics" }
+novar_hir = { version = "0.0.3", path = "../../compiler/semantic" }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.2", path = "../../compiler/parser" }
+novar_parser = { version = "0.0.3", path = "../../compiler/parser" }
