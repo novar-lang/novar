@@ -71,25 +71,35 @@ jobs:
           ref: ${{ needs.plan.outputs.tag }}
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p novar_cli -p novar_pkg
+      # Full build: tables, SQL, CSV / Parquet, real services (about 50 MB).
+      - run: cargo build --profile dist --locked -p novar_cli -p novar_pkg
+      # Lite build: no Arrow / DataFusion, so no tables or SQL; real services stay (about 10 MB).
+      - run: >
+          cargo build --release --locked -p novar_cli --no-default-features --features live
+          --target-dir target/lite
       - name: Package
         run: |
-          mkdir dist
-          if [ "${{ runner.os }}" = Windows ]; then
-            cp target/release/novar.exe target/release/nvpm.exe dist/
-            (cd dist && 7z a -tzip ../novar-${{ matrix.target }}.zip novar.exe nvpm.exe)
-            sha256sum novar-${{ matrix.target }}.zip > novar-${{ matrix.target }}.zip.sha256
-          else
-            cp target/release/novar target/release/nvpm dist/
-            tar -czf novar-${{ matrix.target }}.tar.gz -C dist novar nvpm
-            shasum -a 256 novar-${{ matrix.target }}.tar.gz > novar-${{ matrix.target }}.tar.gz.sha256
-          fi
+          mkdir dist-full dist-lite
+          ext=""; if [ "${{ runner.os }}" = Windows ]; then ext=".exe"; fi
+          cp target/dist/novar$ext target/dist/nvpm$ext dist-full/
+          cp target/lite/release/novar$ext target/dist/nvpm$ext dist-lite/
+          for variant in full lite; do
+            name=novar-${{ matrix.target }}
+            [ $variant = lite ] && name=novar-lite-${{ matrix.target }}
+            if [ "${{ runner.os }}" = Windows ]; then
+              (cd dist-$variant && 7z a -tzip ../$name.zip novar.exe nvpm.exe)
+              sha256sum $name.zip > $name.zip.sha256
+            else
+              tar -czf $name.tar.gz -C dist-$variant novar nvpm
+              shasum -a 256 $name.tar.gz > $name.tar.gz.sha256
+            fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: novar-${{ matrix.target }}
           path: |
-            novar-${{ matrix.target }}.tar.gz*
-            novar-${{ matrix.target }}.zip*
+            novar-*${{ matrix.target }}.tar.gz*
+            novar-*${{ matrix.target }}.zip*
 
   publish:
     needs: [plan, build]

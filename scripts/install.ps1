@@ -1,6 +1,7 @@
 # Installs `novar` and `nvpm` on Windows from a GitHub release.
 # Usage:  irm https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.ps1 | iex
-#         $env:NOVAR_VERSION = "0.0.1"   # optional: install a specific version
+#         $env:NOVAR_VERSION = "0.0.3"   # optional: install a specific version
+#         $env:NOVAR_LITE = "1"          # optional: ~10 MB build without tables / SQL
 $ErrorActionPreference = "Stop"
 
 $repo = "ntsation/novar"
@@ -15,7 +16,8 @@ if ($env:NOVAR_VERSION) {
     $tag = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1")[0].tag_name
 }
 
-$url = "https://github.com/$repo/releases/download/$tag/novar-$target.zip"
+$asset = if ($env:NOVAR_LITE) { "novar-lite" } else { "novar" }
+$url = "https://github.com/$repo/releases/download/$tag/$asset-$target.zip"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "novar-install-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Force -Path $tmp, $bin | Out-Null
 try {

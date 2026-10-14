@@ -76,3 +76,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  # The ~10 MB build without Arrow / DataFusion must keep compiling and passing its tests.
+  lite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p novar_cli --no-default-features --features live
