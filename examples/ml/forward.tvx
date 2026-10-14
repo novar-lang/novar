@@ -2,17 +2,17 @@
 # and `telvax check` rejects the program before anything runs.
 # Run from the repository root: telvax run examples/ml/forward.tvx main
 
-def layer1(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[float32, [2, 4]]:
-    return x.matmul(w).relu()
+fn layer1(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    x.matmul(w).relu()
 
-def layer2(h: Tensor[float32, [2, 4]], w: Tensor[float32, [4, 2]]) -> Tensor[float32, [2, 2]]:
-    return h.matmul(w).softmax()
+fn layer2(h: Tensor[f32, 2, 4], w: Tensor[f32, 4, 2]) -> Tensor[f32, 2, 2]:
+    h.matmul(w).softmax()
 
-def main():
-    x: Tensor[float32, [2, 3]] = std.tensor.from_vec([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    w1: Tensor[float32, [3, 4]] = std.tensor.from_vec([0.1, 0.2, -0.1, 0.0, 0.3, -0.2, 0.1, 0.4, -0.1, 0.1, 0.2, 0.1])
-    w2: Tensor[float32, [4, 2]] = std.tensor.from_vec([0.5, -0.5, 0.2, 0.1, -0.3, 0.3, 0.1, 0.2])
-    probs = layer2(layer1(x, w1), w2)
-    rows = probs.to_vec()
+fn main():
+    let x: Tensor[f32, 2, 3] = std.tensor.from_vec([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    let w1: Tensor[f32, 3, 4] = std.tensor.from_vec([0.1, 0.2, -0.1, 0.0, 0.3, -0.2, 0.1, 0.4, -0.1, 0.1, 0.2, 0.1])
+    let w2: Tensor[f32, 4, 2] = std.tensor.from_vec([0.5, -0.5, 0.2, 0.1, -0.3, 0.3, 0.1, 0.2])
+    let probs = layer2(layer1(x, w1), w2)
+    let rows = probs.to_vec()
     print(f"probabilities: {rows}")
     print(f"index of the largest probability: {probs.argmax()}")

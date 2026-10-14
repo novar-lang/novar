@@ -6,41 +6,41 @@ use telvax_modules::Image;
 use telvax_runtime::{Executor, Interp, Value};
 
 const PROGRAM: &str = r#"
-class Job:
-    id: int
-    text: str
+type Job:
+    id: Int
+    text: Text
 
-class Done:
-    id: int
-    words: uint64
-    shout: str
+type Done:
+    id: Int
+    words: u64
+    shout: Text
 
-def square(x: int) -> int:
-    return x * x
+fn square(x: Int) -> Int:
+    x * x
 
-def heavy(n: int) -> int:
-    acc: int = 0
+fn heavy(n: Int) -> Int:
+    var acc: Int = 0
     for i in range(n):
         acc += i * i % 7
-    return acc
+    acc
 
-def process(j: Job) -> Done:
-    return Done(id=j.id, words=std.iter.count(std.text.split(j.text, " ")), shout=std.text.uppercase(j.text))
+fn process(j: Job) -> Done:
+    Done(id: j.id, words: std.iter.count(std.text.split(j.text, " ")), shout: std.text.uppercase(j.text))
 
-def fails(x: int) -> int:
-    return 100 / x
+fn fails(x: Int) -> Int:
+    100 / x
 
-def squares(v: list[int]) -> list[int]:
-    return std.dist.map(v, square)
+fn squares(v: List[Int]) -> List[Int]:
+    std.dist.map(v, square)
 
-def crunch(v: list[int]) -> list[int]:
-    return std.dist.map(v, heavy)
+fn crunch(v: List[Int]) -> List[Int]:
+    std.dist.map(v, heavy)
 
-def jobs(v: list[Job]) -> list[Done]:
-    return std.dist.map(v, process)
+fn jobs(v: List[Job]) -> List[Done]:
+    std.dist.map(v, process)
 
-def risky(v: list[int]) -> list[int]:
-    return std.dist.map(v, fails)
+fn risky(v: List[Int]) -> List[Int]:
+    std.dist.map(v, fails)
 "#;
 
 fn image(src: &str) -> Image {
@@ -245,8 +245,8 @@ fn workers_refuse_programs_that_do_not_compile() {
     let w = spawn(None).unwrap();
     let broken = image(
         r#"
-def f() -> int32:
-    return "nope"
+fn f() -> i32:
+    "nope"
 "#,
     );
     let exec = ClusterExecutor::new(vec![w.address()], &broken, None).unwrap();

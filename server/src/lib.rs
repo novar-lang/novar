@@ -175,7 +175,7 @@ fn check(kind: &Kind, v: &Value, path: &str, errors: &mut Vec<String>) {
         Kind::Tensor { elem, shape } => check_tensor(elem, shape, v, path, errors),
         Kind::Object(schema) => check_object(schema, v, path, errors),
         Kind::Bool => errors.push(format!("{path}: expected bool, found {}", describe(v))),
-        Kind::Str => errors.push(format!("{path}: expected str, found {}", describe(v))),
+        Kind::Str => errors.push(format!("{path}: expected Text, found {}", describe(v))),
         Kind::Float => errors.push(format!("{path}: expected a number, found {}", describe(v))),
     }
 }
@@ -425,32 +425,32 @@ mod tests {
     }
 
     const SRC: &str = r#"
-class QueryPayload:
-    query: str
-    top_k: int32
+type QueryPayload:
+    query: Text
+    top_k: i32
 
-class Embed:
-    v: Tensor[float32, [3]]
-    tags: list[str]
-    small: uint8
+type Embed:
+    v: Tensor[f32, 3]
+    tags: List[Text]
+    small: u8
 
-@endpoint(path="/v1/rag/query", method="POST")
-def handle_rag(p: QueryPayload) -> Result[QueryPayload, str]:
-    return Ok(p)
+@endpoint(POST, "/v1/rag/query")
+fn handle_rag(p: QueryPayload) -> Result[QueryPayload, Text]:
+    Ok(p)
 
-@endpoint(path="/v1/embed", method="PUT")
-def embed(p: Embed) -> Result[Embed, str]:
-    return Ok(p)
+@endpoint(PUT, "/v1/embed")
+fn embed(p: Embed) -> Result[Embed, Text]:
+    Ok(p)
 
-@endpoint(path="/v1/search")
-def search(p: QueryPayload) -> Result[QueryPayload, str]:
-    return Ok(p)
+@endpoint(path: "/v1/search")
+fn search(p: QueryPayload) -> Result[QueryPayload, Text]:
+    Ok(p)
 
-@endpoint(path="/v1/ping")
-def ping() -> Result[str, str]:
-    return Ok("pong")
+@endpoint(path: "/v1/ping")
+fn ping() -> Result[Text, Text]:
+    Ok("pong")
 
-def helper():
+fn helper():
     pass
 "#;
 
@@ -533,7 +533,10 @@ def helper():
         let (s, v) = call(&a, "POST", "/v1/rag/query", r#"{"query":1,"extra":true}"#).await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
         let details = v["details"].to_string();
-        assert!(details.contains("payload.query: expected str"), "{details}");
+        assert!(
+            details.contains("payload.query: expected Text"),
+            "{details}"
+        );
         assert!(
             details.contains("payload.top_k: missing required field"),
             "{details}"
@@ -577,8 +580,8 @@ def helper():
             d.contains("payload.v: expected 3 element(s), found 2"),
             "{d}"
         );
-        assert!(d.contains("payload.tags[0]: expected str"), "{d}");
-        assert!(d.contains("256 is out of range for uint8"), "{d}");
+        assert!(d.contains("payload.tags[0]: expected Text"), "{d}");
+        assert!(d.contains("256 is out of range for u8"), "{d}");
     }
 
     #[tokio::test]

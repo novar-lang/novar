@@ -97,13 +97,13 @@ pub struct Completion {
 }
 
 const KEYWORDS: &[&str] = &[
-    "def", "class", "enum", "trait", "extend", "import", "from", "return", "if", "elif", "else",
-    "for", "in", "is", "while", "match", "case", "break", "continue", "pass", "lambda", "and",
-    "or", "not", "True", "False",
+    "fn", "let", "var", "type", "enum", "trait", "extend", "import", "from", "return", "if",
+    "elif", "else", "for", "in", "is", "while", "match", "case", "break", "continue", "pass",
+    "and", "or", "not", "True", "False",
 ];
 const PRIMS: &[&str] = &[
-    "int", "float", "str", "bool", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32",
-    "uint64", "float32", "float64",
+    "Int", "Float", "Text", "Bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32",
+    "f64",
 ];
 
 pub fn signature(f: &hir::FnDef) -> String {
@@ -124,7 +124,7 @@ pub fn signature(f: &hir::FnDef) -> String {
         format!(" -> {}", f.ret)
     };
     format!(
-        "def {}({}){ret}",
+        "fn {}({}){ret}",
         f.name.replace("::", "."),
         params.join(", ")
     )
@@ -246,7 +246,7 @@ impl Snapshot {
                     .collect();
                 return Some((
                     format!(
-                        "```telvax\nclass {}:\n{}\n```",
+                        "```telvax\ntype {}:\n{}\n```",
                         s.name,
                         if fields.is_empty() {
                             "    pass".to_string()
@@ -260,7 +260,12 @@ impl Snapshot {
         }
         if let Some(l) = self.locals.values().find(|l| l.span.contains(&offset)) {
             return Some((
-                format!("```telvax\n{}: {}\n```", l.name, l.ty),
+                format!(
+                    "```telvax\n{} {}: {}\n```",
+                    if l.mutable { "var" } else { "let" },
+                    l.name,
+                    l.ty
+                ),
                 l.span.clone(),
             ));
         }
@@ -268,14 +273,19 @@ impl Snapshot {
         let text = match &node.target {
             Target::Local(id) => {
                 let l = self.locals.get(id)?;
-                format!("```telvax\n{}: {}\n```", l.name, node.ty)
+                format!(
+                    "```telvax\n{} {}: {}\n```",
+                    if l.mutable { "var" } else { "let" },
+                    l.name,
+                    node.ty
+                )
             }
             Target::Fn(name) => {
                 let f = prog.fns.iter().find(|f| &f.name == name)?;
                 format!("```telvax\n{}\n```", signature(f))
             }
-            Target::Global(name) => format!("```telvax\n{name}: {}\n```", node.ty),
-            Target::Struct(name) => format!("```telvax\nclass {name}\n```"),
+            Target::Global(name) => format!("```telvax\nlet {name}: {}\n```", node.ty),
+            Target::Struct(name) => format!("```telvax\ntype {name}\n```"),
             Target::Other => format!("```telvax\n{}\n```", node.ty),
         };
         Some((text, node.span.clone()))
@@ -464,16 +474,20 @@ impl Snapshot {
             if after.starts_with(':') {
                 continue;
             }
-            // Only names a statement declares (`x = ...`, `a, b = ...`, `for x in ...`).
+            // Only names a statement declares (`let x = ...`, `let a, b = ...`, `for x in ...`).
             let line_start = self.text[..l.span.start].rfind('\n').map_or(0, |i| i + 1);
             let prefix = self.text[line_start..l.span.start].trim();
-            let prefix = prefix.strip_prefix("for").unwrap_or(prefix);
+            let prefix = ["let", "var", "for"]
+                .iter()
+                .find_map(|kw| prefix.strip_prefix(kw))
+                .unwrap_or(prefix);
             let declares = prefix
                 .chars()
                 .all(|c| c.is_alphanumeric() || matches!(c, '_' | ',' | ' '));
-            let binds = (after.starts_with('=') && !after.starts_with("=="))
-                || after.starts_with(',')
-                || after.starts_with("in ");
+            let binds =
+                (after.starts_with('=') && !after.starts_with("==") && !after.starts_with("=>"))
+                    || after.starts_with(',')
+                    || after.starts_with("in ");
             if declares && binds {
                 hints.push((l.span.end, format!(": {}", l.ty)));
             }
@@ -522,7 +536,7 @@ impl Snapshot {
             .map(|k| item(k, CompletionKind::Keyword, None))
             .collect();
         out.extend(PRIMS.iter().map(|p| item(p, CompletionKind::Type, None)));
-        for t in ["list", "dict", "Tensor", "Table", "Result"] {
+        for t in ["List", "Map", "Tensor", "Table", "Result"] {
             out.push(item(t, CompletionKind::Type, None));
         }
         out.push(item(

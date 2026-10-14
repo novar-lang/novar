@@ -68,12 +68,12 @@
     ]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(?:def|class|enum|trait|extend|if|elif|else|for|while|match|case)\\b.*:\\s*(?:#.*)?$",
+    "increaseIndentPattern": "^\\s*(?:fn|type|enum|trait|extend|if|elif|else|for|while|match|case)\\b.*:\\s*(?:#.*)?$",
     "decreaseIndentPattern": "^\\s*(?:elif|else)\\b.*:\\s*(?:#.*)?$"
   },
   "onEnterRules": [
     {
-      "beforeText": "^\\s*(?:def|class|enum|trait|extend|if|elif|else|for|while|match|case)\\b.*:\\s*(?:#.*)?$",
+      "beforeText": "^\\s*(?:fn|type|enum|trait|extend|if|elif|else|for|while|match|case)\\b.*:\\s*(?:#.*)?$",
       "action": {
         "indent": "indent"
       }

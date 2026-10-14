@@ -234,7 +234,7 @@ impl Checker {
                     if !declared.insert(s.name.node.clone()) {
                         self.err(
                             s.name.span.clone(),
-                            format!("class `{}` is defined twice", s.name.node),
+                            format!("type `{}` is defined twice", s.name.node),
                         );
                     }
                     self.generic_structs.insert(s.name.node.clone(), s.clone());
@@ -258,7 +258,7 @@ impl Checker {
                 if !declared.insert(s.name.node.clone()) {
                     self.err(
                         s.name.span.clone(),
-                        format!("class `{}` is defined twice", s.name.node),
+                        format!("type `{}` is defined twice", s.name.node),
                     );
                 } else {
                     self.struct_fields.insert(s.name.node.clone(), Vec::new());
@@ -389,7 +389,7 @@ impl Checker {
                     } else {
                         self.err(
                             imp.ty.span.clone(),
-                            format!("cannot find the generic class or enum `{}`", imp.ty.node),
+                            format!("cannot find the generic type or enum `{}`", imp.ty.node),
                         );
                     }
                 }
@@ -408,7 +408,7 @@ impl Checker {
                     if !self.struct_fields.contains_key(&ty) && !self.enums.contains_key(&ty) {
                         self.err(
                             imp.ty.span.clone(),
-                            format!("cannot find the class or enum `{ty}` to extend"),
+                            format!("cannot find the type or enum `{ty}` to extend"),
                         );
                         continue;
                     }
@@ -581,7 +581,7 @@ impl Checker {
                     other => {
                         self.err(
                             inner.span.clone(),
-                            format!("a table's schema must be a class, found `{other}`"),
+                            format!("a table's schema must be a type, found `{other}`"),
                         );
                         Ty::Unknown
                     }
@@ -618,7 +618,7 @@ impl Checker {
                 }
                 Some(t) => Ty::Struct(t),
                 None => {
-                    self.err(t.span.clone(), "`Self` can only be used inside a class");
+                    self.err(t.span.clone(), "`Self` can only be used inside a `type`");
                     Ty::Unknown
                 }
             },
@@ -626,10 +626,7 @@ impl Checker {
             "Option" => match type_args.as_slice() {
                 [inner] if t.args.len() == 1 => Ty::Option(Box::new(self.resolve_type(inner))),
                 _ => {
-                    self.err(
-                        t.span.clone(),
-                        "`Option` takes one type argument: `T | None`",
-                    );
+                    self.err(t.span.clone(), "`Option` takes one type argument: `T?`");
                     Ty::Unknown
                 }
             },
@@ -641,7 +638,7 @@ impl Checker {
                     {
                         self.err(
                             k.span.clone(),
-                            format!("`dict` keys must be a str, an int or a bool, found `{key}`"),
+                            format!("`Map` keys must be a Text, an Int or a Bool, found `{key}`"),
                         );
                     }
                     Ty::Map(Box::new(key), Box::new(self.resolve_type(v)))
@@ -649,7 +646,7 @@ impl Checker {
                 _ => {
                     self.err(
                         t.span.clone(),
-                        "`dict` takes two type arguments: `dict[K, V]`",
+                        "`Map` takes two type arguments: `Map[K, V]`",
                     );
                     Ty::Unknown
                 }
@@ -688,14 +685,22 @@ impl Checker {
             _ if self.imports.contains_key(name) => Ty::Named(name.to_string()),
             _ => {
                 let mut known: Vec<&str> = vec![
-                    "int", "float", "str", "bool", "int8", "int16", "int32", "int64", "uint8",
-                    "uint16", "uint32", "uint64", "float32", "float64", "list", "dict", "Tensor",
-                    "Table", "Result",
+                    "Int", "Float", "Text", "Bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32",
+                    "u64", "f32", "f64", "List", "Map", "Tensor", "Table", "Result",
                 ];
                 known.extend(self.struct_fields.keys().map(String::as_str));
                 known.extend(self.enums.keys().map(String::as_str));
                 known.extend(self.imports.keys().map(String::as_str));
-                let hint = closest(name, known).map(str::to_string);
+                // The spellings other languages use for the types Telvax capitalizes.
+                let hint = match name {
+                    "int" | "integer" => Some("Int".to_string()),
+                    "float" | "double" => Some("Float".to_string()),
+                    "str" | "string" | "String" => Some("Text".to_string()),
+                    "bool" | "boolean" => Some("Bool".to_string()),
+                    "list" | "array" => Some("List".to_string()),
+                    "dict" | "map" | "hashmap" => Some("Map".to_string()),
+                    _ => closest(name, known).map(str::to_string),
+                };
                 self.err_hint(
                     t.span.clone(),
                     format!("cannot find type `{name}` in this scope"),
@@ -774,7 +779,7 @@ impl Checker {
             _ => {
                 self.err(
                     t.span.clone(),
-                    "`Tensor` expects an element type and a shape: `Tensor<f32, [N, M]>`",
+                    "`Tensor` expects an element type and a shape: `Tensor[f32, N, M]`",
                 );
                 return Ty::Unknown;
             }
@@ -1211,7 +1216,7 @@ impl Checker {
                 [p] if matches!(p.ty, Ty::Struct(_) | Ty::Unknown) => {}
                 _ => self.err(
                     f.name.span.clone(),
-                    "an endpoint takes at most one parameter, which must be a class (the request payload)",
+                    "an endpoint takes at most one parameter, which must be a `type` (the request payload)",
                 ),
             }
             if wants_body && params.is_empty() {
@@ -1304,6 +1309,16 @@ impl Checker {
         let span = &e.span;
         match &e.node {
             K::Error => Self::mk(hir::ExprKind::Error, Ty::Unknown, span),
+            K::Named { name, .. } => {
+                self.err(
+                    span.clone(),
+                    format!(
+                        "`{}: ...` can only be written in the arguments of a call",
+                        name.node
+                    ),
+                );
+                Self::mk(hir::ExprKind::Error, Ty::Unknown, span)
+            }
             K::Assign { target, value } => self.assign(target, value, span),
             K::While { cond, body } => {
                 let cond = self.expr(cond, Some(&Ty::bool()));
@@ -1657,12 +1672,22 @@ impl Checker {
             ast::ExprKind::Path(p) if p.len() == 1 => {
                 let name = p[0].node.clone();
                 let Some((id, ty, mutable)) = self.lookup_local_full(&name) else {
-                    let msg = if self.globals.contains_key(&name) {
-                        format!("cannot assign to the global `{name}`")
+                    if self.globals.contains_key(&name) {
+                        self.err(
+                            target.span.clone(),
+                            format!("cannot assign to the global `{name}`"),
+                        );
                     } else {
-                        format!("cannot find `{name}` in this scope")
-                    };
-                    self.err(target.span.clone(), msg);
+                        self.diags.push(
+                            Diagnostic::error(
+                                target.span.clone(),
+                                format!("cannot find `{name}` in this scope"),
+                            )
+                            .with_note(format!(
+                                "declare it first with `let {name} = ...`, or `var {name} = ...` if it changes"
+                            )),
+                        );
+                    }
                     return None;
                 };
                 let captured = self.closure_floors.last().is_some_and(|floor| {
@@ -1692,10 +1717,10 @@ impl Checker {
                             target.span.clone(),
                             format!("cannot assign to the immutable variable `{name}`"),
                         )
-                        .with_note(
-                            "loop variables and pattern names cannot be changed; copy it into a new \
-                             variable first",
-                        ),
+                        .with_note(format!(
+                            "declare it with `var {name}` instead of `let {name}` (loop variables \
+                             and pattern names cannot change: copy them into a `var`)"
+                        )),
                     );
                 }
                 Some(hir::Place {
@@ -2457,7 +2482,7 @@ impl Checker {
                 ) {
                     (None, _) if *required => self.err(
                         span.clone(),
-                        format!("`class {ty}({trait_name})` is missing the method `{method}`"),
+                        format!("`type {ty}({trait_name})` is missing the method `{method}`"),
                     ),
                     (Some((got_params, got_ret)), Some((want_params, want_ret))) => {
                         let want_params: Vec<Ty> = want_params
@@ -3041,7 +3066,7 @@ impl Checker {
             if self.struct_fields.contains_key(first) {
                 self.err(
                     span.clone(),
-                    format!("`{first}` is a class, not a value; construct it with `{first}(..)`"),
+                    format!("`{first}` is a type, not a value; construct it with `{first}(field: value)`"),
                 );
                 return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
             }
@@ -3213,7 +3238,7 @@ impl Checker {
                 "chars" | "lines" => Ty::Fn(vec![], Box::new(Ty::Vec(Box::new(Ty::str())))),
                 _ => self.no_method(
                     name,
-                    "str",
+                    "Text",
                     &[
                         "is_empty",
                         "len",
@@ -3853,7 +3878,7 @@ impl Checker {
                     if !Ty::bool().accepts(&side.ty) {
                         self.err(
                             side.span.clone(),
-                            format!("expected `bool`, found `{}`", side.ty),
+                            format!("expected `Bool`, found `{}`", side.ty),
                         );
                     }
                 }
@@ -4023,7 +4048,7 @@ impl Checker {
         }
         let Some(decl) = self.struct_fields.get(&name).cloned() else {
             if !self.generic_structs.contains_key(&name) {
-                self.err(span.clone(), format!("cannot find class `{name}`"));
+                self.err(span.clone(), format!("cannot find type `{name}`"));
             }
             for (_, e) in fields {
                 let _ = self.expr(e, None);
@@ -4040,7 +4065,7 @@ impl Checker {
             if want.is_none() {
                 self.err(
                     fname.span.clone(),
-                    format!("class `{name}` has no field `{}`", fname.node),
+                    format!("type `{name}` has no field `{}`", fname.node),
                 );
             }
             if !seen.insert(fname.node.clone()) {

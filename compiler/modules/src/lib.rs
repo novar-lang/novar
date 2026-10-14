@@ -401,7 +401,7 @@ impl Loader<'_> {
                     None => self.diags.push(Diagnostic::error(
                         ident.span.clone(),
                         format!(
-                            "module `{}` has no function or class `{name}`",
+                            "module `{}` has no function or type `{name}`",
                             self.describe(&key)
                         ),
                     )),

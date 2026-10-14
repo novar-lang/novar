@@ -72,15 +72,15 @@ fn sibling_modules_are_imported_by_path() {
         r#"
 import util.double
 
-def main() -> int32:
-    return double(21)
+fn main() -> i32:
+    double(21)
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def double(x: int32) -> int32:
-    return x * 2
+fn double(x: i32) -> i32:
+    x * 2
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "42");
@@ -95,27 +95,27 @@ fn structs_group_imports_and_nested_modules() {
 from crate.geometry import Point, norm2
 import crate.geometry.shapes.area
 
-def main() -> int32:
-    p = Point(x=3, y=4)
-    return norm2(p) + area(2, 5)
+fn main() -> i32:
+    let p = Point(x: 3, y: 4)
+    norm2(p) + area(2, 5)
 "#,
     )
     .file(
         "geometry.tvx",
         r#"
-class Point:
-    x: int32
-    y: int32
+type Point:
+    x: i32
+    y: i32
 
-def norm2(p: Point) -> int32:
-    return p.x * p.x + p.y * p.y
+fn norm2(p: Point) -> i32:
+    p.x * p.x + p.y * p.y
 "#,
     )
     .file(
         "geometry/shapes.tvx",
         r#"
-def area(w: int32, h: int32) -> int32:
-    return w * h
+fn area(w: i32, h: i32) -> i32:
+    w * h
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "35");
@@ -129,15 +129,15 @@ fn mod_rs_style_directories_work() {
         r#"
 import tools.answer
 
-def main() -> int32:
-    return answer()
+fn main() -> i32:
+    answer()
 "#,
     )
     .file(
         "tools/mod.tvx",
         r#"
-def answer() -> int32:
-    return 42
+fn answer() -> i32:
+    42
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "42");
@@ -152,15 +152,15 @@ fn dependencies_are_imported_by_package_name() {
 import mathx.dot
 import mathx.vec.scale
 
-def main() -> int32:
-    return dot(2, 3) + scale(4)
+fn main() -> i32:
+    dot(2, 3) + scale(4)
 "#,
     )
     .file(
         "mathx/src/lib.tvx",
         r#"
-def dot(a: int32, b: int32) -> int32:
-    return a * b
+fn dot(a: i32, b: i32) -> i32:
+    a * b
 "#,
     )
     .file(
@@ -168,8 +168,8 @@ def dot(a: int32, b: int32) -> int32:
         r#"
 import crate.dot
 
-def scale(x: int32) -> int32:
-    return dot(x, 10)
+fn scale(x: i32) -> i32:
+    dot(x, 10)
 "#,
     );
     let deps = [dep("mathx", &p, "mathx/src")];
@@ -185,31 +185,31 @@ fn same_private_names_in_different_modules_do_not_collide() {
 import a.value
 import b.other
 
-def helper() -> int32:
-    return 1
+fn helper() -> i32:
+    1
 
-def main() -> int32:
-    return helper() + value() + other()
+fn main() -> i32:
+    helper() + value() + other()
 "#,
     )
     .file(
         "a.tvx",
         r#"
-def helper() -> int32:
-    return 100
+fn helper() -> i32:
+    100
 
-def value() -> int32:
-    return helper()
+fn value() -> i32:
+    helper()
 "#,
     )
     .file(
         "b.tvx",
         r#"
-def helper() -> int32:
-    return 10000
+fn helper() -> i32:
+    10000
 
-def other() -> int32:
-    return helper()
+fn other() -> i32:
+    helper()
 "#,
     );
     assert_eq!(
@@ -227,16 +227,16 @@ fn locals_shadow_imports() {
         r#"
 import util.double
 
-def main() -> int32:
-    double = 5
-    return double + 1
+fn main() -> i32:
+    let double = 5
+    double + 1
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def double(x: int32) -> int32:
-    return x * 2
+fn double(x: i32) -> i32:
+    x * 2
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "6");
@@ -250,15 +250,15 @@ fn std_imports_survive_merging() {
         r#"
 import util.shout
 
-def main() -> str:
-    return shout("hi")
+fn main() -> Text:
+    shout("hi")
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def shout(s: str) -> str:
-    return std.text.uppercase(s)
+fn shout(s: Text) -> Text:
+    std.text.uppercase(s)
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "HI");
@@ -272,8 +272,8 @@ fn import_cycles_between_modules_are_allowed() {
         r#"
 import even.is_even
 
-def main() -> bool:
-    return is_even(10)
+fn main() -> Bool:
+    is_even(10)
 "#,
     )
     .file(
@@ -281,11 +281,11 @@ def main() -> bool:
         r#"
 import odd.is_odd
 
-def is_even(n: int32) -> bool:
+fn is_even(n: i32) -> Bool:
     if n == 0:
-        return True
+        True
     else:
-        return is_odd(n - 1)
+        is_odd(n - 1)
 "#,
     )
     .file(
@@ -293,11 +293,11 @@ def is_even(n: int32) -> bool:
         r#"
 import even.is_even
 
-def is_odd(n: int32) -> bool:
+fn is_odd(n: i32) -> Bool:
     if n == 0:
-        return False
+        False
     else:
-        return is_even(n - 1)
+        is_even(n - 1)
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "True");
@@ -315,7 +315,7 @@ fn import_problems_are_diagnosed() {
         r#"
 import nope.f
 
-def main():
+fn main():
     pass
 "#,
     );
@@ -331,17 +331,17 @@ def main():
         r#"
 import util._hidden
 
-def main():
+fn main():
     pass
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def _hidden():
+fn _hidden():
     pass
 
-def shown():
+fn shown():
     pass
 "#,
     );
@@ -356,14 +356,14 @@ def shown():
         r#"
 import util.missing
 
-def main():
+fn main():
     pass
 "#,
     );
     assert!(
         messages(&p, &[])
             .iter()
-            .any(|m| m.contains("has no function or class `missing`"))
+            .any(|m| m.contains("has no function or type `missing`"))
     );
 
     p.file(
@@ -371,7 +371,7 @@ def main():
         r#"
 import crate
 
-def main():
+fn main():
     pass
 "#,
     );
@@ -390,23 +390,23 @@ fn diagnostics_point_into_the_right_file_with_original_names() {
         r#"
 import util.broken
 
-def main() -> int32:
-    return broken()
+fn main() -> i32:
+    broken()
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def broken() -> int32:
-    return "not a number"
+fn broken() -> i32:
+    "not a number"
 "#,
     );
     let loaded = load(&p.path("main.tvx"), &[]).unwrap();
     assert!(loaded.diagnostics.is_empty());
     let (_, diags) = telvax_hir::lower(&loaded.program);
     let text = loaded.map.render(&diags, false);
-    assert!(text.contains("util.tvx:3:12"), "{text}");
-    assert!(text.contains("expected `int32`, found `str`"), "{text}");
+    assert!(text.contains("util.tvx:3:5"), "{text}");
+    assert!(text.contains("expected `i32`, found `Text`"), "{text}");
 
     // Errors that mention a renamed item show the name the user wrote.
     p.file(
@@ -414,15 +414,15 @@ def broken() -> int32:
         r#"
 import util.broken
 
-def main() -> str:
-    return broken()
+fn main() -> Text:
+    broken()
 "#,
     )
     .file(
         "util.tvx",
         r#"
-def broken() -> int32:
-    return 1
+fn broken() -> i32:
+    1
 "#,
     );
     let loaded = load(&p.path("main.tvx"), &[]).unwrap();
@@ -440,8 +440,8 @@ fn syntax_errors_in_a_module_are_reported_with_that_file() {
         r#"
 import util.f
 
-def main() -> int32:
-    return f()
+fn main() -> i32:
+    f()
 "#,
     )
     .file("util.tvx", "pub fn f() -> i32 { let x = ; 1 }\n");
@@ -461,8 +461,8 @@ fn load_text_uses_the_unsaved_buffer() {
     p.file(
         "util.tvx",
         r#"
-def one() -> int32:
-    return 1
+fn one() -> i32:
+    1
 "#,
     );
     let loaded = telvax_modules::load_text(
@@ -470,8 +470,8 @@ def one() -> int32:
         r#"
 import util.one
 
-def main() -> int32:
-    return one() + 1
+fn main() -> i32:
+    one() + 1
 "#,
         Some(Path::new(&p.0)),
         &[],
@@ -489,22 +489,22 @@ fn bundled_sources_rebuild_the_same_program_without_the_file_system() {
 import mathx.dot
 import helper.twice
 
-def main() -> int32:
-    return twice(dot(2, 3))
+fn main() -> i32:
+    twice(dot(2, 3))
 "#,
     )
     .file(
         "app/helper.tvx",
         r#"
-def twice(x: int32) -> int32:
-    return x * 2
+fn twice(x: i32) -> i32:
+    x * 2
 "#,
     )
     .file(
         "mathx/src/lib.tvx",
         r#"
-def dot(a: int32, b: int32) -> int32:
-    return a * b
+fn dot(a: i32, b: i32) -> i32:
+    a * b
 "#,
     );
     let deps = [dep("mathx", &p, "mathx/src")];
@@ -543,30 +543,30 @@ from crate.shapes import Shape, area
 enum Shape2:
     Dot
 
-def main() -> int32:
-    s = Shape.Square(3)
-    n = 0
+fn main() -> i32:
+    let s = Shape.Square(3)
+    var n = 0
     match s:
         case Shape.Square(k):
             n = k
         case Shape.Dot:
             n = 0
-    return area(Shape.Square(4)) + n
+    area(Shape.Square(4)) + n
 "#,
     )
     .file(
         "shapes.tvx",
         r#"
 enum Shape:
-    Square(int32)
+    Square(i32)
     Dot
 
-def area(s: Shape) -> int32:
+fn area(s: Shape) -> i32:
     match s:
         case Shape.Square(k):
-            return k * k
+            k * k
         case Shape.Dot:
-            return 0
+            0
 "#,
     );
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "19");
@@ -580,35 +580,35 @@ fn impl_blocks_travel_with_their_type() {
         r#"
 import crate.shapes.Rect
 
-class Rect2:
-    w: int32
+type Rect2:
+    w: i32
 
-    def area(self) -> int32:
-        return self.w * self.w
+    fn area(self) -> i32:
+        self.w * self.w
 
-def area() -> int32:
-    return 1
+fn area() -> i32:
+    1
 
-def main() -> int32:
-    return Rect.new(3, 4).area() + Rect2(w=2).area() + area()
+fn main() -> i32:
+    Rect.new(3, 4).area() + Rect2(w: 2).area() + area()
 "#,
     )
     .file(
         "shapes.tvx",
         r#"
-class Rect:
-    w: int32
-    h: int32
+type Rect:
+    w: i32
+    h: i32
 
-def area() -> int32:
-    return 100
+fn area() -> i32:
+    100
 
 extend Rect:
-    def new(w: int32, h: int32) -> Rect:
-        return Rect(w=w, h=h)
+    fn new(w: i32, h: i32) -> Rect:
+        Rect(w: w, h: h)
 
-    def area(self) -> int32:
-        return self.w * self.h
+    fn area(self) -> i32:
+        self.w * self.h
 "#,
     );
     // `area` the method, `area` the function of each module, and the one in main do not clash.

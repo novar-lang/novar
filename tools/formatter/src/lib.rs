@@ -62,8 +62,8 @@ enum Kind {
 fn kind(t: &Token) -> Kind {
     use Token::*;
     match t {
-        Import | From | Def | Class | Enum | Trait | Extend | Match | Case | Return | Break
-        | Continue | Pass | If | Elif | Else | For | In | Is | While | Lambda | And | Or | Not => {
+        Import | From | Fn | Let | Var | Enum | Trait | Extend | Match | Case | Return | Break
+        | Continue | Pass | If | Elif | Else | For | In | Is | While | And | Or | Not => {
             Kind::Keyword
         }
         True | False | Int(_) | Float(_) | Str(_) | FStr(_) | Ellipsis => Kind::Literal,
@@ -356,10 +356,9 @@ fn space_between(
     prev: &Piece,
     next: &Piece,
     before_prev: Option<Kind>,
-    innermost: Option<char>,
+    _innermost: Option<char>,
 ) -> bool {
     use Kind::*;
-    let in_call = innermost == Some('(');
     match (prev.kind, next.kind) {
         // Nothing before these.
         (_, Comma | Dot | Question | Colon) => false,
@@ -367,8 +366,6 @@ fn space_between(
         (Open(_), _) => false,
         (Dot | At, _) => false,
         (Colon | Comma, _) => true,
-        // Keyword arguments and decorator arguments: `f(a=1)`.
-        (Assign, _) | (_, Assign) if in_call => false,
         // Calls and indexing.
         (Word | Literal | Close(_) | Question, Open('(' | '[')) => false,
         (Keyword, Open(_)) => true,
@@ -388,47 +385,47 @@ mod tests {
 
     #[test]
     fn normalises_spacing_and_indentation() {
-        let out = fmt(
-            "def add(a:int,b:int)->int:\n  x=a+b*2\n  if x>3:\n      return x\n  return x - 1\n",
-        );
+        let out =
+            fmt("fn add(a:Int,b:Int)->Int:\n  let x=a+b*2\n  if x>3:\n      return x\n  x - 1\n");
         assert_eq!(
             out,
-            "def add(a: int, b: int) -> int:\n    x = a + b * 2\n    if x > 3:\n        return x\n    return x - 1\n"
+            "fn add(a: Int, b: Int) -> Int:\n    let x = a + b * 2\n    if x > 3:\n        return x\n    x - 1\n"
         );
     }
 
     #[test]
     fn keeps_comments_and_limits_blank_lines() {
-        let src = "# header\n\n\n\ndef f() -> int:   # trailing\n  # inside\n  return 1 # one\n";
+        let src = "# header\n\n\n\nfn f() -> Int:   # trailing\n  # inside\n  1 # one\n";
         assert_eq!(
             fmt(src),
-            "# header\n\ndef f() -> int:  # trailing\n    # inside\n    return 1  # one\n"
+            "# header\n\nfn f() -> Int:  # trailing\n    # inside\n    1  # one\n"
         );
     }
 
     #[test]
     fn a_comment_before_a_dedent_stays_with_its_block() {
-        let src = "def f():\n    if a:\n        b()\n        # last of the branch\n    # back in f\n    c()\n";
+        let src = "fn f():\n    if a:\n        b()\n        # last of the branch\n    # back in f\n    c()\n";
         assert_eq!(fmt(src), src);
     }
 
     #[test]
     fn handles_types_unary_calls_and_pipes() {
-        let src = "def f(t:Tensor[float32,[2,3]],v:list[list[int]])->Result[int,str]:\n    a= -1\n    b=not True\n    for i in range(n):\n        g(i,-a)\n    c=x\n    |>f()\n    |>g()\n    d=lambda x,y:x+y\n    return Ok(t[0]  [1])\n";
+        let src = "fn f(t:Tensor[f32,2,3],v:List[List[Int]],o:Int?)->Result[Int,Text]:\n    let a= -1\n    let b=not True\n    for i in range(n):\n        g(i,-a)\n    let c=x\n    |>f()\n    |>g()\n    let d=(x,y)=>x+y\n    Ok(t[0]  [1])\n";
         let out = fmt(src);
         assert_eq!(
             out,
-            "def f(t: Tensor[float32, [2, 3]], v: list[list[int]]) -> Result[int, str]:\n    a = -1\n    b = not True\n    for i in range(n):\n        g(i, -a)\n    c = x\n        |> f()\n        |> g()\n    d = lambda x, y: x + y\n    return Ok(t[0][1])\n"
+            "fn f(t: Tensor[f32, 2, 3], v: List[List[Int]], o: Int?) -> Result[Int, Text]:\n    let a = -1\n    let b = not True\n    for i in range(n):\n        g(i, -a)\n    let c = x\n        |> f()\n        |> g()\n    let d = (x, y) => x + y\n    Ok(t[0][1])\n"
         );
     }
 
     #[test]
-    fn keyword_arguments_have_no_spaces() {
-        let out =
-            fmt("@endpoint(path = \"/x\", method=\"POST\")\ndef f():\n    p = Point(x = 1, y=2)\n");
+    fn named_arguments_and_defaults() {
+        let out = fmt(
+            "@endpoint( POST ,\"/x\")\nfn f(limit:Int=5):\n    let p=Point(x:1,y:2)\n    search(v,limit:3)\n",
+        );
         assert_eq!(
             out,
-            "@endpoint(path=\"/x\", method=\"POST\")\ndef f():\n    p = Point(x=1, y=2)\n"
+            "@endpoint(POST, \"/x\")\nfn f(limit: Int = 5):\n    let p = Point(x: 1, y: 2)\n    search(v, limit: 3)\n"
         );
     }
 
@@ -460,40 +457,41 @@ mod tests {
 
     #[test]
     fn enums_match_and_break() {
-        let src = "enum S:\n    A(int)\n    B\n\ndef f(s:S)->int:\n    match s:\n      case S.A(n):\n        return n\n      case S.B:\n        return 0\n\ndef g():\n    while True:\n        break\n";
+        let src = "enum S:\n    A(Int)\n    B\n\nfn f(s:S)->Int:\n    match s:\n      case S.A(n):\n        n\n      case S.B:\n        0\n\nfn g():\n    while True:\n        break\n";
         let out = fmt(src);
         assert_eq!(fmt(&out), out);
-        assert!(out.contains("    A(int)\n"), "{out}");
+        assert!(out.contains("    A(Int)\n"), "{out}");
         assert!(
-            out.contains("        case S.A(n):\n            return n\n"),
+            out.contains("        case S.A(n):\n            n\n"),
             "{out}"
         );
     }
 
     #[test]
     fn rejects_input_it_cannot_lex() {
-        assert!(format("def f():\n    s = \"unterminated\n").is_err());
-        assert!(format("def f():\n\treturn 1\n").is_err());
+        assert!(format("fn f():\n    let s = \"unterminated\n").is_err());
+        assert!(format("fn f():\n\t1\n").is_err());
     }
 
     #[test]
     fn brackets_continue_lines() {
-        let src = "def f() -> R:\n    return Ok(Response(\n    x=1,\n    y=2,\n    ))\n";
+        let src = "fn f() -> R:\n    Ok(Response(\n    x: 1,\n    y: 2,\n    ))\n";
         let out = fmt(src);
         assert_eq!(
             out,
-            "def f() -> R:\n    return Ok(Response(\n        x=1,\n        y=2,\n    ))\n"
+            "fn f() -> R:\n    Ok(Response(\n        x: 1,\n        y: 2,\n    ))\n"
         );
         assert_eq!(fmt(&out), out);
     }
 
     #[test]
     fn imports_and_row_types() {
-        let out =
-            fmt("from std.http import Request,Status\nt:Table[{region:str,revenue:float}]=x\n");
+        let out = fmt(
+            "from std.http import Request,Status\nlet t:Table[{region:Text,revenue:Float}]=x\n",
+        );
         assert_eq!(
             out,
-            "from std.http import Request, Status\nt: Table[{region: str, revenue: float}] = x\n"
+            "from std.http import Request, Status\nlet t: Table[{region: Text, revenue: Float}] = x\n"
         );
     }
 }

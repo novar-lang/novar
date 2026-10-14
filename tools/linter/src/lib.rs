@@ -210,22 +210,22 @@ mod tests {
     fn reports_unused_variables_and_functions() {
         let m = messages(
             r#"
-def _helper() -> int32:
-    return 1
+fn _helper() -> i32:
+    1
 
-def used() -> int32:
-    return 2
+fn used() -> i32:
+    2
 
-def api(unused_param: int32) -> int32:
-    a = 1
-    b = 2
-    _quiet = 3
-    c = 0
+fn api(unused_param: i32) -> i32:
+    let a = 1
+    let b = 2
+    let _quiet = 3
+    var c = 0
     c = c + used()
-    return b
+    b
 
-def main() -> int32:
-    return api(1)
+fn main() -> i32:
+    api(1)
 "#,
         );
         assert_eq!(
@@ -243,22 +243,22 @@ def main() -> int32:
         let m = messages(
             r#"
 enum E:
-    A(int32)
+    A(i32)
     B
 
-def main() -> int32:
-    total = 0
-    v = [1, 2, 3]
+fn main() -> i32:
+    var total = 0
+    let v = [1, 2, 3]
     for x in v:
         if x == 2:
             continue
         total += x
-    e = E.A(total)
+    let e = E.A(total)
     match e:
         case E.A(n):
-            return n
+            n
         case E.B:
-            return 0
+            0
 "#,
         );
         assert!(m.is_empty(), "{m:?}");

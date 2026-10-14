@@ -12,18 +12,18 @@ python -m pytest tests                     # needs numpy, pyarrow (polars / torc
 import telvax, numpy as np, pyarrow as pa
 
 prog = telvax.compile("""
-class Row:
-    id: int
-    score: float32
+type Row:
+    id: Int
+    score: f32
 
-def add(a: int, b: int) -> int:
-    return a + b
+fn add(a: Int, b: Int) -> Int:
+    a + b
 
-def double(t: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
-    return std.tensor.scale(t, 2.0)
+fn double(t: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    std.tensor.scale(t, 2.0)
 
-def best(t: Table[Row]) -> Table[Row]:
-    return t |> std.table.sql("SELECT * FROM t WHERE score > 1.5")
+fn best(t: Table[Row]) -> Table[Row]:
+    t |> std.table.sql("SELECT * FROM t WHERE score > 1.5")
 """)
 
 prog.call("add", 1, 2)                                   # 3   (~0.3 us per call)
@@ -37,9 +37,9 @@ prog.call("best", pa.table({"id": [1, 2], "score": pa.array([1.0, 2.0], pa.float
 | Arrow PyCapsule (`__arrow_c_array__`, `__arrow_c_stream__`) | `Tensor`, `Table` | PyArrow, Polars, pandas (via Arrow) | zero-copy |
 | NumPy array interface (`__array_interface__`) | `Tensor` | NumPy, PyTorch (`torch.from_numpy`) | zero-copy (C-contiguous) |
 | CUDA array interface (`__cuda_array_interface__`) | `DeviceTensor` | PyTorch, CuPy, Numba | GPU pointer passing |
-| PyO3 value conversion | scalars, strings, classes, `list` | `int`, `float`, `str`, `dict`, `list` | sub-microsecond |
+| PyO3 value conversion | scalars, strings, types you define, `List` | `int`, `float`, `str`, `dict`, `list` | sub-microsecond |
 
-* Functions check argument types and tensor shapes at the boundary: a `Tensor[float32, [2, 3]]`
+* Functions check argument types and tensor shapes at the boundary: a `Tensor[f32, 2, 3]`
   parameter rejects any other shape, and converts the element type (one copy) when it differs.
 * `Program.endpoint(name, payload)` runs an `@endpoint` on a dict; error statuses raise
   `telvax.StatusError` with `.status`.

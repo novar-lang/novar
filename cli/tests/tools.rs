@@ -21,8 +21,8 @@ fn run(args: &[&str]) -> (bool, String, String) {
 
 #[test]
 fn fmt_rewrites_in_place_and_check_reports() {
-    let messy = "def main() -> int32:\n  x=1\n  return x+2\n";
-    let tidy = "def main() -> int32:\n    x = 1\n    return x + 2\n";
+    let messy = "fn main() -> i32:\n  let x=1\n  x+2\n";
+    let tidy = "fn main() -> i32:\n    let x = 1\n    x + 2\n";
     let file = scratch("messy", messy);
     let path = file.to_str().unwrap();
     let (ok, out, _) = run(&["fmt", "--check", path]);
@@ -40,7 +40,7 @@ fn fmt_rewrites_in_place_and_check_reports() {
 
 #[test]
 fn fmt_refuses_broken_source() {
-    let file = scratch("broken", "def main():\n    s = \"open\n");
+    let file = scratch("broken", "fn main():\n    let s = \"open\n");
     let (ok, _, err) = run(&["fmt", file.to_str().unwrap()]);
     assert!(!ok && err.contains("cannot format"), "{err}");
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
@@ -51,12 +51,12 @@ fn lint_reports_unused_code() {
     let file = scratch(
         "lintme",
         r#"
-def _helper() -> int32:
-    return 1
+fn _helper() -> i32:
+    1
 
-def main() -> int32:
-    unused = 2
-    return 3
+fn main() -> i32:
+    let unused = 2
+    3
 "#,
     );
     let path = file.to_str().unwrap();

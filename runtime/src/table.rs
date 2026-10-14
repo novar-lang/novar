@@ -267,7 +267,7 @@ fn build_column(ty: &Ty, cells: &[Value]) -> Result<ArrayRef, RuntimeError> {
                 .iter()
                 .map(|c| match c {
                     Value::Str(s) => Ok(s.to_string()),
-                    other => err(format!("expected a str, found {}", other.type_name())),
+                    other => err(format!("expected a Text, found {}", other.type_name())),
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         )),
@@ -309,7 +309,7 @@ fn want_table(v: &Value) -> Result<&Arc<TableVal>, RuntimeError> {
 fn want_str(v: &Value) -> Result<Arc<str>, RuntimeError> {
     match v {
         Value::Str(s) => Ok(s.clone()),
-        other => err(format!("expected a str, found {}", other.type_name())),
+        other => err(format!("expected a Text, found {}", other.type_name())),
     }
 }
 
@@ -323,7 +323,7 @@ fn schema_name(result: &Ty, what: &str) -> Result<String, RuntimeError> {
 fn fields_of<'a>(interp: &'a Interp, name: &str) -> Result<&'a [(String, Ty)], RuntimeError> {
     interp
         .struct_fields(name)
-        .ok_or_else(|| RuntimeError::new(format!("unknown class `{name}`")))
+        .ok_or_else(|| RuntimeError::new(format!("unknown type `{name}`")))
 }
 
 fn table(schema: String, batch: RecordBatch) -> Res {
@@ -467,7 +467,7 @@ pub(crate) fn call(interp: &Interp, path: &str, args: &[Value], result: &Ty) -> 
                 return err("`from_rows` needs a statically known row type");
             };
             let Value::Vec(rows) = &args[0] else {
-                return err("`from_rows` needs a list");
+                return err("`from_rows` needs a List");
             };
             let batch = rows_to_batch(fields_of(interp, schema)?, &rows.snapshot())?;
             table(schema.clone(), batch)

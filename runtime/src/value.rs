@@ -56,7 +56,7 @@ impl MapKey {
             Value::Int(i) => Ok(MapKey::Int(*i)),
             Value::Str(s) => Ok(MapKey::Str(s.clone())),
             other => Err(format!(
-                "a dict key must be a str, an int or a bool, found {}",
+                "a Map key must be a Text, an Int or a Bool, found {}",
                 other.type_name()
             )),
         }
@@ -359,15 +359,15 @@ impl Value {
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Unit => "None",
-            Value::Bool(_) => "bool",
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
-            Value::Str(_) => "str",
-            Value::Vec(_) => "list",
-            Value::Struct(_) => "class",
+            Value::Bool(_) => "Bool",
+            Value::Int(_) => "Int",
+            Value::Float(_) => "Float",
+            Value::Str(_) => "Text",
+            Value::Vec(_) => "List",
+            Value::Struct(_) => "type",
             Value::Enum(e) if e.name == "Option" => "Option",
             Value::Enum(_) => "enum",
-            Value::Map(_) => "dict",
+            Value::Map(_) => "Map",
             Value::Tuple(_) => "tuple",
             Value::Tensor(_) => "Tensor",
             Value::Table(_) => "Table",
@@ -581,7 +581,7 @@ pub fn from_json(
     let bad = |what: &str| format!("expected {what}, found {json}");
     match ty {
         Ty::Prim(Prim::Bool) => json.as_bool().map(Value::Bool).ok_or_else(|| bad("bool")),
-        Ty::Prim(Prim::Str) => json.as_str().map(Value::str).ok_or_else(|| bad("str")),
+        Ty::Prim(Prim::Str) => json.as_str().map(Value::str).ok_or_else(|| bad("Text")),
         Ty::Prim(p) if p.is_float() => json
             .as_f64()
             .map(Value::Float)
@@ -621,7 +621,7 @@ pub fn from_json(
         Ty::Table(name) => {
             let fields = structs
                 .get(name)
-                .ok_or_else(|| format!("unknown class `{name}`"))?;
+                .ok_or_else(|| format!("unknown type `{name}`"))?;
             let items = json.as_array().ok_or_else(|| bad("an array of rows"))?;
             let rows = items
                 .iter()
@@ -639,7 +639,7 @@ pub fn from_json(
         Ty::Struct(name) => {
             let fields = structs
                 .get(name)
-                .ok_or_else(|| format!("unknown class `{name}`"))?;
+                .ok_or_else(|| format!("unknown type `{name}`"))?;
             let obj = json.as_object().ok_or_else(|| bad("an object"))?;
             let mut out = Vec::new();
             for (fname, fty) in fields {

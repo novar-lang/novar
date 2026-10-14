@@ -24,14 +24,14 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 const PROGRAM: &str = r#"
-def fib(n: int32) -> int32:
+fn fib(n: i32) -> i32:
     if n < 2:
         return n
 
-    return fib(n - 1) + fib(n - 2)
+    fib(n - 1) + fib(n - 2)
 
-def main() -> int32:
-    return fib(10)
+fn main() -> i32:
+    fib(10)
 "#;
 
 #[test]
@@ -44,11 +44,11 @@ fn emits_llvm_ir() {
 #[test]
 fn optimiser_pipeline_runs() {
     let src = r#"
-def twice(x: int32) -> int32:
-    return x + x
+fn twice(x: i32) -> i32:
+    x + x
 
-def main() -> int32:
-    return twice(twice(10)) + 2
+fn main() -> i32:
+    twice(twice(10)) + 2
 "#;
     let ir = llvm_ir(&hir(src)).unwrap();
     let o0 = optimize_ir(&ir, OptLevel(0)).unwrap();
@@ -69,7 +69,7 @@ fn builds_and_runs_an_executable() {
 #[test]
 fn exit_code_reflects_control_flow() {
     let src = r#"
-def classify(x: int32) -> int32:
+fn classify(x: i32) -> i32:
     if x < 0:
         return 1
 
@@ -77,10 +77,10 @@ def classify(x: int32) -> int32:
         if x == 0:
             return 2
 
-    return 3
+    3
 
-def main() -> int32:
-    return classify(-5) * 100 / 100 + classify(0) * 10 + classify(9)
+fn main() -> i32:
+    classify(-5) * 100 / 100 + classify(0) * 10 + classify(9)
 "#;
     let exe = scratch("classify");
     build_executable(&hir(src), OptLevel(0), &exe).unwrap();
@@ -100,22 +100,22 @@ fn entry_point_is_validated() {
     for (src, needle) in [
         (
             r#"
-def f() -> int32:
-    return 1
+fn f() -> i32:
+    1
 "#,
             "entry point",
         ),
         (
             r#"
-def main() -> bool:
-    return True
+fn main() -> Bool:
+    True
 "#,
             "def main() -> int32",
         ),
         (
             r#"
-def main(x: int32) -> int32:
-    return x
+fn main(x: i32) -> i32:
+    x
 "#,
             "def main() -> int32",
         ),
@@ -130,9 +130,9 @@ def main(x: int32) -> int32:
 #[test]
 fn unsupported_code_reports_diagnostics() {
     match llvm_ir(&hir(r#"
-def main() -> int32:
-    g = lambda x: x
-    return 1
+fn main() -> i32:
+    let g = x => x
+    1
 "#))
     {
         Err(BuildError::Diagnostics(d)) => assert!(d[0].message.contains("closures")),
@@ -175,9 +175,9 @@ fn run_interpreted(src: &str) -> (i64, String) {
 #[test]
 fn hello_world() {
     let src = r#"
-def main() -> int32:
+fn main() -> i32:
     print("hello, world")
-    return 0
+    0
 "#;
     assert_eq!(
         run_native(src, "hello"),
@@ -188,32 +188,32 @@ def main() -> int32:
 #[test]
 fn native_and_interpreter_print_the_same() {
     let src = r#"
-class Item:
-    name: str
-    qty: int32
+type Item:
+    name: Text
+    qty: i32
 
-greeting = "total"
+let greeting = "total"
 
-def show(i: Item):
+fn show(i: Item):
     std.io.print(i.name + ":")
 
-def count(n: int32) -> int32:
+fn count(n: i32) -> i32:
     if n == 0:
         return 0
     std.io.print(".")
-    return count(n - 1) + 1
+    count(n - 1) + 1
 
-def main() -> int32:
-    show(Item(name="apple", qty=3))
-    show(Item(qty=1, name="pear"))
+fn main() -> i32:
+    show(Item(name: "apple", qty: 3))
+    show(Item(qty: 1, name: "pear"))
     print("")
     print(greeting + "!")
-    n = count(4)
+    let n = count(4)
     print("")
     if "a" + "b" == "ab":
-        return n + 40
+        n + 40
     else:
-        return 1
+        1
 "#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
@@ -227,19 +227,19 @@ def main() -> int32:
 #[test]
 fn fstrings_match_the_interpreter() {
     let src = r#"
-class Order:
-    id: uint32
-    total: int
-    paid: bool
+type Order:
+    id: u32
+    total: Int
+    paid: Bool
 
-def describe(o: Order) -> str:
-    return f"order #{o.id}: total={o.total} paid={o.paid}"
+fn describe(o: Order) -> Text:
+    f"order #{o.id}: total={o.total} paid={o.paid}"
 
-def main() -> int32:
-    print(describe(Order(id=7, total=-1250, paid=False)))
-    print(describe(Order(paid=True, total=9000000000, id=4000000000)))
+fn main() -> i32:
+    print(describe(Order(id: 7, total: -1250, paid: False)))
+    print(describe(Order(paid: True, total: 9000000000, id: 4000000000)))
     print(f"{0} {-0} {255}")
-    return 0
+    0
 "#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
@@ -255,43 +255,43 @@ def main() -> int32:
 #[test]
 fn loops_and_vectors_match_the_interpreter() {
     let src = r#"
-def is_prime(n: int) -> bool:
+fn is_prime(n: Int) -> Bool:
     if n < 2:
         return False
-    d: int = 2
+    var d: Int = 2
     while d * d <= n:
         if n % d == 0:
             return False
         d += 1
-    return True
+    True
 
-def fib(n: int32) -> int:
-    a: int = 0
-    b: int = 1
+fn fib(n: i32) -> Int:
+    var a: Int = 0
+    var b: Int = 1
     for i in range(n):
-        t = a + b
+        let t = a + b
         a = b
         b = t
-    return a
+    a
 
-def main() -> int32:
-    primes = 0
-    limit: int = 100
+fn main() -> i32:
+    var primes = 0
+    let limit: Int = 100
     for n in range(limit):
         if is_prime(n):
             primes += 1
     print(f"primes below 100: {primes}")
-    weights = [3, 1, 4, 1, 5, 9, 2, 6]
-    total = 0
+    let weights = [3, 1, 4, 1, 5, 9, 2, 6]
+    var total = 0
     for w in weights:
         total += w
     print(f"sum of {weights.len()} weights: {total}, third: {weights[2]}")
     print(f"fib(50) = {fib(50)}")
-    line = ""
+    var line = ""
     for i in range(1, 6):
         line = line + f"{i * i} "
     print(line)
-    return primes + total
+    primes + total
 "#;
     let (code, out) = run_interpreted(src);
     assert_eq!(
@@ -305,13 +305,13 @@ def main() -> int32:
 #[test]
 fn out_of_bounds_index_aborts_with_a_message() {
     let src = r#"
-def at(i: int32) -> int32:
-    v = [1, 2, 3]
-    return v[i]
+fn at(i: i32) -> i32:
+    let v = [1, 2, 3]
+    v[i]
 
-def main() -> int32:
+fn main() -> i32:
     print("before")
-    return at(7)
+    at(7)
 "#;
     let exe = scratch("oob");
     build_executable(&hir(src), OptLevel(0), &exe).unwrap();
@@ -345,11 +345,11 @@ fn primes_example_matches_the_interpreter() {
 #[test]
 fn out_of_bounds_assignment_aborts() {
     let src = r#"
-def main() -> int32:
-    v = [1, 2]
-    k = 5
+fn main() -> i32:
+    var v = [1, 2]
+    let k = 5
     v[k] = 1
-    return 0
+    0
 "#;
     let exe = scratch("oob_store");
     build_executable(&hir(src), OptLevel(1), &exe).unwrap();

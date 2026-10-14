@@ -105,16 +105,16 @@ fn initialize(c: &mut Client) -> Value {
     r
 }
 
-const PROGRAM: &str = r#"class Point:
-    x: float
-    y: float
+const PROGRAM: &str = r#"type Point:
+    x: Float
+    y: Float
 
-def norm(p: Point) -> float:
-    return p.x * p.x + p.y * p.y
+fn norm(p: Point) -> Float:
+    p.x * p.x + p.y * p.y
 
-def main() -> float:
-    origin = Point(x=1.0, y=2.0)
-    return norm(origin)
+fn main() -> Float:
+    let origin = Point(x: 1.0, y: 2.0)
+    norm(origin)
 "#;
 
 #[test]
@@ -144,31 +144,22 @@ fn advertises_its_capabilities() {
 fn publishes_diagnostics_and_clears_them() {
     let mut c = Client::start();
     initialize(&mut c);
-    open(
-        &mut c,
-        r#"
-def f() -> int32:
-    return "oops"
-"#,
-    );
+    open(&mut c, "fn f() -> i32:\n    \"oops\"\n");
     let d = c.diagnostics(URI);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0]["severity"], 1);
     assert_eq!(d[0]["source"], "telvax");
-    assert_eq!(d[0]["range"]["start"], json!({"line": 2, "character": 11}));
+    assert_eq!(d[0]["range"]["start"], json!({"line": 1, "character": 4}));
     assert!(
         d[0]["message"]
             .as_str()
             .unwrap()
-            .contains("expected `int32`, found `str`")
+            .contains("expected `i32`, found `Text`")
     );
 
     c.notify(
         "textDocument/didChange",
-        json!({"textDocument": {"uri": URI, "version": 2}, "contentChanges": [{"text": r#"
-def f() -> int32:
-    return 1
-"#}]}),
+        json!({"textDocument": {"uri": URI, "version": 2}, "contentChanges": [{"text": "fn f() -> i32:\n    1\n"}]}),
     );
     assert!(
         c.diagnostics(URI).is_empty(),
@@ -183,14 +174,14 @@ fn answers_editor_requests() {
     open(&mut c, PROGRAM);
     assert!(c.diagnostics(URI).is_empty());
 
-    let hover = c.request("textDocument/hover", at(9, 13));
+    let hover = c.request("textDocument/hover", at(9, 6));
     let text = hover["result"]["contents"]["value"].as_str().unwrap();
-    assert!(text.contains("def norm(p: Point) -> float"), "{text}");
+    assert!(text.contains("fn norm(p: Point) -> Float"), "{text}");
 
-    let def = c.request("textDocument/definition", at(9, 13));
+    let def = c.request("textDocument/definition", at(9, 6));
     assert_eq!(
         def["result"]["range"]["start"],
-        json!({"line": 4, "character": 4})
+        json!({"line": 4, "character": 3})
     );
 
     let symbols = c.request(
@@ -212,7 +203,7 @@ fn answers_editor_requests() {
     let hints = hints["result"].as_array().unwrap();
     assert_eq!(hints.len(), 1);
     assert_eq!(hints[0]["label"], ": Point");
-    assert_eq!(hints[0]["position"], json!({"line": 8, "character": 10}));
+    assert_eq!(hints[0]["position"], json!({"line": 8, "character": 14}));
 
     // The sample is already formatted, so there is nothing to change.
     let fmt = c.request(
@@ -221,7 +212,7 @@ fn answers_editor_requests() {
     );
     assert_eq!(fmt["result"], json!([]));
 
-    let items = c.request("textDocument/completion", at(9, 13));
+    let items = c.request("textDocument/completion", at(9, 6));
     let labels: Vec<_> = items["result"]
         .as_array()
         .unwrap()
@@ -240,30 +231,16 @@ fn completes_members_while_typing() {
     initialize(&mut c);
     open(
         &mut c,
-        r#"
-class Point:
-    x: float
-    y: float
-
-def f(p: Point) -> float:
-    return 0.0
-"#,
+        "type Point:\n    x: Float\n    y: Float\n\nfn f(p: Point) -> Float:\n    0.0\n",
     );
     c.diagnostics(URI);
     // The user types `p.` on a new line; the half-written statement does not parse.
     c.notify(
         "textDocument/didChange",
-        json!({"textDocument": {"uri": URI, "version": 2}, "contentChanges": [{"text": r#"
-class Point:
-    x: float
-    y: float
-
-def f(p: Point) -> float:
-    return p.
-"#}]}),
+        json!({"textDocument": {"uri": URI, "version": 2}, "contentChanges": [{"text": "type Point:\n    x: Float\n    y: Float\n\nfn f(p: Point) -> Float:\n    p.\n"}]}),
     );
     c.diagnostics(URI);
-    let items = c.request("textDocument/completion", at(6, 13));
+    let items = c.request("textDocument/completion", at(5, 6));
     let labels: Vec<_> = items["result"]
         .as_array()
         .unwrap()
@@ -285,7 +262,7 @@ fn unknown_requests_get_an_error_not_a_hang() {
 fn formats_a_messy_document() {
     let mut c = Client::start();
     initialize(&mut c);
-    open(&mut c, "def main() -> int32:\n  x=1\n  return x+2\n");
+    open(&mut c, "fn main() -> i32:\n  let x=1\n  x+2\n");
     let r = c.request(
         "textDocument/formatting",
         json!({"textDocument": {"uri": URI}, "options": {"tabSize": 4, "insertSpaces": true}}),
@@ -294,7 +271,7 @@ fn formats_a_messy_document() {
     assert_eq!(edits.len(), 1);
     assert_eq!(
         edits[0]["newText"],
-        "def main() -> int32:\n    x = 1\n    return x + 2\n"
+        "fn main() -> i32:\n    let x = 1\n    x + 2\n"
     );
     c.request("shutdown", json!(null));
 }
@@ -317,7 +294,7 @@ fn finds_references_and_renames_variables_and_functions() {
     // `origin` is declared on line 8 and used on line 9.
     let refs = c.request(
         "textDocument/references",
-        json!({"textDocument": {"uri": URI}, "position": {"line": 9, "character": 18},
+        json!({"textDocument": {"uri": URI}, "position": {"line": 9, "character": 11},
                "context": {"includeDeclaration": true}}),
     );
     let lines: Vec<_> = refs["result"]
@@ -329,17 +306,17 @@ fn finds_references_and_renames_variables_and_functions() {
     assert_eq!(lines, [8, 9]);
     let no_decl = c.request(
         "textDocument/references",
-        json!({"textDocument": {"uri": URI}, "position": {"line": 9, "character": 18},
+        json!({"textDocument": {"uri": URI}, "position": {"line": 9, "character": 11},
                "context": {"includeDeclaration": false}}),
     );
     assert_eq!(no_decl["result"].as_array().unwrap().len(), 1);
 
     // The editor asks first which text will be renamed.
-    let prep = c.request("textDocument/prepareRename", at(9, 13));
+    let prep = c.request("textDocument/prepareRename", at(9, 6));
     assert_eq!(prep["result"]["placeholder"], "norm");
 
     // Renaming the function edits its definition and its call.
-    let r = c.request("textDocument/rename", rename_params(9, 13, "length"));
+    let r = c.request("textDocument/rename", rename_params(9, 6, "length"));
     let edits = r["result"]["changes"][URI].as_array().unwrap();
     assert_eq!(edits.len(), 2);
     assert!(edits.iter().all(|e| e["newText"] == "length"));
@@ -350,7 +327,7 @@ fn finds_references_and_renames_variables_and_functions() {
     assert_eq!(starts, [4, 9]);
 
     // Things that must be refused, with a message the editor can show.
-    let keyword = c.request("textDocument/rename", rename_params(9, 13, "while"));
+    let keyword = c.request("textDocument/rename", rename_params(9, 6, "while"));
     assert!(
         keyword["error"]["message"]
             .as_str()
@@ -358,7 +335,7 @@ fn finds_references_and_renames_variables_and_functions() {
             .contains("not a valid name"),
         "{keyword}"
     );
-    let main = c.request("textDocument/rename", rename_params(7, 6, "start"));
+    let main = c.request("textDocument/rename", rename_params(7, 4, "start"));
     assert!(
         main["error"]["message"]
             .as_str()
@@ -367,7 +344,7 @@ fn finds_references_and_renames_variables_and_functions() {
         "{main}"
     );
     // `p` is already a parameter of `norm`: renaming `origin` to it would change what the code means.
-    let clash = c.request("textDocument/rename", rename_params(8, 6, "norm"));
+    let clash = c.request("textDocument/rename", rename_params(8, 10, "norm"));
     assert!(
         clash["error"]["message"]
             .as_str()
@@ -375,7 +352,7 @@ fn finds_references_and_renames_variables_and_functions() {
             .contains("collides"),
         "{clash}"
     );
-    let on_struct = c.request("textDocument/prepareRename", at(0, 8));
+    let on_struct = c.request("textDocument/prepareRename", at(0, 7));
     assert!(
         on_struct["error"]["message"]
             .as_str()

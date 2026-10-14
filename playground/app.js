@@ -9,7 +9,7 @@ let ready = false;
 let currentExample = EXAMPLES[0];
 
 // ---- syntax highlighting (a light tokenizer; the compiler is the source of truth) ------------
-const TOKEN = /(#.*)|(f?"(?:[^"\\]|\\.)*"|f?'(?:[^'\\]|\\.)*')|\b(def|class|enum|trait|extend|import|from|return|if|elif|else|while|for|in|is|match|case|break|continue|pass|lambda|and|or|not|True|False|None)\b|\b(int|float|str|bool|int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|list|dict|Vector|Tensor|Table|Result|[A-Z]\w*)\b|\b(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)\b|(\|>|->|\.\.\.|[-+*\/%=<>!|]+)|(@\w+)|([A-Za-z_]\w*)(?=\s*\()/g;
+const TOKEN = /(#.*)|(f?"(?:[^"\\]|\\.)*"|f?'(?:[^'\\]|\\.)*')|\b(fn|let|var|type|enum|trait|extend|import|from|return|if|elif|else|while|for|in|is|match|case|break|continue|pass|and|or|not|True|False|None)\b|\b(Int|Float|Text|Bool|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|List|Map|Vector|Tensor|Table|Result|[A-Z]\w*)\b|\b(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)\b|(\|>|->|=>|\.\.\.|[-+*\/%=<>!|?]+)|(@\w+)|([A-Za-z_]\w*)(?=\s*\()/g;
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 function render(src) {

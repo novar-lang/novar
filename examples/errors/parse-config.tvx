@@ -1,23 +1,23 @@
 # Parses "key=value" lines with Result, Option, `?`, `if let` and tuples.
 # Run from the repository root: telvax run examples/errors/parse-config.tvx main
 
-def split_pair(line: str) -> Result[(str, str), str]:
-    parts = line.split("=")
+fn split_pair(line: Text) -> Result[(Text, Text), Text]:
+    let parts = line.split("=")
     if parts.len() != 2:
         return Err(f"bad line: {line}")
-    return Ok((parts[0].trim(), parts[1].trim()))
+    Ok((parts[0].trim(), parts[1].trim()))
 
-def port_of(line: str) -> Result[int, str]:
-    key, value = split_pair(line)?
+fn port_of(line: Text) -> Result[Int, Text]:
+    let key, value = split_pair(line)?
     if key != "port":
         return Err(f"expected port, found {key}")
     match value.to_int():
         case Some(n):
-            return Ok(n)
+            Ok(n)
         case None:
-            return Err(f"not a number: {value}")
+            Err(f"not a number: {value}")
 
-def main():
+fn main():
     for line in ["port = 8080", "host = local", "port = abc", "oops"]:
         match port_of(line):
             case Ok(p):

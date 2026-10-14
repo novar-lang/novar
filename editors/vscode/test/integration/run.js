@@ -18,10 +18,10 @@ async function main() {
   );
   fs.writeFileSync(
     path.join(workspace, "ok.tvx"),
-    "class Point:\n    x: float\n    y: float\n\ndef norm(p: Point) -> float:\n    return p.x * p.x + p.y * p.y\n\ndef main() -> float:\n    origin = Point(x=1.0, y=2.0)\n    return norm(origin)\n",
+    "type Point:\n    x: Float\n    y: Float\n\nfn norm(p: Point) -> Float:\n    p.x * p.x + p.y * p.y\n\nfn main() -> Float:\n    let origin = Point(x: 1.0, y: 2.0)\n    norm(origin)\n",
   );
-  fs.writeFileSync(path.join(workspace, "bad.tvx"), 'def main() -> int32:\n    return "not a number"\n');
-  fs.writeFileSync(path.join(workspace, "messy.tvx"), "def main()->int32:\n  x=1\n  return x+2\n");
+  fs.writeFileSync(path.join(workspace, "bad.tvx"), 'fn main() -> i32:\n    "not a number"\n');
+  fs.writeFileSync(path.join(workspace, "messy.tvx"), "fn main()->i32:\n  let x=1\n  x+2\n");
 
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "telvax-vscode-user-"));
   try {

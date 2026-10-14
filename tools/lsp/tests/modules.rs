@@ -31,17 +31,17 @@ impl Drop for Dir {
 const MAIN: &str = r#"
 from util import double, Pair
 
-def main() -> int32:
-    p = Pair(a=1, b=2)
-    return double(p.a) + double(p.b)
+fn main() -> i32:
+    let p = Pair(a: 1, b: 2)
+    double(p.a) + double(p.b)
 "#;
 const UTIL: &str = r#"
-class Pair:
-    a: int32
-    b: int32
+type Pair:
+    a: i32
+    b: i32
 
-def double(x: int32) -> int32:
-    return x * 2
+fn double(x: i32) -> i32:
+    x * 2
 "#;
 
 fn project(tag: &str) -> (Dir, PathBuf) {
@@ -77,10 +77,7 @@ fn hover_shows_the_names_the_user_wrote() {
     let s = Snapshot::analyze_in(MAIN.to_string(), Some(&main));
     let at = MAIN.find("double(p.a)").unwrap() + 2;
     let (text, _) = s.hover(at).unwrap();
-    assert!(
-        text.contains("def util.double(x: int32) -> int32"),
-        "{text}"
-    );
+    assert!(text.contains("fn util.double(x: i32) -> i32"), "{text}");
     assert!(!text.contains("__"), "{text}");
 }
 
@@ -92,7 +89,7 @@ fn go_to_definition_crosses_files() {
     let (file, span) = s.definition_location(at).unwrap();
     assert!(file.ends_with("util.tvx"), "{file}");
     assert_eq!(&UTIL[span], "double");
-    let at = MAIN.find("Pair(a=1").unwrap() + 1;
+    let at = MAIN.find("Pair(a: 1").unwrap() + 1;
     let (file, span) = s.definition_location(at).unwrap();
     assert!(
         file.ends_with("util.tvx") && UTIL[span].starts_with("Pair"),
@@ -106,17 +103,17 @@ fn only_this_documents_problems_and_symbols_are_listed() {
     d.write(
         "util.tvx",
         r#"
-def broken() -> int32:
-    return "nope"
+fn broken() -> i32:
+    "nope"
 "#,
     );
     let main_text = r#"
 import util.broken
 
-def main() -> int32:
-    return broken()
+fn main() -> i32:
+    broken()
 
-def other():
+fn other():
     pass
 "#;
     let main = d.write("main.tvx", main_text);
@@ -139,7 +136,7 @@ def other():
     assert!(
         u.diagnostics
             .iter()
-            .any(|x| x.message.contains("expected `int32`, found `str`"))
+            .any(|x| x.message.contains("expected `i32`, found `Text`"))
     );
 }
 
@@ -147,7 +144,7 @@ def other():
 fn completion_offers_imported_items_without_mangled_names() {
     let (_d, main) = project("complete");
     let s = Snapshot::analyze_in(MAIN.to_string(), Some(&main));
-    let at = MAIN.find("    return double(p.a)").unwrap() + 4;
+    let at = MAIN.find("    double(p.a)").unwrap() + 4;
     let items = s.completions(at);
     let labels: Vec<_> = items.iter().map(|c| c.label.as_str()).collect();
     assert!(
@@ -173,8 +170,8 @@ fn project_dependencies_are_found_through_telvax_toml() {
     d.write(
         "shared/src/lib.tvx",
         r#"
-def answer() -> int32:
-    return 42
+fn answer() -> i32:
+    42
 "#,
     );
     // The locked path dependency is what the compiler consults.
@@ -183,12 +180,12 @@ def answer() -> int32:
     let text = r#"
 import shared.answer
 
-def main() -> int32:
-    return answer()
+fn main() -> i32:
+    answer()
 "#;
     let main = d.write("src/main.tvx", text);
     let s = Snapshot::analyze_in(text.to_string(), Some(&main));
     assert!(s.diagnostics.is_empty(), "{:?}", s.diagnostics);
     let (hover, _) = s.hover(text.find("answer()").unwrap() + 1).unwrap();
-    assert!(hover.contains("def shared.answer() -> int32"), "{hover}");
+    assert!(hover.contains("fn shared.answer() -> i32"), "{hover}");
 }

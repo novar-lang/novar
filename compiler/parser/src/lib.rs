@@ -1,7 +1,7 @@
 //! Parser for Telvax: token stream -> AST.
 //!
-//! The surface syntax is Python-like (blocks by indentation, `def`, `class`, `elif`, `and` /
-//! `or` / `not`, `from a.b import C`). Everything is rewritten into the same tree the compiler
+//! The surface syntax reads like Python (blocks by indentation, `elif`, `and` / `or` / `not`,
+//! `from a.b import C`) with its own words: `fn`, `let` / `var`, `type`, `x => x + 1`, `Int?`. Everything is rewritten into the same tree the compiler
 //! always used, so nothing after the parser knows about the surface: see `desugar` for the
 //! rewrites that need more than one statement to decide (declarations and `return`).
 
@@ -122,12 +122,13 @@ fn lex_message(text: &str) -> Diagnostic {
 /// Words from other languages that start a line, with what to write in Telvax.
 fn foreign_word(word: &str) -> Option<&'static str> {
     Some(match word {
-        "fn" => "`fn` is not used in Telvax: write `def name(...)`",
-        "let" => "`let` is not used in Telvax: write `name = value`",
-        "mut" => "`mut` is not used in Telvax: every variable can change",
-        "struct" => "`struct` is not used in Telvax: write `class Name:`",
+        "def" => "`def` is not used in Telvax: write `fn name(...)`",
+        "class" => "`class` is not used in Telvax: write `type Name:`",
+        "lambda" => "`lambda` is not used in Telvax: write `x => x + 1`",
+        "mut" => "`mut` is not used in Telvax: write `var` for a variable that changes",
+        "struct" => "`struct` is not used in Telvax: write `type Name:`",
         "impl" => {
-            "`impl` is not used in Telvax: put the methods in the `class`, or use `extend Name:`"
+            "`impl` is not used in Telvax: put the methods in the `type`, or use `extend Name:`"
         }
         "pub" => {
             "`pub` is not used in Telvax: names that start with `_` are private, all others are public"
@@ -307,24 +308,35 @@ where
     select! { Token::Ident(s) if s == w => () }
 }
 
-/// The names of the types as written (`int`, `str`, `list`) and as the compiler knows them.
+/// The names of the types as written (`Int`, `Text`, `List`) and as the compiler knows them.
 fn canonical_type_name(name: &str) -> &str {
     match name {
-        "int" | "int64" => "i64",
-        "int8" => "i8",
-        "int16" => "i16",
-        "int32" => "i32",
-        "uint8" => "u8",
-        "uint16" => "u16",
-        "uint32" => "u32",
-        "uint64" => "u64",
-        "float" | "float64" => "f64",
-        "float32" => "f32",
-        "str" => "String",
-        "list" => "Vec",
-        "dict" => "Map",
+        "Int" => "i64",
+        "Float" => "f64",
+        "Text" => "String",
+        "Bool" => "bool",
+        "List" => "Vec",
         other => other,
     }
+}
+
+/// `Tensor[f32, 2, 3]`: after the element type, the arguments are the dimensions.
+fn tensor_shape(args: Vec<TypeArg>) -> Vec<TypeArg> {
+    let mut out = Vec::new();
+    let mut dims = Vec::new();
+    for (i, a) in args.into_iter().enumerate() {
+        match a {
+            TypeArg::Shape(d) if i > 0 => dims.extend(d),
+            TypeArg::Type(t) if i > 0 && t.path.len() == 1 && t.args.is_empty() => {
+                dims.push(Dim::Named(t.path[0].clone()));
+            }
+            other => out.push(other),
+        }
+    }
+    if !dims.is_empty() {
+        out.push(TypeArg::Shape(dims));
+    }
+    out
 }
 
 fn type_<'a, 's: 'a, I>() -> impl Parser<'a, I, Type, Extra<'a, 's>> + Clone
@@ -332,36 +344,32 @@ where
     I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
 {
     recursive(|ty| {
-        let dim = select! { Token::Int(n) => n }
-            .try_map(|n, span| {
-                n.replace('_', "")
-                    .parse::<u64>()
-                    .map(Dim::Lit)
-                    .map_err(|_| Rich::custom(span, "integer literal out of range"))
-            })
-            .or(ident().map(Dim::Named));
-        let shape = dim
-            .separated_by(just(Token::Comma))
-            .allow_trailing()
-            .collect::<Vec<_>>()
-            .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map(TypeArg::Shape);
+        let dim = select! { Token::Int(n) => n }.try_map(|n, span| {
+            n.replace('_', "")
+                .parse::<u64>()
+                .map(|v| TypeArg::Shape(vec![Dim::Lit(v)]))
+                .map_err(|_| Rich::custom(span, "integer literal out of range"))
+        });
         let row = ident()
             .then_ignore(just(Token::Colon))
             .then(ty.clone())
-            .map(|(name, ty)| Field { name, ty })
+            .map(|(name, ty)| Field {
+                name,
+                ty,
+                default: None,
+            })
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBrace), just(Token::RBrace))
             .map(TypeArg::Row);
-        let arg = ty.clone().map(TypeArg::Type).or(shape).or(row);
+        let arg = ty.clone().map(TypeArg::Type).or(dim).or(row);
         let args = arg
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket));
-        // `(int, str)`: a tuple type is spelled with a name no program can write.
+        // `(Int, Text)`: a tuple type is spelled with a name no program can write.
         let tuple_ty = ty
             .clone()
             .separated_by(just(Token::Comma))
@@ -385,19 +393,23 @@ where
                 let canon = canonical_type_name(&path[0].node).to_string();
                 path[0].node = canon;
             }
+            let mut args = args.unwrap_or_default();
+            if path.last().is_some_and(|p| p.node == "Tensor") {
+                args = tensor_shape(args);
+            }
             Type {
                 path,
-                args: args.unwrap_or_default(),
+                args,
                 span: rng(e.span()),
             }
         });
-        // `T | None` is `Option<T>`.
+        // `T?` is `Option<T>`.
         tuple_ty
             .or(named)
-            .then(just(Token::Bar).ignore_then(word("None")).or_not())
-            .map_with(|(base, none), e| match none {
+            .then(just(Token::Question).or_not())
+            .map_with(|(base, optional), e| match optional {
                 None => base,
-                Some(()) => {
+                Some(_) => {
                     let span = rng(e.span());
                     Type {
                         path: vec![Ident {
@@ -768,23 +780,26 @@ where
         #[derive(Clone)]
         enum Postfix {
             Call(Vec<Expr>),
-            /// `Point(x=1, y=2)`: a struct being built.
-            Fields(Vec<(Ident, Expr)>),
             Field(Ident),
             Index(Expr),
             Try,
             Parts(Vec<Ident>),
         }
-        let keyword_arg = ident().then_ignore(just(Token::Eq)).then(expr.clone());
-        let keyword_args = keyword_arg
-            .separated_by(just(Token::Comma))
-            .at_least(1)
-            .allow_trailing()
-            .collect::<Vec<_>>()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(Postfix::Fields);
-        let call = expr
-            .clone()
+        // An argument is `value` or `name: value`.
+        let argument = ident()
+            .then_ignore(just(Token::Colon))
+            .then(expr.clone())
+            .map_with(|(name, value), e| {
+                spanned(
+                    ExprKind::Named {
+                        name,
+                        value: Box::new(value),
+                    },
+                    e.span(),
+                )
+            })
+            .or(expr.clone());
+        let call = argument
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
@@ -822,26 +837,41 @@ where
             .map(Postfix::Index);
         let path_heads = heads.clone();
         let postfix = primary.foldl_with(
-            keyword_args
-                .or(call)
-                .or(field)
-                .or(index)
-                .or(try_)
-                .repeated(),
+            call.or(field).or(index).or(try_).repeated(),
             move |base, op, e| {
                 let kind = match op {
                     Postfix::Index(index) => ExprKind::Index {
                         base: Box::new(base),
                         index: Box::new(index),
                     },
-                    Postfix::Call(args) => ExprKind::Call {
-                        callee: Box::new(base),
-                        args,
-                    },
-                    Postfix::Fields(fields) => match base.node {
-                        ExprKind::Path(path) => ExprKind::StructLit { path, fields },
-                        _ => ExprKind::Error,
-                    },
+                    Postfix::Call(args) => {
+                        // `Point(x: 1, y: 2)`: a capitalized name with every argument named builds
+                        // a value of that type.
+                        let builds = !args.is_empty()
+                            && args
+                                .iter()
+                                .all(|a| matches!(a.node, ExprKind::Named { .. }))
+                            && matches!(&base.node, ExprKind::Path(p)
+                                if p.last().is_some_and(|i| i.node.starts_with(|c: char| c.is_uppercase())));
+                        if builds {
+                            let ExprKind::Path(path) = base.node else {
+                                unreachable!()
+                            };
+                            let fields = args
+                                .into_iter()
+                                .filter_map(|a| match a.node {
+                                    ExprKind::Named { name, value } => Some((name, *value)),
+                                    _ => None,
+                                })
+                                .collect();
+                            ExprKind::StructLit { path, fields }
+                        } else {
+                            ExprKind::Call {
+                                callee: Box::new(base),
+                                args,
+                            }
+                        }
+                    }
                     Postfix::Try => ExprKind::Try(Box::new(base)),
                     Postfix::Parts(names) => {
                         let mut current = base;
@@ -1032,8 +1062,9 @@ where
                 }
             });
 
-        // `lambda x, y: x + y`; a parameter may also be a tuple of names: `lambda (i, s): ..`.
-        let lambda_param = ident()
+        // `x => x + 1`, `(a, b) => a + b`, `() => 1`; a parameter may also be a tuple of names:
+        // `((i, s)) => ..`.
+        let arrow_param = ident()
             .map(|name| (name, Vec::new()))
             .or(tuple_names().map_with(|names, e| {
                 let at = rng(e.span());
@@ -1045,13 +1076,15 @@ where
                     names,
                 )
             }));
-        let lambda = just(Token::Lambda)
-            .ignore_then(
-                lambda_param
-                    .separated_by(just(Token::Comma))
-                    .collect::<Vec<_>>(),
-            )
-            .then_ignore(just(Token::Colon))
+        let arrow_params = arrow_param
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .or(arrow_param.map(|p| vec![p]));
+        let lambda = arrow_params
+            .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
             .map_with(|(params, body), e| {
                 let mut names = Vec::new();
@@ -1313,7 +1346,7 @@ where
 
         // `def add(a, b: int):` inside a function is a closure bound to a name.
         let local_param = ident().then(just(Token::Colon).ignore_then(type_()).or_not());
-        let local_def = just(Token::Def)
+        let local_def = just(Token::Fn)
             .ignore_then(ident())
             .then(
                 local_param
@@ -1358,36 +1391,40 @@ where
             .or(just(Token::Ellipsis))
             .to(BlockItem::Nothing);
 
-        // `name: type = value`
-        let typed = ident()
-            .then_ignore(just(Token::Colon))
-            .then(type_())
+        // `let name: Type = value` and `var name = value`
+        let binding = choice((just(Token::Let).to(false), just(Token::Var).to(true)));
+        let binding_one = binding
+            .then(ident())
+            .then(just(Token::Colon).ignore_then(type_()).or_not())
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
-            .map_with(|((name, ty), init), e| {
+            .map_with(|(((mutable, name), ty), init), e| {
                 BlockItem::Let(Let {
-                    mutable: true,
+                    mutable,
                     name,
-                    ty: Some(ty),
+                    ty,
                     init,
                     span: rng(e.span()),
                 })
             });
-        // `a, b = value`
-        let destructure = ident()
-            .separated_by(just(Token::Comma))
-            .at_least(2)
-            .allow_trailing()
-            .collect::<Vec<_>>()
+        // `let a, b = value`
+        let binding_many = binding
+            .then(
+                ident()
+                    .separated_by(just(Token::Comma))
+                    .at_least(2)
+                    .allow_trailing()
+                    .collect::<Vec<_>>(),
+            )
             .then_ignore(just(Token::Eq))
             .then(expr.clone())
-            .map_with(|(names, init), e| {
+            .map_with(|((mutable, names), init), e| {
                 let span = rng(e.span());
                 let temp = Ident {
                     node: format!("__tuple{}", span.start),
                     span: span.clone(),
                 };
-                BlockItem::Lets(tuple_lets(names, temp, Some(init), true, span))
+                BlockItem::Lets(tuple_lets(names, temp, Some(init), mutable, span))
             });
         // `target = value` and the compound forms, which desugar to `target = target op value`.
         let assign_op = select! {
@@ -1431,8 +1468,8 @@ where
             break_,
             continue_,
             pass,
-            typed,
-            destructure,
+            binding_many,
+            binding_one,
             simple_expr,
         ))
         .then_ignore(just(Token::Newline));
@@ -1521,13 +1558,56 @@ where
             })
         });
 
-    // `@endpoint(path="/x", method="POST")`
+    // `@endpoint(POST, "/x")`, or with names: `@endpoint(method: POST, path: "/x")`. A bare word
+    // is the HTTP method and a string is the path.
+    let text_value = |name: &'static str| {
+        move |value: Expr| -> Expr {
+            match value.node {
+                ExprKind::Path(ref p) if name == "method" && p.len() == 1 => Expr {
+                    span: value.span.clone(),
+                    node: ExprKind::Lit(Lit::Str(p[0].node.clone())),
+                },
+                _ => value,
+            }
+        }
+    };
+    let attr_named = ident()
+        .then_ignore(just(Token::Colon))
+        .then(expr.clone())
+        .map(move |(key, value)| {
+            let fix = text_value(if key.node == "method" { "method" } else { "" });
+            (key, fix(value))
+        });
+    let attr_method = ident().map_with(|word, e| {
+        let span = rng(e.span());
+        (
+            Ident {
+                node: "method".into(),
+                span: span.clone(),
+            },
+            Expr {
+                node: ExprKind::Lit(Lit::Str(word.node)),
+                span,
+            },
+        )
+    });
+    let attr_path = select! { Token::Str(s) => s }.map_with(|text, e| {
+        let span = rng(e.span());
+        (
+            Ident {
+                node: "path".into(),
+                span: span.clone(),
+            },
+            Expr {
+                node: ExprKind::Lit(Lit::Str(unescape(&text[1..text.len() - 1]))),
+                span,
+            },
+        )
+    });
     let attr = just(Token::At)
         .ignore_then(ident())
         .then(
-            ident()
-                .then_ignore(just(Token::Eq))
-                .then(expr.clone())
+            choice((attr_named, attr_path, attr_method))
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -1558,22 +1638,24 @@ where
                 args: Vec::new(),
                 span,
             },
+            default: None,
         }
     });
-    let param =
-        self_param.or(ident()
-            .then_ignore(just(Token::Colon))
-            .then(type_())
-            .map(|(name, ty)| Param {
-                mutable: true,
-                name,
-                ty,
-            }));
+    let param = self_param.or(ident()
+        .then_ignore(just(Token::Colon))
+        .then(type_())
+        .then(just(Token::Eq).ignore_then(expr.clone()).or_not())
+        .map(|((name, ty), default)| Param {
+            mutable: true,
+            name,
+            ty,
+            default,
+        }));
 
     let func = attr
         .repeated()
         .collect::<Vec<_>>()
-        .then_ignore(just(Token::Def))
+        .then_ignore(just(Token::Fn))
         .then(ident())
         .then(generics())
         .then(
@@ -1627,8 +1709,9 @@ where
     let field = ident()
         .then_ignore(just(Token::Colon))
         .then(type_())
+        .then(just(Token::Eq).ignore_then(expr.clone()).or_not())
         .then_ignore(just(Token::Newline))
-        .map(|(name, ty)| Member::Field(Field { name, ty }));
+        .map(|((name, ty), default)| Member::Field(Field { name, ty, default }));
     let member = choice((
         func.clone().map(Member::Method),
         field,
@@ -1636,7 +1719,7 @@ where
             .then(just(Token::Newline))
             .to(Member::Nothing),
     ));
-    let class = just(Token::Class)
+    let class = word("type")
         .ignore_then(ident())
         .then(generics())
         .then(
@@ -1761,7 +1844,8 @@ where
         });
 
     // A name set at the top of the file: `embedder = OllamaEmbedder.new("x")`.
-    let global = ident()
+    let global = just(Token::Let)
+        .ignore_then(ident())
         .then(just(Token::Colon).ignore_then(type_()).or_not())
         .then_ignore(just(Token::Eq))
         .then(expr)
@@ -1779,14 +1863,15 @@ where
     let item_start = one_of([
         Token::Import,
         Token::From,
-        Token::Class,
         Token::Enum,
         Token::Extend,
         Token::Trait,
-        Token::Def,
+        Token::Fn,
+        Token::Let,
         Token::At,
     ])
-    .ignored();
+    .ignored()
+    .or(word("type"));
 
     choice((
         import.map(|i| vec![i]),
@@ -1804,24 +1889,11 @@ where
     .then_ignore(end())
     .map(|groups| {
         let mut items: Vec<Item> = groups.into_iter().flatten().collect();
-        let globals: HashSet<String> = items
-            .iter()
-            .filter_map(|i| match i {
-                Item::Let(l) => Some(l.name.node.clone()),
-                _ => None,
-            })
-            .collect();
         for item in &mut items {
             match item {
-                Item::Fn(f) => desugar::finish_fn(f, &globals),
-                Item::Impl(i) => i
-                    .fns
-                    .iter_mut()
-                    .for_each(|f| desugar::finish_fn(f, &globals)),
-                Item::Trait(t) => t
-                    .fns
-                    .iter_mut()
-                    .for_each(|f| desugar::finish_fn(f, &globals)),
+                Item::Fn(f) => desugar::finish_fn(f),
+                Item::Impl(i) => i.fns.iter_mut().for_each(desugar::finish_fn),
+                Item::Trait(t) => t.fns.iter_mut().for_each(desugar::finish_fn),
                 _ => {}
             }
         }

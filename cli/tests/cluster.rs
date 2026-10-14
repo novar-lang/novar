@@ -63,17 +63,17 @@ fn program(tag: &str) -> PathBuf {
     std::fs::write(
         &path,
         r#"
-def square(x: int) -> int:
-    return x * x
+fn square(x: Int) -> Int:
+    x * x
 
-def ones() -> list[int]:
-    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+fn ones() -> List[Int]:
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-def all() -> int:
-    s: int = 0
+fn all() -> Int:
+    var s: Int = 0
     for v in std.dist.map(ones(), square):
         s += v
-    return s
+    s
 "#,
     )
     .unwrap();

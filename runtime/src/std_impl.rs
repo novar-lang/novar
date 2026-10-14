@@ -19,14 +19,14 @@ fn err<T>(msg: impl Into<String>) -> Result<T, RuntimeError> {
 fn want_str(v: &Value) -> Result<Arc<str>, RuntimeError> {
     match v {
         Value::Str(s) => Ok(s.clone()),
-        other => err(format!("expected a str, found {}", other.type_name())),
+        other => err(format!("expected a Text, found {}", other.type_name())),
     }
 }
 
 fn want_vec(v: &Value) -> Result<Vec<Value>, RuntimeError> {
     match v {
         Value::Vec(items) => Ok(items.snapshot()),
-        other => err(format!("expected a list, found {}", other.type_name())),
+        other => err(format!("expected a List, found {}", other.type_name())),
     }
 }
 
@@ -335,7 +335,7 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
                 }
                 Ok(Value::vec(s.split(&*sep).map(Value::str).collect()))
             }
-            _ => err(format!("str has no method `{name}`")),
+            _ => err(format!("Text has no method `{name}`")),
         },
         Value::Table(t) => match name {
             "len" => Ok(Value::Int(t.rows() as i64)),
@@ -370,7 +370,7 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
                 v.reverse();
                 Ok(Value::Unit)
             }
-            _ => err(format!("list has no method `{name}`")),
+            _ => err(format!("List has no method `{name}`")),
         },
         Value::Enum(e) if e.name == "Option" => match name {
             "is_some" => Ok(Value::Bool(e.variant == "Some")),

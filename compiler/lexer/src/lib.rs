@@ -25,10 +25,12 @@ pub enum Token<'src> {
     Import,
     #[token("from")]
     From,
-    #[token("def")]
-    Def,
-    #[token("class")]
-    Class,
+    #[token("fn")]
+    Fn,
+    #[token("let")]
+    Let,
+    #[token("var")]
+    Var,
     #[token("enum")]
     Enum,
     #[token("trait")]
@@ -61,8 +63,6 @@ pub enum Token<'src> {
     Is,
     #[token("while")]
     While,
-    #[token("lambda")]
-    Lambda,
     #[token("and")]
     And,
     #[token("or")]
@@ -102,6 +102,8 @@ pub enum Token<'src> {
     SlashEq,
     #[token("->")]
     Arrow,
+    #[token("=>")]
+    FatArrow,
     #[token("==")]
     EqEq,
     #[token("!=")]
@@ -168,8 +170,9 @@ impl std::fmt::Display for Token<'_> {
         let s = match self {
             Import => "import",
             From => "from",
-            Def => "def",
-            Class => "class",
+            Fn => "fn",
+            Let => "let",
+            Var => "var",
             Enum => "enum",
             Trait => "trait",
             Extend => "extend",
@@ -186,7 +189,6 @@ impl std::fmt::Display for Token<'_> {
             In => "in",
             Is => "is",
             While => "while",
-            Lambda => "lambda",
             And => "and",
             Or => "or",
             Not => "not",
@@ -200,6 +202,7 @@ impl std::fmt::Display for Token<'_> {
             StarEq => "*=",
             SlashEq => "/=",
             Arrow => "->",
+            FatArrow => "=>",
             EqEq => "==",
             NotEq => "!=",
             LtEq => "<=",
@@ -337,10 +340,20 @@ mod tests {
     }
 
     #[test]
-    fn lambda_does_not_collide_with_pipe() {
+    fn arrow_function_does_not_collide_with_pipe() {
         assert_eq!(
-            flat("lambda d: d.text"),
-            [Lambda, Ident("d"), Colon, Ident("d"), Dot, Ident("text")]
+            flat("d => d.text |> f()"),
+            [
+                Ident("d"),
+                FatArrow,
+                Ident("d"),
+                Dot,
+                Ident("text"),
+                Pipe,
+                Ident("f"),
+                LParen,
+                RParen
+            ]
         );
     }
 
@@ -415,17 +428,23 @@ mod tests {
         );
         assert_eq!(flat("True False None"), [True, False, Ident("None")]);
         assert_eq!(
-            flat("def f(): ..."),
-            [Def, Ident("f"), LParen, RParen, Colon, Ellipsis]
+            flat("fn f(): ..."),
+            [Fn, Ident("f"), LParen, RParen, Colon, Ellipsis]
         );
     }
 
     #[test]
     fn keywords_vs_identifiers() {
-        assert_eq!(flat("def define"), [Def, Ident("define")]);
+        assert_eq!(flat("fn define"), [Fn, Ident("define")]);
         assert_eq!(
-            flat("let fn mut"),
-            [Ident("let"), Ident("fn"), Ident("mut")]
+            flat("def class type lambda mut"),
+            [
+                Ident("def"),
+                Ident("class"),
+                Ident("type"),
+                Ident("lambda"),
+                Ident("mut")
+            ]
         );
     }
 
@@ -436,8 +455,8 @@ mod tests {
 
     #[test]
     fn spans_are_byte_offsets() {
-        let (toks, _) = tokenize_flat("def x");
-        assert_eq!(toks[1].1, 4..5);
+        let (toks, _) = tokenize_flat("fn x");
+        assert_eq!(toks[1].1, 3..4);
     }
 
     #[test]

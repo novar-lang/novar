@@ -162,8 +162,8 @@
           "match": "\\b(?:and|or|not)\\b"
         },
         {
-          "name": "storage.type.function.lambda.telvax",
-          "match": "\\blambda\\b"
+          "name": "storage.type.telvax",
+          "match": "\\b(?:let|var)\\b"
         }
       ]
     },
@@ -174,7 +174,7 @@
     "declaration": {
       "patterns": [
         {
-          "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "storage.type.function.telvax"
@@ -185,7 +185,7 @@
           }
         },
         {
-          "match": "\\b(class|enum|trait|extend)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "^\\s*(type|enum|trait|extend)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "storage.type.struct.telvax"
@@ -209,11 +209,11 @@
       "patterns": [
         {
           "name": "support.type.primitive.telvax",
-          "match": "\\b(?:int|float|str|bool|int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64)\\b"
+          "match": "\\b(?:Int|Float|Text|Bool|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)\\b"
         },
         {
           "name": "support.type.builtin.telvax",
-          "match": "\\b(?:list|dict|Vector|Tensor|Table|Result)\\b"
+          "match": "\\b(?:List|Map|Vector|Tensor|Table|Result)\\b"
         },
         {
           "name": "entity.name.type.telvax",
@@ -233,7 +233,7 @@
         },
         {
           "name": "keyword.operator.arrow.telvax",
-          "match": "->"
+          "match": "->|=>"
         },
         {
           "name": "keyword.operator.assignment.telvax",
@@ -250,10 +250,6 @@
         {
           "name": "keyword.operator.try.telvax",
           "match": "\\?"
-        },
-        {
-          "name": "keyword.operator.union.telvax",
-          "match": "\\|"
         }
       ]
     }

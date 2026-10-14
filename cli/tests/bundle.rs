@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 const APP: &str = r#"
-class In:
-    name: str
+type In:
+    name: Text
 
-class Out:
-    greeting: str
+type Out:
+    greeting: Text
 
-@endpoint(path="/hello", method="POST")
-def hello(p: In) -> Result[Out, str]:
-    return Ok(Out(greeting=f"hello, {p.name}!"))
+@endpoint(POST, "/hello")
+fn hello(p: In) -> Result[Out, Text]:
+    Ok(Out(greeting: f"hello, {p.name}!"))
 "#;
 
 fn scratch(name: &str) -> PathBuf {
@@ -176,8 +176,8 @@ fn programs_without_endpoints_are_rejected() {
     std::fs::write(
         &src,
         r#"
-def main() -> int32:
-    return 0
+fn main() -> i32:
+    0
 "#,
     )
     .unwrap();
@@ -231,23 +231,23 @@ fn a_multi_file_program_is_bundled_with_all_its_modules() {
         r#"
 import util.shout
 
-class In:
-    name: str
+type In:
+    name: Text
 
-class Out:
-    greeting: str
+type Out:
+    greeting: Text
 
-@endpoint(path="/hello", method="POST")
-def hello(p: In) -> Result[Out, str]:
-    return Ok(Out(greeting=shout(p.name)))
+@endpoint(POST, "/hello")
+fn hello(p: In) -> Result[Out, Text]:
+    Ok(Out(greeting: shout(p.name)))
 "#,
     )
     .unwrap();
     std::fs::write(
         dir.join("util.tvx"),
         r#"
-def shout(s: str) -> str:
-    return f"{s}!"
+fn shout(s: Text) -> Text:
+    f"{s}!"
 "#,
     )
     .unwrap();
@@ -293,16 +293,16 @@ fn errors_in_a_module_are_reported_against_that_file() {
         r#"
 import util.bad
 
-def main() -> int32:
-    return bad()
+fn main() -> i32:
+    bad()
 "#,
     )
     .unwrap();
     std::fs::write(
         dir.join("util.tvx"),
         r#"
-def bad() -> int32:
-    return "nope"
+fn bad() -> i32:
+    "nope"
 "#,
     )
     .unwrap();
@@ -314,7 +314,7 @@ def bad() -> int32:
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("util.tvx:3:12") && err.contains("expected `int32`, found `str`"),
+        err.contains("util.tvx:3:5") && err.contains("expected `i32`, found `Text`"),
         "{err}"
     );
 }
@@ -341,8 +341,8 @@ fn tvpm_projects_run_against_installed_dependencies() {
     std::fs::write(
         lib.join("src/lib.tvx"),
         r#"
-def cube(x: int) -> int:
-    return x * x * x
+fn cube(x: Int) -> Int:
+    x * x * x
 "#,
     )
     .unwrap();
@@ -358,8 +358,8 @@ def cube(x: int) -> int:
         r#"
 import mathx.cube
 
-def main() -> int:
-    return cube(3) + 1
+fn main() -> Int:
+    cube(3) + 1
 "#,
     )
     .unwrap();

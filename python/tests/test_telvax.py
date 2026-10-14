@@ -10,64 +10,64 @@ import telvax
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 PROGRAM = """
-class Point:
-    x: float
-    y: float
+type Point:
+    x: Float
+    y: Float
 
-class Order:
-    id: int
-    tags: list[str]
+type Order:
+    id: Int
+    tags: List[Text]
     at: Point
 
-def add(a: int, b: int) -> int:
-    return a + b
+fn add(a: Int, b: Int) -> Int:
+    a + b
 
-def scale(p: Point, k: float) -> Point:
-    return Point(x=p.x * k, y=p.y * k)
+fn scale(p: Point, k: Float) -> Point:
+    Point(x: p.x * k, y: p.y * k)
 
-def describe(o: Order) -> str:
-    return f"order {o.id} at ({o.at.x}, {o.at.y}) with {o.tags.len()} tags"
+fn describe(o: Order) -> Text:
+    f"order {o.id} at ({o.at.x}, {o.at.y}) with {o.tags.len()} tags"
 
-def total(v: list[int]) -> int:
-    s = 0
+fn total(v: List[Int]) -> Int:
+    var s = 0
     for x in v:
         s += x
-    return s
+    s
 
-def shout(s: str) -> str:
-    return std.text.uppercase(s)
+fn shout(s: Text) -> Text:
+    std.text.uppercase(s)
 
-def nothing():
+fn nothing():
     pass
 
-def boom(d: int) -> int:
-    return 10 / d
+fn boom(d: Int) -> Int:
+    10 / d
 
-def tsum(t: Tensor[float32, [4]]) -> float32:
-    return std.tensor.sum(t)
+fn tsum(t: Tensor[f32, 4]) -> f32:
+    std.tensor.sum(t)
 
-def double(t: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
-    return std.tensor.scale(t, 2.0)
+fn double(t: Tensor[f32, 4]) -> Tensor[f32, 4]:
+    std.tensor.scale(t, 2.0)
 
-def head(t: Tensor[float, [N]]) -> float:
-    return t[0]
+fn head(t: Tensor[Float, N]) -> Float:
+    t[0]
 
-def mm(a: Tensor[float32, [2, 3]], b: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
-    return std.tensor.matmul(a, b)
+fn mm(a: Tensor[f32, 2, 3], b: Tensor[f32, 3, 2]) -> Tensor[f32, 2, 2]:
+    std.tensor.matmul(a, b)
 
-class Row:
-    id: int
-    score: float32
-    name: str
+type Row:
+    id: Int
+    score: f32
+    name: Text
 
-def count(t: Table[Row]) -> uint64:
-    return t.len()
+fn count(t: Table[Row]) -> u64:
+    t.len()
 
-def mean_score(t: Table[Row]) -> float32:
-    return std.tensor.mean(t.score)
+fn mean_score(t: Table[Row]) -> f32:
+    std.tensor.mean(t.score)
 
-def best(t: Table[Row]) -> Table[Row]:
-    return t |> std.table.sql("SELECT * FROM t WHERE score > 1.5 ORDER BY score DESC")
+fn best(t: Table[Row]) -> Table[Row]:
+    t |> std.table.sql("SELECT * FROM t WHERE score > 1.5 ORDER BY score DESC")
 """
 
 
@@ -115,10 +115,10 @@ def test_runtime_errors_become_exceptions(prog):
 def test_compile_errors_carry_diagnostics():
     with pytest.raises(telvax.CompileError) as e:
         telvax.compile("""
-def f() -> int32:
-    return "oops"
+fn f() -> i32:
+    "oops"
 """, name="bad.tvx")
-    assert "bad.tvx:3" in str(e.value) and "expected `int32`, found `str`" in str(e.value)
+    assert "bad.tvx:3" in str(e.value) and "expected `i32`, found `Text`" in str(e.value)
 
 
 def test_rag_endpoint_and_status_errors():
@@ -320,29 +320,29 @@ def test_scalar_calls_cost_microseconds(prog):
 # ---- distributed execution -----------------------------------------------------------------
 
 DIST = """
-def square(x: int) -> int:
-    return x * x
+fn square(x: Int) -> Int:
+    x * x
 
-def collatz(n: int) -> int:
-    steps: int = 0
-    x = n
+fn collatz(n: Int) -> Int:
+    var steps: Int = 0
+    var x = n
     while x != 1:
         if x % 2 == 0:
             x = x / 2
         else:
             x = 3 * x + 1
         steps += 1
-    return steps
+    steps
 
-def squares(v: list[int]) -> list[int]:
-    return std.dist.map(v, square)
+fn squares(v: List[Int]) -> List[Int]:
+    std.dist.map(v, square)
 
-def longest(v: list[int]) -> int:
-    best: int = 0
+fn longest(v: List[Int]) -> Int:
+    var best: Int = 0
     for steps in std.dist.map(v, collatz):
         if steps > best:
             best = steps
-    return best
+    best
 """
 
 
@@ -408,27 +408,27 @@ def test_mapped_calls_run_as_ray_tasks():
 
 ENUMS = """
 enum Shape:
-    Circle(float)
-    Rect(float, float)
+    Circle(Float)
+    Rect(Float, Float)
     Empty
 
-def area(s: Shape) -> float:
+fn area(s: Shape) -> Float:
     match s:
         case Shape.Circle(r):
-            return r * r * 3.0
+            r * r * 3.0
         case Shape.Rect(w, h):
-            return w * h
+            w * h
         case Shape.Empty:
-            return 0.0
+            0.0
 
-def make(kind: int) -> Shape:
+fn make(kind: Int) -> Shape:
     match kind:
         case 0:
-            return Shape.Circle(1.5)
+            Shape.Circle(1.5)
         case 1:
-            return Shape.Rect(2.0, 3.0)
+            Shape.Rect(2.0, 3.0)
         case _:
-            return Shape.Empty
+            Shape.Empty
 """
 
 
@@ -448,28 +448,28 @@ def test_enums_use_the_json_shape():
 
 
 OPT_MAP = """
-def find(words: list[str], w: str) -> uint64 | None:
+fn find(words: List[Text], w: Text) -> u64?:
     words.contains(w) and True
     words.first().is_some() and w.len() > 0
-    return w.find("a")
+    w.find("a")
 
-def word_counts(text: str) -> dict[str, int]:
-    counts: dict[str, int] = std.map.new()
+fn word_counts(text: Text) -> Map[Text, Int]:
+    let counts: Map[Text, Int] = std.map.new()
     for w in text.split(" "):
         counts.insert(w, counts.get(w).unwrap_or(0) + 1)
-    return counts
+    counts
 
-def lookup(m: dict[str, int], k: str) -> int:
-    return m.get(k).unwrap_or(0 - 1)
+fn lookup(m: Map[Text, Int], k: Text) -> Int:
+    m.get(k).unwrap_or(0 - 1)
 
-def maybe(flag: bool) -> str | None:
+fn maybe(flag: Bool) -> Text?:
     if flag:
-        return Some("yes")
+        Some("yes")
     else:
-        return None
+        None
 
-def total(x: Tensor[float32, [4]]) -> float32:
-    return (x * 2.0 + x).sum()
+fn total(x: Tensor[f32, 4]) -> f32:
+    (x * 2.0 + x).sum()
 """
 
 

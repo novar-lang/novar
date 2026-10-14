@@ -80,7 +80,7 @@ fn calls_fields_and_paths() {
 
 #[test]
 fn imported_names_start_paths() {
-    let p = ok_program("import util\n\ndef f() -> int:\n    return util.clamp(3)\n");
+    let p = ok_program("import util\n\nfn f() -> Int:\n    return util.clamp(3)\n");
     let Item::Fn(f) = &p.items[1] else { panic!() };
     let Some(t) = f.body.tail.as_deref() else {
         panic!()
@@ -90,26 +90,37 @@ fn imported_names_start_paths() {
 }
 
 #[test]
-fn lambda_in_call() {
-    assert!(matches!(
-        ok_expr("map(lambda d: d.text)"),
-        ExprKind::Call { .. }
-    ));
-    let ExprKind::Call { args, .. } = ok_expr("f(lambda a, b: a + b, lambda: 1)") else {
+fn arrow_functions() {
+    assert!(matches!(ok_expr("map(d => d.text)"), ExprKind::Call { .. }));
+    let ExprKind::Call { args, .. } = ok_expr("f((a, b) => a + b, () => 1, x => x)") else {
         panic!()
     };
     assert!(matches!(&args[0].node, ExprKind::Closure { params, .. } if params.len() == 2));
     assert!(matches!(&args[1].node, ExprKind::Closure { params, .. } if params.is_empty()));
+    assert!(matches!(&args[2].node, ExprKind::Closure { params, .. } if params.len() == 1));
+    // A parenthesized tuple is still a tuple.
+    assert!(matches!(ok_expr("(a, b)"), ExprKind::Tuple(_)));
+    // Double parentheses take one tuple argument apart.
+    let ExprKind::Closure { params, body, .. } = ok_expr("((i, x)) => i + x") else {
+        panic!()
+    };
+    assert_eq!(params.len(), 1);
+    assert!(matches!(body.node, ExprKind::Block(_)));
 }
 
 #[test]
-fn struct_construction_uses_keyword_arguments() {
-    let ExprKind::StructLit { path, fields } = ok_expr("Foo(a=1, b=2,)") else {
+fn construction_names_every_field() {
+    let ExprKind::StructLit { path, fields } = ok_expr("Foo(a: 1, b: 2,)") else {
         panic!()
     };
     assert_eq!(path.len(), 1);
     assert_eq!(fields.len(), 2);
     assert!(matches!(ok_expr("Foo(1, 2)"), ExprKind::Call { .. }));
+    // A call to a function keeps the names for the checker.
+    let ExprKind::Call { args, .. } = ok_expr("search(v, limit: 3)") else {
+        panic!()
+    };
+    assert!(matches!(&args[1].node, ExprKind::Named { name, .. } if name.node == "limit"));
 }
 
 #[test]
@@ -149,32 +160,47 @@ fn imports() {
 }
 
 #[test]
-fn types_are_spelled_like_python() {
+fn types_have_capitalized_names_and_inline_shapes() {
     let f = only_fn(
-        "def f(x: Tensor[float32, [768]], y: list[Tensor[int8, [N, 4]]], z: int | None, \
-         w: dict[str, (int, float)]) -> list: ...\n",
+        "fn f(x: Tensor[f32, 768], y: List[Tensor[i8, N, 4]], z: Int?, \
+         w: Map[Text, (Int, Float)]) -> List: ...\n",
     );
     assert_eq!(f.params[0].ty.path[0].node, "Tensor");
     assert!(matches!(&f.params[0].ty.args[0], TypeArg::Type(t) if t.path[0].node == "f32"));
     assert!(matches!(&f.params[0].ty.args[1], TypeArg::Shape(d) if d == &[Dim::Lit(768)]));
     assert_eq!(f.params[1].ty.path[0].node, "Vec");
+    let TypeArg::Type(inner) = &f.params[1].ty.args[0] else {
+        panic!()
+    };
+    assert!(matches!(&inner.args[1], TypeArg::Shape(d)
+        if matches!(d.as_slice(), [Dim::Named(n), Dim::Lit(4)] if n.node == "N")));
     assert_eq!(f.params[2].ty.path[0].node, "Option");
     assert_eq!(f.params[3].ty.path[0].node, "Map");
     assert_eq!(f.ret.as_ref().unwrap().path[0].node, "Vec");
 }
 
 #[test]
-fn return_at_the_end_is_the_value() {
-    let f = only_fn("def f(x: int) -> int:\n    y = x + 1\n    return y * 2\n");
+fn the_last_expression_is_the_value() {
+    let f = only_fn("fn f(x: Int) -> Int:\n    let y = x + 1\n    y * 2\n");
     assert_eq!(f.body.stmts.len(), 1);
     assert!(f.body.tail.is_some());
+    // `return` at the end means the same.
+    let f = only_fn("fn f(x: Int) -> Int:\n    return x\n");
+    assert!(f.body.stmts.is_empty() && f.body.tail.is_some());
 }
 
 #[test]
-fn return_in_every_branch_is_the_value() {
+fn a_function_without_a_return_type_keeps_its_statements() {
+    let f = only_fn("fn f(x: Int):\n    print(x)\n");
+    assert_eq!(f.body.stmts.len(), 1);
+    assert!(f.body.tail.is_none());
+}
+
+#[test]
+fn the_last_expression_of_every_branch_is_the_value() {
     let f = only_fn(
-        "def f(n: int) -> str:\n    if n < 0:\n        return \"neg\"\n    elif n == 0:\n        \
-         return \"zero\"\n    else:\n        return \"pos\"\n",
+        "fn f(n: Int) -> Text:\n    if n < 0:\n        \"neg\"\n    elif n == 0:\n        \
+         return \"zero\"\n    else:\n        \"pos\"\n",
     );
     assert!(f.body.stmts.is_empty());
     let Some(Spanned {
@@ -198,22 +224,16 @@ fn return_in_every_branch_is_the_value() {
 
 #[test]
 fn an_early_return_stays_a_statement() {
-    let f = only_fn("def f(n: int) -> int:\n    if n < 0:\n        return 0\n    return n\n");
+    let f = only_fn("fn f(n: Int) -> Int:\n    if n < 0:\n        return 0\n    n\n");
     assert_eq!(f.body.stmts.len(), 1);
     assert!(f.body.tail.is_some());
 }
 
 #[test]
-fn first_assignment_declares_and_later_ones_reassign() {
-    let f = only_fn("def f() -> int:\n    x = 1\n    x = x + 1\n    x += 2\n    return x\n");
-    assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if l.mutable && l.name.node == "x"));
-    assert!(matches!(
-        &f.body.stmts[1],
-        Stmt::Expr(Spanned {
-            node: ExprKind::Assign { .. },
-            ..
-        })
-    ));
+fn let_is_fixed_and_var_can_change() {
+    let f = only_fn("fn f():\n    let a = 1\n    var b: Int = 2\n    b += a\n");
+    assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if !l.mutable && l.name.node == "a"));
+    assert!(matches!(&f.body.stmts[1], Stmt::Let(l) if l.mutable && l.ty.is_some()));
     assert!(matches!(
         &f.body.stmts[2],
         Stmt::Expr(Spanned {
@@ -224,43 +244,33 @@ fn first_assignment_declares_and_later_ones_reassign() {
 }
 
 #[test]
-fn assignment_in_an_inner_block_updates_the_outer_name() {
-    let f = only_fn(
-        "def f() -> int:\n    total = 0\n    for i in range(3):\n        total += i\n        seen = i\n    \
-         return total\n",
-    );
-    let Stmt::Expr(Spanned {
-        node: ExprKind::For { body, .. },
-        ..
-    }) = &f.body.stmts[1]
-    else {
-        panic!()
-    };
+fn a_plain_assignment_does_not_declare() {
+    let f = only_fn("fn f():\n    x = 1\n");
     assert!(matches!(
-        &body.stmts[0],
+        &f.body.stmts[0],
         Stmt::Expr(Spanned {
             node: ExprKind::Assign { .. },
             ..
         })
     ));
-    assert!(matches!(&body.stmts[1], Stmt::Let(l) if l.name.node == "seen"));
 }
 
 #[test]
-fn typed_declaration_and_destructuring() {
-    let f = only_fn("def f():\n    x: int = 1\n    a, b = g()\n");
-    assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if l.ty.is_some()));
-    // `x`, then a temporary and one `let` per name.
-    assert_eq!(f.body.stmts.len(), 4);
+fn destructuring() {
+    let f = only_fn("fn f():\n    let a, b = g()\n    var c, d = g()\n");
+    // A temporary and one binding per name, twice.
+    assert_eq!(f.body.stmts.len(), 6);
+    assert!(matches!(&f.body.stmts[1], Stmt::Let(l) if l.name.node == "a" && !l.mutable));
+    assert!(matches!(&f.body.stmts[4], Stmt::Let(l) if l.name.node == "c" && l.mutable));
 }
 
 #[test]
 fn loops_and_ranges() {
     let f = only_fn(
-        "def f(v: list[int], n: int) -> int:\n    total = 0\n    i = 0\n    while i < n:\n        \
+        "fn f(v: List[Int], n: Int) -> Int:\n    var total = 0\n    var i = 0\n    while i < n:\n        \
          total += v[i] * 2\n        i = i + 1\n    for x in v:\n        total -= x\n    \
          for k in range(n):\n        total += k\n    for k in range(1, 4):\n        total *= k\n    \
-         return total\n",
+         total\n",
     );
     let kinds: Vec<_> = f
         .body
@@ -293,8 +303,8 @@ fn loops_and_ranges() {
 }
 
 #[test]
-fn for_with_two_names_and_tuples() {
-    let f = only_fn("def f(xs: list[int]):\n    for i, x in xs.enumerate():\n        print(i)\n");
+fn for_with_two_names() {
+    let f = only_fn("fn f(xs: List[Int]):\n    for i, x in xs.enumerate():\n        print(i)\n");
     let Stmt::Expr(Spanned {
         node: ExprKind::For { body, .. },
         ..
@@ -310,18 +320,18 @@ fn for_with_two_names_and_tuples() {
 #[test]
 fn if_is_pattern_becomes_a_match() {
     let f = only_fn(
-        "def f(xs: list[int]):\n    if xs.first() is Some(x):\n        print(x)\n    else:\n        \
-         print(0)\n    while xs.pop() is Some(y):\n        print(y)\n",
+        "fn f(xs: List[Int]):\n    var ys = xs\n    if xs.first() is Some(x):\n        print(x)\n    else:\n        \
+         print(0)\n    while ys.pop() is Some(y):\n        print(y)\n",
     );
     assert!(matches!(
-        &f.body.stmts[0],
+        &f.body.stmts[1],
         Stmt::Expr(Spanned {
             node: ExprKind::Match { arms, .. },
             ..
         }) if arms.len() == 2
     ));
     assert!(matches!(
-        &f.body.stmts[1],
+        &f.body.stmts[2],
         Stmt::Expr(Spanned {
             node: ExprKind::While { .. },
             ..
@@ -332,12 +342,12 @@ fn if_is_pattern_becomes_a_match() {
 #[test]
 fn match_with_cases() {
     let p = ok_program(
-        "enum Shape:\n    Circle(float)\n    Rect(float, float)\n    Empty\n\n\
-         def area(s: Shape) -> float:\n    match s:\n        case Shape.Circle(r):\n            \
-         return r * r * 3.0\n        case Shape.Rect(w, h):\n            return w * h\n        \
-         case Shape.Empty:\n            return 0.0\n\n\
-         def classify(n: int) -> str:\n    match n:\n        case 0:\n            return \"zero\"\n        \
-         case _:\n            return \"many\"\n",
+        "enum Shape:\n    Circle(Float)\n    Rect(Float, Float)\n    Empty\n\n\
+         fn area(s: Shape) -> Float:\n    match s:\n        case Shape.Circle(r):\n            \
+         r * r * 3.0\n        case Shape.Rect(w, h):\n            w * h\n        \
+         case Shape.Empty:\n            0.0\n\n\
+         fn classify(n: Int) -> Text:\n    match n:\n        case 0:\n            \"zero\"\n        \
+         case _:\n            \"many\"\n",
     );
     let Item::Enum(e) = &p.items[0] else { panic!() };
     assert_eq!(e.variants.len(), 3);
@@ -358,15 +368,15 @@ fn match_with_cases() {
 }
 
 #[test]
-fn classes_traits_and_generics() {
+fn types_traits_and_generics() {
     let p = ok_program(
-        "trait Shape:\n    def area(self) -> float: ...\n    def describe(self) -> str:\n        \
-         return f\"area {self.area()}\"\n\n\
-         class Circle(Shape):\n    r: float\n\n    def area(self) -> float:\n        \
-         return self.r * self.r\n\n\
-         class Stack[T]:\n    items: list[T]\n\n    def push(self, x: T):\n        \
+        "trait Shape:\n    fn area(self) -> Float: ...\n    fn describe(self) -> Text:\n        \
+         f\"area {self.area()}\"\n\n\
+         type Circle(Shape):\n    r: Float\n\n    fn area(self) -> Float:\n        \
+         self.r * self.r\n\n\
+         type Stack[T]:\n    items: List[T]\n\n    fn push(self, x: T):\n        \
          self.items.push(x)\n\n\
-         extend Circle:\n    def twice(self) -> float:\n        return self.area() * 2.0\n",
+         extend Circle:\n    fn twice(self) -> Float:\n        self.area() * 2.0\n",
     );
     let kinds: Vec<_> = p
         .items
@@ -394,29 +404,57 @@ fn classes_traits_and_generics() {
 }
 
 #[test]
+fn defaults_for_fields_and_parameters() {
+    let p = ok_program(
+        "type Query:\n    text: Text\n    top_k: Int = 5\n\nfn search(q: Query, limit: Int = 10):\n    pass\n",
+    );
+    let Item::Struct(s) = &p.items[0] else {
+        panic!()
+    };
+    assert!(s.fields[0].default.is_none() && s.fields[1].default.is_some());
+    let Item::Fn(f) = &p.items[1] else { panic!() };
+    assert!(f.params[0].default.is_none() && f.params[1].default.is_some());
+}
+
+#[test]
+fn type_can_still_be_a_name() {
+    let f = only_fn("fn f(type: Text) -> Text:\n    type\n");
+    assert_eq!(f.params[0].name.node, "type");
+}
+
+#[test]
 fn private_names_start_with_an_underscore() {
-    let p = ok_program("def f():\n    pass\n\ndef _g():\n    pass\n");
+    let p = ok_program("fn f():\n    pass\n\nfn _g():\n    pass\n");
     let Item::Fn(f) = &p.items[0] else { panic!() };
     let Item::Fn(g) = &p.items[1] else { panic!() };
     assert!(f.is_pub && !g.is_pub);
 }
 
 #[test]
-fn decorators_and_globals() {
+fn endpoints_and_globals() {
     let p = ok_program(
-        "limit = 3\n\n@endpoint(path=\"/x\", method=\"POST\")\ndef handle(p: In) -> int:\n    return limit\n",
+        "let limit = 3\n\n@endpoint(POST, \"/x\")\nfn handle(p: In) -> Int:\n    limit\n\n\
+         @endpoint(path: \"/y\", method: GET)\nfn other() -> Int:\n    1\n",
     );
     assert!(matches!(&p.items[0], Item::Let(l) if !l.mutable));
     let Item::Fn(f) = &p.items[1] else { panic!() };
     assert_eq!(f.attrs[0].name.node, "endpoint");
-    assert_eq!(f.attrs[0].args.len(), 2);
+    let args: Vec<_> = f.attrs[0]
+        .args
+        .iter()
+        .map(|(k, v)| (k.node.clone(), v.node.clone()))
+        .collect();
+    assert_eq!(args[0].0, "method");
+    assert!(matches!(&args[0].1, ExprKind::Lit(Lit::Str(s)) if s == "POST"));
+    assert_eq!(args[1].0, "path");
+    let Item::Fn(g) = &p.items[2] else { panic!() };
+    assert_eq!(g.attrs[0].args.len(), 2);
 }
 
 #[test]
 fn a_pipeline_can_continue_on_the_next_lines() {
-    let f = only_fn(
-        "def f(q: str) -> str:\n    return q\n        |> embed()\n        |> store.search(3)\n",
-    );
+    let f =
+        only_fn("fn f(q: Text) -> Text:\n    q\n        |> embed()\n        |> store.search(3)\n");
     assert!(matches!(
         f.body.tail.as_deref(),
         Some(Spanned {
@@ -429,30 +467,38 @@ fn a_pipeline_can_continue_on_the_next_lines() {
 #[test]
 fn errors_and_try() {
     let f = only_fn(
-        "def f(line: str) -> Result[int, str]:\n    key, value = split(line)?\n    return Ok(1)\n",
+        "fn f(line: Text) -> Result[Int, Text]:\n    let key, value = split(line)?\n    Ok(1)\n",
     );
     assert_eq!(f.body.stmts.len(), 3);
     assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if matches!(l.init.node, ExprKind::Try(_))));
 }
 
 #[test]
-fn missing_colon_is_reported() {
-    let (_, errs) = parse("def f()\n    return 1\n");
-    assert!(!errs.is_empty());
-}
-
-#[test]
-fn bad_indentation_is_reported() {
-    let (_, errs) = parse("def f():\n        a = 1\n    b = 2\n");
-    assert!(!errs.is_empty());
-    let (_, errs) = parse("def f():\n\ta = 1\n");
-    assert!(!errs.is_empty());
+fn a_fn_inside_a_function_is_a_closure_bound_to_its_name() {
+    let f = only_fn(
+        "fn f(k: Int) -> Int:\n    fn add(a: Int):\n        let b = a + k\n        b\n    add(1)\n",
+    );
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!("{:?}", f.body)
+    };
+    assert_eq!(l.name.node, "add");
+    let ExprKind::Closure {
+        params,
+        types,
+        body,
+    } = &l.init.node
+    else {
+        panic!()
+    };
+    assert_eq!(params.len(), 1);
+    assert!(types[0].is_some());
+    // The body is a block whose value is the final expression.
+    assert!(matches!(&body.node, ExprKind::Block(b) if b.tail.is_some() && b.stmts.len() == 1));
 }
 
 #[test]
 fn recovers_and_keeps_later_items() {
-    let src =
-        "def a():\n    x = \n    y = 1\n\ndef b():\n    1 +\n\ndef c() -> int:\n    return 3\n";
+    let src = "fn a():\n    let x =\n    let y = 1\n\nfn b():\n    1 +\n\nfn c() -> Int:\n    3\n";
     let (p, errs) = parse(src);
     assert!(errs.len() >= 2, "{errs:?}");
     let names: Vec<_> = p
@@ -470,7 +516,7 @@ fn recovers_and_keeps_later_items() {
 #[test]
 fn recovers_from_garbage_between_items() {
     let (p, errs) =
-        parse("class A:\n    x: int\n\n??? )\n\ndef f():\n    pass\n\nclass B:\n    y: int\n");
+        parse("type A:\n    x: Int\n\n??? )\n\nfn f():\n    pass\n\ntype B:\n    y: Int\n");
     assert!(!errs.is_empty());
     assert!(p.unwrap().items.len() >= 2);
 }
@@ -486,7 +532,7 @@ fn arrays_and_index_expressions() {
 
 #[test]
 fn spans_can_be_shifted_into_a_shared_offset_space() {
-    let src = "def f() -> int:\n    return 1\n";
+    let src = "fn f() -> Int:\n    1\n";
     let (plain, _) = parse(src);
     let (shifted, errs) = parse_at(src, 1000);
     assert!(errs.is_empty());
@@ -496,7 +542,7 @@ fn spans_can_be_shifted_into_a_shared_offset_space() {
     assert_eq!(b.name.span.start, a.name.span.start + 1000);
     assert_eq!(b.span.end, a.span.end + 1000);
     // Interpolations inside f-strings are shifted too.
-    let (p, _) = parse_at("def g() -> str:\n    return f\"{a + 1}\"\n", 500);
+    let (p, _) = parse_at("fn g() -> Text:\n    f\"{a + 1}\"\n", 500);
     assert!(
         format!("{p:?}").contains("span: 5"),
         "expected shifted spans"
@@ -533,29 +579,6 @@ fn rag_example_parses() {
     ));
 }
 
-#[test]
-fn a_def_inside_a_function_is_a_closure_bound_to_its_name() {
-    let f = only_fn(
-        "def f(k: int) -> int:\n    def add(a: int):\n        b = a + k\n        return b\n    return add(1)\n",
-    );
-    let Stmt::Let(l) = &f.body.stmts[0] else {
-        panic!("{:?}", f.body)
-    };
-    assert_eq!(l.name.node, "add");
-    let ExprKind::Closure {
-        params,
-        types,
-        body,
-    } = &l.init.node
-    else {
-        panic!()
-    };
-    assert_eq!(params.len(), 1);
-    assert!(types[0].is_some());
-    // The body is a block whose value is the final `return`.
-    assert!(matches!(&body.node, ExprKind::Block(b) if b.tail.is_some() && b.stmts.len() == 1));
-}
-
 fn first_message(src: &str) -> String {
     let (_, errs) = parse(src);
     errs.into_iter()
@@ -567,49 +590,46 @@ fn first_message(src: &str) -> String {
 #[test]
 fn syntax_errors_explain_what_to_write() {
     assert_eq!(
-        first_message("def f()\n    return 1\n"),
+        first_message("fn f()\n    1\n"),
         "expected `:` at the end of this line"
     );
     assert_eq!(
-        first_message("def f():\nreturn 1\n"),
+        first_message("fn f():\n1\n"),
         "expected an indented block here"
     );
     assert_eq!(
-        first_message("def f():\n    x = 1;\n"),
+        first_message("fn f():\n    let x = 1;\n"),
         "`;` is not used in Telvax"
     );
     assert_eq!(
-        first_message("def f():\n    return 1\n  x = 2\n"),
+        first_message("fn f():\n    1\n  2\n"),
         "this line is indented differently from the lines above it"
     );
     assert_eq!(
-        first_message("def f():\n\treturn 1\n"),
+        first_message("fn f():\n\t1\n"),
         "tabs are not allowed in indentation"
     );
     assert_eq!(
-        first_message("def f():\n    for i in 0..3:\n        pass\n"),
+        first_message("fn f():\n    for i in 0..3:\n        pass\n"),
         "`..` is not used in Telvax"
     );
 }
 
 #[test]
 fn words_from_other_languages_get_a_hint() {
-    let (_, errs) = parse("fn f() -> i32 { 1 }\n");
+    let (_, errs) = parse("def f():\n    pass\n");
     assert!(
         errs.iter()
-            .any(|e| e.message.contains("write `def name(...)`"))
+            .any(|e| e.message.contains("write `fn name(...)`"))
     );
-    let (_, errs) = parse("def f():\n    let x = 1\n");
+    let (_, errs) = parse("class P:\n    x: Int\n");
     assert!(
         errs.iter()
-            .any(|e| e.message.contains("write `name = value`"))
+            .any(|e| e.message.contains("write `type Name:`"))
     );
-    let (_, errs) = parse("struct P:\n    x: int\n");
-    assert!(
-        errs.iter()
-            .any(|e| e.message.contains("write `class Name:`"))
-    );
-    // A file that parses is left alone, even if a variable is called `fn`.
-    let (_, errs) = parse("def f(fn: int) -> int:\n    return fn\n");
+    let (_, errs) = parse("fn f():\n    mut x = 1\n");
+    assert!(errs.iter().any(|e| e.message.contains("write `var`")));
+    // A file that parses is left alone, even if a variable is called `def`.
+    let (_, errs) = parse("fn f(def: Int) -> Int:\n    def\n");
     assert!(errs.is_empty(), "{errs:?}");
 }

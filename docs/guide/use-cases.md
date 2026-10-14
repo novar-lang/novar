@@ -15,21 +15,21 @@ Every program below is in [`examples/`](../../examples) and is run by the comman
 
 ## 1. Data analysis on tables
 
-A `Table[Row]` is an Arrow table whose columns are the fields of the class `Row`. The column names
+A `Table[Row]` is an Arrow table whose columns are the fields of the type `Row`. The column names
 and types are checked before the program runs, and a column is read as a tensor without copying it.
 
 ```telvax
-class Sale:
-    id: int
-    region: str
-    units: int
-    price: float
+type Sale:
+    id: Int
+    region: Text
+    units: Int
+    price: Float
 
-def main():
-    sales: Table[Sale] = read_csv("examples/dataframe/sales.csv")
+fn main():
+    let sales: Table[Sale] = read_csv("examples/dataframe/sales.csv")
     print(f"mean price: {sales.price.mean()}")
 
-    by_region: Table[{region: str, revenue: float}] = sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC")
+    let by_region: Table[{region: Text, revenue: Float}] = sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC")
     for row in by_region:
         print(f"{row.region}: {row.revenue}")
 ```
@@ -47,8 +47,8 @@ halfway through a run. SQL (and Parquet) need the full build; `telvax-lite` keep
 Tensor shapes are part of the type, so a matrix product of mismatched shapes does not compile:
 
 ```telvax
-def layer1(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[float32, [2, 4]]:
-    return x.matmul(w).relu()
+fn layer1(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    x.matmul(w).relu()
 ```
 
 ```sh
@@ -57,21 +57,20 @@ telvax run examples/ml/forward.tvx main --device gpu      # needs a build with -
 telvax run examples/ml/forward.tvx main --quantize int8   # int8 matrix products
 ```
 
-Change the weights in `layer1` to `Tensor[float32, [4, 4]]` and `telvax check` reports
-``matmul inner dimensions differ: 3 and 4`` at the call. Use symbolic dimensions (`Tensor[float32, [N, 3]]`) when a size is only known at run time.
+Change the weights in `layer1` to `Tensor[f32, 4, 4]` and `telvax check` reports
+``matmul inner dimensions differ: 3 and 4`` at the call. Use symbolic dimensions (`Tensor[f32, N, 3]`) when a size is only known at run time.
 Weights come from `std.tensor.from_vec` here; a real model would load them from a file or a table.
 
 ## 3. Serving a function over HTTP
 
-`@endpoint` turns a function into a route. The parameter class is the JSON body and is validated
+`@endpoint` turns a function into a route. The parameter type is the JSON body and is validated
 for you; `Err(Status.BadRequest(...))` becomes a 400.
 
 ```telvax
-@endpoint(path="/v1/sentiment", method="POST")
-def sentiment(input: Input) -> Result[Output, Status]:
+@endpoint(POST, "/v1/sentiment")
+fn sentiment(input: Input) -> Result[Output, Status]:
     if input.text.is_empty():
         return Err(Status.BadRequest("empty text"))
-    ...
 ```
 
 ```sh
@@ -92,7 +91,7 @@ store, builds a prompt from the hits and asks a model, as one `@endpoint`. Stage
 `|>`:
 
 ```telvax
-answer = prompt |> llm.complete() |> std.text.trim()
+let answer = prompt |> llm.complete() |> std.text.trim()
 ```
 
 ```sh
@@ -105,16 +104,16 @@ talks to the real ones.
 
 ## 5. Text processing
 
-`str`, `list` and `dict` have the methods you expect, and `list` has iterator methods (`map`,
+`Text`, `List` and `Map` have the methods you expect, and `List` has iterator methods (`map`,
 `filter`, `fold`, `sum`, `enumerate`, `zip`, ...):
 
 ```telvax
-def count_words(text: str) -> dict[str, int]:
-    counts: dict[str, int] = std.map.new()
+fn count_words(text: Text) -> Map[Text, Int]:
+    let counts: Map[Text, Int] = std.map.new()
     for word in text.to_lowercase().split(" "):
-        seen = counts.get(word).unwrap_or(0)
+        let seen = counts.get(word).unwrap_or(0)
         counts.insert(word, seen + 1)
-    return counts
+    counts
 ```
 
 ```sh
@@ -123,13 +122,12 @@ telvax run examples/text/word-count.tvx main
 
 ## 6. Errors as values
 
-There are no exceptions. A function that can fail returns `Result[T, E]` or `T | None`, `match`
+There are no exceptions. A function that can fail returns `Result[T, E]` or `T?`, `match`
 must cover every case, and `?` passes an error up to the caller.
 
 ```telvax
-def port_of(line: str) -> Result[int, str]:
-    key, value = split_pair(line)?
-    ...
+fn port_of(line: Text) -> Result[Int, Text]:
+    let key, value = split_pair(line)?
 ```
 
 ```sh
@@ -138,7 +136,7 @@ telvax run examples/errors/parse-config.tvx main
 
 ## 7. Plain numeric code, interpreted or native
 
-Integers, floats, loops and classes also work as an ordinary language. The interpreter runs
+Integers, floats, loops and types of your own also work as an ordinary language. The interpreter runs
 anything; the native backend (`--features llvm`) compiles the subset described in the
 [README](../../README.md#language-notes).
 

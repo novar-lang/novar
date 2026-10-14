@@ -1,24 +1,24 @@
 # Counts words in a text with a Map, then lists the most frequent ones.
 # Run from the repository root: telvax run examples/text/word-count.tvx main
 
-def count_words(text: str) -> dict[str, int]:
-    counts: dict[str, int] = std.map.new()
+fn count_words(text: Text) -> Map[Text, Int]:
+    let counts: Map[Text, Int] = std.map.new()
     for word in text.to_lowercase().split(" "):
         if word.is_empty():
             continue
-        seen = counts.get(word).unwrap_or(0)
+        let seen = counts.get(word).unwrap_or(0)
         counts.insert(word, seen + 1)
-    return counts
+    counts
 
-def main():
-    text = "the quick brown fox jumps over the lazy dog the end"
-    counts = count_words(text)
+fn main():
+    let text = "the quick brown fox jumps over the lazy dog the end"
+    let counts = count_words(text)
     print(f"distinct words: {counts.len()}")
-    the = counts.get("the").unwrap_or(0)
+    let the = counts.get("the").unwrap_or(0)
     print(f"the: {the}")
 
-    best = ""
-    best_n = 0
+    var best = ""
+    var best_n = 0
     for word, n in counts.entries():
         if n > best_n:
             best = word

@@ -136,8 +136,8 @@ fn publishing_writes_an_index_and_a_checksummed_archive() {
         "1.0.0",
         &[],
         r#"
-def one() -> int32:
-    return 1
+fn one() -> i32:
+    1
 "#,
     );
     publish(
@@ -146,8 +146,8 @@ def one() -> int32:
         "1.1.0",
         &[],
         r#"
-def one() -> int32:
-    return 1
+fn one() -> i32:
+    1
 "#,
     );
     let r = DirRegistry::new(&reg.0);
@@ -171,7 +171,7 @@ fn publishing_rules() {
         "1.0.0",
         &[],
         r#"
-def f():
+fn f():
     pass
 "#,
     );
@@ -183,7 +183,7 @@ def f():
     .write(
         "src/lib.tvx",
         r#"
-def f():
+fn f():
     pass
 "#,
     );
@@ -195,7 +195,7 @@ def f():
 
     let local = Dir::new("pathdep");
     local.write("telvax.toml", "[package]\nname = \"b\"\nversion = \"1.0.0\"\n[dependencies]\na = { path = \"../a\" }\n").write("src/lib.tvx", r#"
-def g():
+fn g():
     pass
 "#);
     assert!(
@@ -225,7 +225,7 @@ fn tampered_archives_are_rejected() {
         "1.0.0",
         &[],
         r#"
-def f():
+fn f():
     pass
 "#,
     );
@@ -254,7 +254,7 @@ fn the_newest_compatible_version_wins_transitively() {
         "1.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -264,7 +264,7 @@ def c():
         "1.4.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -274,7 +274,7 @@ def c():
         "2.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -284,7 +284,7 @@ def c():
         "1.0.0",
         &[("c", "^1")],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -294,7 +294,7 @@ def a():
         "1.2.0",
         &[("c", "^1")],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -317,7 +317,7 @@ fn the_search_backs_up_when_a_newer_choice_conflicts() {
         "1.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -327,7 +327,7 @@ def c():
         "2.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -338,7 +338,7 @@ def c():
         "1.0.0",
         &[("c", "^1")],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -348,7 +348,7 @@ def a():
         "1.1.0",
         &[("c", "^2")],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -358,7 +358,7 @@ def a():
         "1.0.0",
         &[("c", "^1")],
         r#"
-def b():
+fn b():
     pass
 "#,
     );
@@ -375,7 +375,7 @@ fn unsatisfiable_graphs_explain_themselves() {
         "1.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -385,7 +385,7 @@ def c():
         "1.0.0",
         &[("c", "^2")],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -414,7 +414,7 @@ fn yanked_versions_are_skipped_by_new_resolutions() {
         "1.0.0",
         &[],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -424,7 +424,7 @@ def a():
         "1.1.0",
         &[],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -443,7 +443,7 @@ fn path_dependencies_are_fixed_and_can_have_registry_dependencies() {
         "1.0.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -453,7 +453,7 @@ def c():
         "1.5.0",
         &[],
         r#"
-def c():
+fn c():
     pass
 "#,
     );
@@ -465,7 +465,7 @@ def c():
     .write(
         "shared/src/lib.tvx",
         r#"
-def s():
+fn s():
     pass
 "#,
     );
@@ -506,8 +506,8 @@ fn locking_installing_and_compiling_against_dependencies() {
         "1.2.0",
         &[],
         r#"
-def double(x: int32) -> int32:
-    return x * 2
+fn double(x: i32) -> i32:
+    x * 2
 "#,
     );
     publish(
@@ -518,8 +518,8 @@ def double(x: int32) -> int32:
         r#"
 import mathx.double
 
-def quad(x: int32) -> int32:
-    return double(double(x))
+fn quad(x: i32) -> i32:
+    double(double(x))
 "#,
     );
 
@@ -533,8 +533,8 @@ def quad(x: int32) -> int32:
         r#"
 import calc.quad
 
-def main() -> int32:
-    return quad(5)
+fn main() -> i32:
+    quad(5)
 "#,
     );
     let project = Project::open(&proj.0).unwrap();
@@ -612,7 +612,7 @@ fn a_stale_lock_is_detected_and_checksums_are_enforced() {
         "1.0.0",
         &[],
         r#"
-def a():
+fn a():
     pass
 "#,
     );
@@ -624,7 +624,7 @@ def a():
     .write(
         "src/main.tvx",
         r#"
-def main():
+fn main():
     pass
 "#,
     );
@@ -669,14 +669,14 @@ fn discovery_walks_up_to_the_manifest() {
     .write(
         "src/deep/x.tvx",
         r#"
-def f():
+fn f():
     pass
 "#,
     )
     .write(
         "src/main.tvx",
         r#"
-def main():
+fn main():
     pass
 "#,
     );
@@ -737,8 +737,8 @@ fn registries_work_over_http() {
         "2.1.0",
         &[],
         r#"
-def w() -> int32:
-    return 7
+fn w() -> i32:
+    7
 "#,
     );
     let url = serve_static(reg.0.clone());
@@ -759,8 +759,8 @@ def w() -> int32:
         r#"
 import webdep.w
 
-def main() -> int32:
-    return w()
+fn main() -> i32:
+    w()
 "#,
     );
     let project = Project::open(&proj.0).unwrap();

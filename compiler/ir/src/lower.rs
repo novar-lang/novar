@@ -138,11 +138,11 @@ impl<'c, 'p> Cx<'c, 'p> {
             }],
             Ty::Struct(name) => {
                 if depth > 16 {
-                    return Err(format!("recursive class `{name}`"));
+                    return Err(format!("recursive type `{name}`"));
                 }
                 let def = self
                     .struct_def(name)
-                    .ok_or_else(|| format!("unknown class `{name}`"))?;
+                    .ok_or_else(|| format!("unknown type `{name}`"))?;
                 let mut out = Vec::new();
                 for (_, fty) in &def.fields {
                     out.extend(self.flat_at(fty, depth + 1)?);

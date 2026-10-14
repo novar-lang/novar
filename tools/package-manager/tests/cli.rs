@@ -43,8 +43,8 @@ fn the_command_line_covers_the_whole_workflow() {
     std::fs::write(
         lib.join("src/lib.tvx"),
         r#"
-def double(x: int32) -> int32:
-    return x * 2
+fn double(x: i32) -> i32:
+    x * 2
 "#,
     )
     .unwrap();

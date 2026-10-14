@@ -98,7 +98,7 @@ fn elem(args: &[Ty], i: usize) -> Result<Ty, String> {
         Ty::Vec(t) => Ok((**t).clone()),
         Ty::Unknown | Ty::Never => Ok(Ty::Unknown),
         other => Err(format!(
-            "argument {} must be a `list`, found `{other}`",
+            "argument {} must be a `List`, found `{other}`",
             i + 1
         )),
     }
@@ -175,7 +175,7 @@ fn filter(args: &[Ty]) -> Result<Ty, String> {
         )),
         Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(vec_of(t)),
         Ty::Unknown => Ok(vec_of(t)),
-        other => Err(format!("argument 2 must be `(_) -> bool`, found `{other}`")),
+        other => Err(format!("argument 2 must be `(_) -> Bool`, found `{other}`")),
     }
 }
 
@@ -197,7 +197,7 @@ fn bool_fn_over_vec(args: &[Ty], what: &str) -> Result<Ty, String> {
         Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(t),
         Ty::Unknown => Ok(t),
         other => Err(format!(
-            "argument 2 of `{what}` must be `(_) -> bool`, found `{other}`"
+            "argument 2 of `{what}` must be `(_) -> Bool`, found `{other}`"
         )),
     }
 }
@@ -596,7 +596,7 @@ fn static_count(shape: &[Dim]) -> Option<u64> {
 
 fn expect_tensor(expected: &Ty, what: &str) -> Result<(Ty, Vec<Dim>), String> {
     tensor_of(expected).ok_or_else(|| {
-        format!("cannot infer the tensor type of `{what}`; annotate it, e.g. `t: Tensor[float32, [3]] = ...`")
+        format!("cannot infer the tensor type of `{what}`; annotate it, e.g. `let t: Tensor[f32, 3] = ...`")
     })
 }
 
@@ -677,7 +677,7 @@ fn expect_table(expected: &Ty, what: &str) -> Result<Ty, String> {
     match expected {
         Ty::Table(_) => Ok(expected.clone()),
         _ => Err(format!(
-            "cannot infer the schema of `{what}`; annotate the result, e.g. `t: Table[Row] = ...`"
+            "cannot infer the schema of `{what}`; annotate the result, e.g. `let t: Table[Row] = ...`"
         )),
     }
 }
@@ -710,12 +710,12 @@ fn from_rows(args: &[Ty]) -> Result<Ty, String> {
             Ty::Struct(s) => Ok(Ty::Table(s.clone())),
             Ty::Unknown => Ok(Ty::Unknown),
             other => Err(format!(
-                "`from_rows` needs a `list` of classes, found `list[{other}]`"
+                "`from_rows` needs a `List` of types, found `List[{other}]`"
             )),
         },
         t if is_dynamic(t) => Ok(Ty::Unknown),
         other => Err(format!(
-            "argument 1 must be a `list` of classes, found `{other}`"
+            "argument 1 must be a `List` of types, found `{other}`"
         )),
     }
 }
@@ -756,7 +756,7 @@ fn filter_rows(args: &[Ty]) -> Result<Ty, String> {
         Ty::Unknown => {}
         other => {
             return Err(format!(
-                "argument 2 must be `(row) -> bool`, found `{other}`"
+                "argument 2 must be `(row) -> Bool`, found `{other}`"
             ));
         }
     }

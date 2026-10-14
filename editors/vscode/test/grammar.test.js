@@ -46,17 +46,17 @@ function has(tokens, text, scope, nth = 0) {
 }
 
 test("declarations and types", async () => {
-  const t = await tokenize("def norm(p: Point, t: Tensor[float32, [768]]) -> float:\n    return 0.0\nclass Row:\n    id: int");
-  has(t, "def", "storage.type.function");
+  const t = await tokenize("fn norm(p: Point, t: Tensor[f32, 768]) -> Float:\n    0.0\ntype Row:\n    id: Int");
+  has(t, "fn", "storage.type.function");
   has(t, "norm", "entity.name.function");
   has(t, "Point", "entity.name.type");
   has(t, "Tensor", "support.type.builtin");
-  has(t, "float32", "support.type.primitive");
+  has(t, "f32", "support.type.primitive");
   has(t, "768", "constant.numeric.integer");
-  has(t, "class", "storage.type.struct");
+  has(t, "type", "storage.type.struct");
   has(t, "Row", "entity.name.type.struct");
   has(t, "->", "keyword.operator.arrow");
-  has(t, "int", "support.type.primitive");
+  has(t, "Int", "support.type.primitive");
 });
 
 test("the pipeline operator, paths and calls", async () => {
@@ -69,14 +69,14 @@ test("the pipeline operator, paths and calls", async () => {
 });
 
 test("decorators", async () => {
-  const t = await tokenize('@endpoint(path="/v1/rag/query", method="POST")');
+  const t = await tokenize('@endpoint(POST, "/v1/rag/query")');
   has(t, "endpoint", "entity.name.function.decorator");
   has(t, "@", "punctuation.definition.attribute");
   has(t, '"', "string.quoted.double");
 });
 
 test("f-strings highlight their interpolations as code", async () => {
-  const t = await tokenize('s = f"hi {name}, you are {age + 1}!\\n"');
+  const t = await tokenize('let s = f"hi {name}, you are {age + 1}!\\n"');
   const start = t.findIndex(([x]) => x === 'f"');
   assert.ok(start >= 0, "f-string start");
   has(t, "name", "meta.interpolation");
@@ -107,11 +107,12 @@ test("numbers, constants, comments and control flow", async () => {
 });
 
 test("match, lambda, imports and pattern tests", async () => {
-  const t = await tokenize("from std.http import Status\nmatch x:\n    case Some(n):\n        f = lambda a: a\nif y is None:\n    pass");
+  const t = await tokenize("from std.http import Status\nmatch x:\n    case Some(n):\n        var f = a => a\nif y is None:\n    pass");
   has(t, "from", "keyword.control.import");
   has(t, "match", "keyword.control");
   has(t, "case", "keyword.control");
-  has(t, "lambda", "storage.type.function.lambda");
+  has(t, "=>", "keyword.operator.arrow");
+  has(t, "var", "storage.type");
   has(t, "is", "keyword.control");
   has(t, "None", "constant.language");
   has(t, "pass", "keyword.control");
@@ -125,6 +126,6 @@ test("the example programs tokenise without raw leftovers", async () => {
     assert.ok(tokens.length > 50, file);
     const unscoped = tokens.filter(([text, scopes]) => /[A-Za-z_]{2,}/.test(text) && scopes.length === 1 && scopes[0] === "source.telvax");
     // Plain variables stay unscoped; keywords and declarations must never be.
-    assert.ok(!unscoped.some(([text]) => ["def", "class", "return", "import", "from", "elif", "lambda"].includes(text)), file);
+    assert.ok(!unscoped.some(([text]) => ["fn", "let", "var", "return", "import", "from", "elif"].includes(text)), file);
   }
 });

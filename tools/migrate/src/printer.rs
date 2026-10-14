@@ -19,6 +19,9 @@ pub struct Printer<'a> {
     pub warnings: Vec<String>,
     /// Imported names, which start a dotted path in the new syntax.
     heads: HashSet<String>,
+    from_py: bool,
+    /// Names assigned in the function being printed: they are `var`, the others `let`.
+    assigned: HashSet<String>,
 }
 
 struct Comment {
@@ -29,36 +32,36 @@ struct Comment {
     used: bool,
 }
 
-fn collect_comments(src: &str) -> Vec<Comment> {
+fn collect_comments(src: &str, marker: &str) -> Vec<Comment> {
     let mut out = Vec::new();
     let bytes = src.as_bytes();
     let mut i = 0;
-    let mut in_str = false;
+    let mut quote: Option<u8> = None;
     while i < bytes.len() {
         let c = bytes[i];
-        if in_str {
+        if let Some(q) = quote {
             if c == b'\\' {
                 i += 2;
                 continue;
             }
-            if c == b'"' {
-                in_str = false;
+            if c == q {
+                quote = None;
             }
             i += 1;
             continue;
         }
-        if c == b'"' {
-            in_str = true;
+        if c == b'"' || (c == b'\'' && marker == "#") {
+            quote = Some(c);
             i += 1;
             continue;
         }
-        if c == b'/' && bytes.get(i + 1) == Some(&b'/') {
+        if src[i..].starts_with(marker) {
             let end = src[i..].find('\n').map_or(src.len(), |n| i + n);
             let line_start = src[..i].rfind('\n').map_or(0, |n| n + 1);
             let trailing = !src[line_start..i].trim().is_empty();
             out.push(Comment {
                 start: i,
-                text: src[i + 2..end].trim_end().to_string(),
+                text: src[i + marker.len()..end].trim_end().to_string(),
                 trailing,
                 used: false,
             });
@@ -73,15 +76,17 @@ fn collect_comments(src: &str) -> Vec<Comment> {
 const INDENT: &str = "    ";
 
 impl<'a> Printer<'a> {
-    pub fn new(src: &'a str) -> Self {
+    pub fn new(src: &'a str, marker: &str) -> Self {
         Printer {
             src,
-            comments: collect_comments(src),
+            comments: collect_comments(src, marker),
             next_comment: 0,
             last_line: usize::MAX,
             out: String::new(),
             warnings: Vec::new(),
             heads: HashSet::new(),
+            from_py: marker == "#",
+            assigned: HashSet::new(),
         }
     }
 
@@ -297,13 +302,22 @@ impl<'a> Printer<'a> {
             .unwrap_or_default();
         self.line(
             0,
-            &format!("class {}{generics}{trait_part}:", s.name.node),
+            &format!("type {}{generics}{trait_part}:", s.name.node),
             s.span.start,
         );
         let mut empty = true;
         for f in &s.fields {
             let ty = self.ty(&f.ty);
-            self.line(1, &format!("{}: {ty}", f.name.node), f.name.span.start);
+            let default = f
+                .default
+                .as_ref()
+                .map(|d| format!(" = {}", self.expr(d, 0)))
+                .unwrap_or_default();
+            self.line(
+                1,
+                &format!("{}: {ty}{default}", f.name.node),
+                f.name.span.start,
+            );
             empty = false;
         }
         if let Some(im) = first {
@@ -371,16 +385,7 @@ impl<'a> Printer<'a> {
     fn func(&mut self, f: &Fn, indent: usize, top: bool) {
         let _ = top;
         for a in &f.attrs {
-            let args: Vec<_> = a
-                .args
-                .iter()
-                .map(|(k, v)| format!("{}={}", k.node, self.expr(v, 0)))
-                .collect();
-            let text = if args.is_empty() && a.args.is_empty() {
-                format!("@{}", a.name.node)
-            } else {
-                format!("@{}({})", a.name.node, args.join(", "))
-            };
+            let text = self.attr_text(a);
             self.line(indent, &text, a.span.start);
         }
         let generics = self.generics_text(&f.generics);
@@ -391,7 +396,12 @@ impl<'a> Printer<'a> {
                 if p.name.node == "self" {
                     "self".to_string()
                 } else {
-                    format!("{}: {}", p.name.node, self.ty(&p.ty))
+                    let default = p
+                        .default
+                        .as_ref()
+                        .map(|d| format!(" = {}", self.expr(d, 0)))
+                        .unwrap_or_default();
+                    format!("{}: {}{default}", p.name.node, self.ty(&p.ty))
                 }
             })
             .collect();
@@ -400,13 +410,41 @@ impl<'a> Printer<'a> {
             .as_ref()
             .map(|t| format!(" -> {}", self.ty(t)))
             .unwrap_or_default();
-        let head = format!("def {}{generics}({}){ret}", f.name.node, params.join(", "));
+        self.assigned = assigned_names(&f.body);
+        let head = format!("fn {}{generics}({}){ret}", f.name.node, params.join(", "));
         if f.required {
             self.line(indent, &format!("{head}: ..."), f.span.start);
         } else {
             self.line(indent, &format!("{head}:"), f.span.start);
             self.body(&f.body, indent + 1, f.ret.is_some());
         }
+    }
+
+    fn attr_text(&mut self, a: &Attribute) -> String {
+        if a.args.is_empty() {
+            return format!("@{}", a.name.node);
+        }
+        let find = |k: &str| a.args.iter().find(|(n, _)| n.node == k).map(|(_, v)| v);
+        // `@endpoint(POST, "/x")` when the method and the path are plain strings.
+        if a.name.node == "endpoint"
+            && a.args.len() == 2
+            && let (
+                Some(Spanned {
+                    node: ExprKind::Lit(Lit::Str(m)),
+                    ..
+                }),
+                Some(path),
+            ) = (find("method"), find("path"))
+            && m.chars().all(|c| c.is_ascii_uppercase())
+        {
+            return format!("@endpoint({m}, {})", self.expr(path, 0));
+        }
+        let args: Vec<_> = a
+            .args
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.node, self.expr(v, 0)))
+            .collect();
+        format!("@{}({})", a.name.node, args.join(", "))
     }
 
     // ---------- types ----------
@@ -433,22 +471,14 @@ impl<'a> Printer<'a> {
             && t.args.len() == 1
             && let TypeArg::Type(inner) = &t.args[0]
         {
-            return format!("{} | None", self.ty(inner));
+            return format!("{}?", self.ty(inner));
         }
         let name = match name.as_str() {
-            "i64" => "int",
-            "i8" => "int8",
-            "i16" => "int16",
-            "i32" => "int32",
-            "u8" => "uint8",
-            "u16" => "uint16",
-            "u32" => "uint32",
-            "u64" => "uint64",
-            "f64" => "float",
-            "f32" => "float32",
-            "String" => "str",
-            "Vec" => "list",
-            "Map" => "dict",
+            "i64" => "Int",
+            "f64" => "Float",
+            "String" => "Text",
+            "bool" => "Bool",
+            "Vec" => "List",
             other => other,
         }
         .to_string();
@@ -468,7 +498,7 @@ impl<'a> Printer<'a> {
                             Dim::Named(n) => n.node.clone(),
                         })
                         .collect();
-                    format!("[{}]", d.join(", "))
+                    d.join(", ")
                 }
                 TypeArg::Row(fields) => {
                     let f: Vec<_> = fields
@@ -493,11 +523,20 @@ impl<'a> Printer<'a> {
         }
     }
 
+    fn keyword(&self, l: &Let) -> &'static str {
+        if l.mutable && self.assigned.contains(&l.name.node) {
+            "var"
+        } else {
+            "let"
+        }
+    }
+
     fn let_text(&mut self, l: &Let) -> String {
         let init = self.expr(&l.init, 0);
+        let kw = self.keyword(l);
         match &l.ty {
-            Some(t) => format!("{}: {} = {init}", l.name.node, self.ty(t)),
-            None => format!("{} = {init}", l.name.node),
+            Some(t) => format!("{kw} {}: {} = {init}", l.name.node, self.ty(t)),
+            None => format!("{kw} {} = {init}", l.name.node),
         }
     }
 
@@ -528,9 +567,14 @@ impl<'a> Printer<'a> {
                         j += 1;
                     }
                     let init = self.expr(&l.init, 0);
+                    let kw = if names.iter().any(|n| self.assigned.contains(n)) {
+                        "var"
+                    } else {
+                        "let"
+                    };
                     self.line(
                         indent,
-                        &format!("{} = {init}", names.join(", ")),
+                        &format!("{kw} {} = {init}", names.join(", ")),
                         l.span.start,
                     );
                     i = j;
@@ -559,7 +603,7 @@ impl<'a> Printer<'a> {
                         .collect();
                     self.line(
                         indent,
-                        &format!("def {}({}):", l.name.node, ps.join(", ")),
+                        &format!("fn {}({}):", l.name.node, ps.join(", ")),
                         l.span.start,
                     );
                     self.body(b, indent + 1, true);
@@ -659,11 +703,7 @@ impl<'a> Printer<'a> {
             }
             _ => {
                 let text = self.expr(e, 0);
-                if value {
-                    self.line(indent, &format!("return {text}"), e.span.start);
-                } else {
-                    self.line(indent, &text, e.span.start);
-                }
+                self.line(indent, &text, e.span.start);
             }
         }
     }
@@ -808,8 +848,9 @@ impl<'a> Printer<'a> {
             ExprKind::Path(p) => {
                 let names: Vec<&str> = p.iter().map(|i| i.node.as_str()).collect();
                 let text = match names.as_slice() {
-                    ["println"] | ["std", "io", "println"] => "print".to_string(),
-                    ["print"] => "std.io.print".to_string(),
+                    // Only the Rust-style syntax had `println`; `print` there did not end the line.
+                    ["println"] | ["std", "io", "println"] if !self.from_py => "print".to_string(),
+                    ["print"] if !self.from_py => "std.io.print".to_string(),
                     _ => names.join("."),
                 };
                 (text, 12)
@@ -818,6 +859,9 @@ impl<'a> Printer<'a> {
                 let c = self.expr(callee, 11);
                 let a: Vec<_> = args.iter().map(|x| self.expr(x, 0)).collect();
                 (format!("{c}({})", a.join(", ")), 11)
+            }
+            ExprKind::Named { name, value } => {
+                (format!("{}: {}", name.node, self.expr(value, 0)), 0)
             }
             ExprKind::Field { base, name } => {
                 let b = self.expr(base, 11);
@@ -862,11 +906,12 @@ impl<'a> Printer<'a> {
             ExprKind::Closure { params, body, .. } => {
                 let (names, body) = self.closure_parts(params, body);
                 let b = self.expr(&body, 0);
-                if names.is_empty() {
-                    (format!("lambda: {b}"), 0)
+                let params = if names.len() == 1 && !names[0].starts_with('(') {
+                    names[0].clone()
                 } else {
-                    (format!("lambda {}: {b}", names.join(", ")), 0)
-                }
+                    format!("({})", names.join(", "))
+                };
+                (format!("{params} => {b}"), 0)
             }
             ExprKind::StructLit { path, fields } => {
                 let name = path
@@ -876,7 +921,7 @@ impl<'a> Printer<'a> {
                     .join(".");
                 let f: Vec<_> = fields
                     .iter()
-                    .map(|(k, v)| format!("{}={}", k.node, self.expr(v, 0)))
+                    .map(|(k, v)| format!("{}: {}", k.node, self.expr(v, 0)))
                     .collect();
                 (format!("{name}({})", f.join(", ")), 11)
             }
@@ -1072,4 +1117,110 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// The variables a function assigns to (the root of `v[i] = x` and `p.a.b = x` counts).
+fn assigned_names(b: &Block) -> HashSet<String> {
+    let mut out = HashSet::new();
+    block_assigns(b, &mut out);
+    out
+}
+
+fn block_assigns(b: &Block, out: &mut HashSet<String>) {
+    for s in &b.stmts {
+        match s {
+            Stmt::Let(l) => expr_assigns(&l.init, out),
+            Stmt::Expr(e) => expr_assigns(e, out),
+        }
+    }
+    if let Some(t) = &b.tail {
+        expr_assigns(t, out);
+    }
+}
+
+fn root_name(e: &Expr) -> Option<&str> {
+    match &e.node {
+        ExprKind::Path(p) if p.len() == 1 => Some(&p[0].node),
+        ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => root_name(base),
+        _ => None,
+    }
+}
+
+fn expr_assigns(e: &Expr, out: &mut HashSet<String>) {
+    match &e.node {
+        ExprKind::Assign { target, value } => {
+            if let Some(n) = root_name(target) {
+                out.insert(n.to_string());
+            }
+            expr_assigns(target, out);
+            expr_assigns(value, out);
+        }
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Break
+        | ExprKind::Continue
+        | ExprKind::Error => {}
+        ExprKind::Call { callee, args } => {
+            expr_assigns(callee, out);
+            args.iter().for_each(|a| expr_assigns(a, out));
+        }
+        ExprKind::Named { value, .. } => expr_assigns(value, out),
+        ExprKind::Field { base, .. } => expr_assigns(base, out),
+        ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => expr_assigns(expr, out),
+        ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
+            expr_assigns(lhs, out);
+            expr_assigns(rhs, out);
+        }
+        ExprKind::Closure { body, .. } => expr_assigns(body, out),
+        ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| expr_assigns(v, out)),
+        ExprKind::If {
+            cond,
+            then,
+            otherwise,
+        } => {
+            expr_assigns(cond, out);
+            block_assigns(then, out);
+            if let Some(o) = otherwise {
+                expr_assigns(o, out);
+            }
+        }
+        ExprKind::Block(b) => block_assigns(b, out),
+        ExprKind::Return(v) => {
+            if let Some(v) = v {
+                expr_assigns(v, out);
+            }
+        }
+        ExprKind::Tuple(items) | ExprKind::Array(items) => {
+            items.iter().for_each(|i| expr_assigns(i, out));
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            expr_assigns(scrutinee, out);
+            arms.iter().for_each(|a| expr_assigns(&a.body, out));
+        }
+        ExprKind::FString(parts) => {
+            for p in parts {
+                if let FPart::Expr(x) = p {
+                    expr_assigns(x, out);
+                }
+            }
+        }
+        ExprKind::While { cond, body } => {
+            expr_assigns(cond, out);
+            block_assigns(body, out);
+        }
+        ExprKind::For { iter, body, .. } => {
+            match iter {
+                ForIter::Range { start, end, .. } => {
+                    expr_assigns(start, out);
+                    expr_assigns(end, out);
+                }
+                ForIter::Expr(x) => expr_assigns(x, out),
+            }
+            block_assigns(body, out);
+        }
+        ExprKind::Index { base, index } => {
+            expr_assigns(base, out);
+            expr_assigns(index, out);
+        }
+    }
 }

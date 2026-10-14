@@ -321,14 +321,13 @@ mod tests {
     #[test]
     fn every_kernel_verifies_and_lowers_to_ptx() {
         let program = {
-            let src = "
-def f(a: Tensor[float32, [4, 4]], b: Tensor[float32, [4, 4]]) -> Tensor[float32, [4, 4]]:
-    return std.tensor.softmax(std.tensor.sigmoid(std.tensor.relu(std.tensor.scale(
-        std.tensor.matmul(std.tensor.sub(std.tensor.div(std.tensor.mul(std.tensor.add(a, b), b), b), a), b), 0.5))))
+            let src = r#"
+fn f(a: Tensor[f32, 4, 4], b: Tensor[f32, 4, 4]) -> Tensor[f32, 4, 4]:
+    std.tensor.softmax(std.tensor.sigmoid(std.tensor.relu(std.tensor.scale(std.tensor.matmul(std.tensor.sub(std.tensor.div(std.tensor.mul(std.tensor.add(a, b), b), b), a), b), 0.5))))
 
-def s(a: Tensor[float32, [16]], b: Tensor[float32, [16]]) -> float32:
-    return std.tensor.sum(a) + std.tensor.mean(a) + std.tensor.dot(a, b)
-            ";
+fn s(a: Tensor[f32, 16], b: Tensor[f32, 16]) -> f32:
+    std.tensor.sum(a) + std.tensor.mean(a) + std.tensor.dot(a, b)
+"#;
             let (ast, errs) = telvax_parser::parse(src);
             assert!(errs.is_empty(), "{errs:?}");
             let (hir, d) = telvax_hir::lower(&ast.unwrap());

@@ -370,7 +370,7 @@ impl Interp {
         let fields = self
             .structs
             .get(schema)
-            .ok_or_else(|| RuntimeError::new(format!("unknown class `{schema}`")))?;
+            .ok_or_else(|| RuntimeError::new(format!("unknown type `{schema}`")))?;
         let batch = crate::table::conform(batch, fields)?;
         Ok(Value::Table(Arc::new(crate::value::TableVal {
             schema: schema.to_string(),
@@ -815,7 +815,7 @@ impl Interp {
             }))),
             ExprKind::StructLit { name, fields } => {
                 let decl = self.structs.get(name).ok_or_else(|| {
-                    Ctrl::Fail(RuntimeError::new(format!("unknown class `{name}`")))
+                    Ctrl::Fail(RuntimeError::new(format!("unknown type `{name}`")))
                 })?;
                 let mut evaluated: HashMap<&str, Value> = HashMap::new();
                 for (fname, fe) in fields {

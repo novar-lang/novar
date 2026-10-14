@@ -45,7 +45,7 @@ async function run() {
     const h = await vscode.commands.executeCommand(
       "vscode.executeHoverProvider",
       ok.uri,
-      new vscode.Position(9, 13),
+      new vscode.Position(9, 6),
     );
     return h && h.length ? h : null;
   });
@@ -53,13 +53,13 @@ async function run() {
     .flatMap((h) => h.contents)
     .map((c) => (typeof c === "string" ? c : c.value))
     .join("\n");
-  assert.ok(hoverText.includes("def norm(p: Point) -> float"), hoverText);
+  assert.ok(hoverText.includes("fn norm(p: Point) -> Float"), hoverText);
 
   // Go to definition jumps to the function.
   const defs = await vscode.commands.executeCommand(
     "vscode.executeDefinitionProvider",
     ok.uri,
-    new vscode.Position(9, 13),
+    new vscode.Position(9, 6),
   );
   assert.ok(defs && defs.length, "definition");
   const target = defs[0].targetRange ?? defs[0].range;
@@ -69,7 +69,7 @@ async function run() {
   const refs = await vscode.commands.executeCommand(
     "vscode.executeReferenceProvider",
     ok.uri,
-    new vscode.Position(9, 18),
+    new vscode.Position(9, 11),
   );
   assert.deepStrictEqual(refs.map((r) => r.range.start.line).sort(), [8, 9]);
 
@@ -77,7 +77,7 @@ async function run() {
   const renamed = await vscode.commands.executeCommand(
     "vscode.executeDocumentRenameProvider",
     ok.uri,
-    new vscode.Position(9, 13),
+    new vscode.Position(9, 6),
     "length",
   );
   const changes = renamed.entries().flatMap(([, edits]) => edits);
@@ -88,7 +88,7 @@ async function run() {
   const completions = await vscode.commands.executeCommand(
     "vscode.executeCompletionItemProvider",
     ok.uri,
-    new vscode.Position(9, 13),
+    new vscode.Position(9, 6),
   );
   const labels = completions.items.map((i) => (typeof i.label === "string" ? i.label : i.label.label));
   assert.ok(labels.includes("norm") || labels.includes("origin"), `completions: ${labels.slice(0, 10)}`);
@@ -108,7 +108,7 @@ async function run() {
   const edit = new vscode.WorkspaceEdit();
   edit.set(messy.uri, edits);
   assert.ok(await vscode.workspace.applyEdit(edit), "the edits apply");
-  assert.strictEqual(messy.getText(), "def main() -> int32:\n    x = 1\n    return x + 2\n");
+  assert.strictEqual(messy.getText(), "fn main() -> i32:\n    let x = 1\n    x + 2\n");
 
 }
 

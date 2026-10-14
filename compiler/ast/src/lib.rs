@@ -62,6 +62,8 @@ pub struct Struct {
 pub struct Field {
     pub name: Ident,
     pub ty: Type,
+    /// `top_k: Int = 5`: the value used when a construction leaves the field out.
+    pub default: Option<Expr>,
 }
 
 /// `impl Point { fn norm(self) -> f64 { .. } }`: methods and associated functions of a type. A
@@ -165,6 +167,8 @@ pub struct Param {
     pub mutable: bool,
     pub name: Ident,
     pub ty: Type,
+    /// `limit: Int = 5`: the value used when a call leaves the argument out.
+    pub default: Option<Expr>,
 }
 
 /// `Name`, `a::B`, `Vec<T>`, `Tensor<f32, [768]>`
@@ -212,6 +216,11 @@ pub enum ExprKind {
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
+    },
+    /// `limit: 5` inside the arguments of a call. The checker moves it to the right place.
+    Named {
+        name: Ident,
+        value: Box<Expr>,
     },
     Field {
         base: Box<Expr>,

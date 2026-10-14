@@ -1,29 +1,27 @@
 # Sieve of Eratosthenes with in-place array updates.
 # Run it interpreted (`telvax run examples/basics/sieve.tvx main`) or native (`telvax build`).
 
-def main() -> int32:
+fn main() -> i32:
     # A list has no constructor for "n copies" yet, so start from a literal.
-    is_prime = [True, True, True, True, True, True, True, True, True, True,
-        True, True, True, True, True, True, True, True, True, True,
-        True, True, True, True, True, True, True, True, True, True]
-    n = is_prime.len()
+    var is_prime = [True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True, True]
+    let n = is_prime.len()
     is_prime[0] = False
     is_prime[1] = False
 
-    p = 2
+    var p = 2
     while p * p < n:
         if is_prime[p]:
-            multiple = p * p
+            var multiple = p * p
             while multiple < n:
                 is_prime[multiple] = False
                 multiple += p
         p += 1
 
-    line = ""
-    count = 0
+    var line = ""
+    var count = 0
     for i in range(n):
         if is_prime[i]:
             line = line + f"{i} "
             count += 1
     print(line)
-    return count
+    count

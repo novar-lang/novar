@@ -460,14 +460,14 @@ mod tests {
     fn translates_a_small_network() {
         let out = compile(
             r#"
-def layer(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[float32, [2, 4]]:
-    return std.tensor.softmax(std.tensor.relu(std.tensor.matmul(x, w)))
+fn layer(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    std.tensor.softmax(std.tensor.relu(std.tensor.matmul(x, w)))
 
-def total(x: Tensor[float32, [2, 4]]) -> float32:
-    return std.tensor.sum(x)
+fn total(x: Tensor[f32, 2, 4]) -> f32:
+    std.tensor.sum(x)
 
-def twice(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[float32, [2, 4]]:
-    return layer(x, w)
+fn twice(x: Tensor[f32, 2, 3], w: Tensor[f32, 3, 4]) -> Tensor[f32, 2, 4]:
+    layer(x, w)
 "#,
         );
         assert_eq!(
@@ -498,17 +498,17 @@ def twice(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[floa
     fn reports_what_it_cannot_translate() {
         let out = compile(
             r#"
-def looped(n: int32) -> int32:
-    s = 0
+fn looped(n: i32) -> i32:
+    var s = 0
     for i in range(n):
         s = s + i
-    return s
+    s
 
-def fine(x: Tensor[float32, [4]]) -> float32:
-    return std.tensor.mean(x)
+fn fine(x: Tensor[f32, 4]) -> f32:
+    std.tensor.mean(x)
 
-def uses_loop(n: int32) -> int32:
-    return looped(n)
+fn uses_loop(n: i32) -> i32:
+    looped(n)
 "#,
         );
         assert_eq!(out.emitted, ["fine"]);

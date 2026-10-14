@@ -52,35 +52,35 @@ fn close(a: &[f32], b: &[f32]) {
 #[test]
 fn gpu_matches_cpu_on_tensor_ops() {
     let src = r#"
-def mm(a: Tensor[float32, [5, 7]], b: Tensor[float32, [7, 3]]) -> Tensor[float32, [5, 3]]:
-    return std.tensor.matmul(a, b)
+fn mm(a: Tensor[f32, 5, 7], b: Tensor[f32, 7, 3]) -> Tensor[f32, 5, 3]:
+    std.tensor.matmul(a, b)
 
-def add(a: Tensor[float32, [5, 7]], b: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.add(a, b)
+fn add(a: Tensor[f32, 5, 7], b: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.add(a, b)
 
-def mul(a: Tensor[float32, [5, 7]], b: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.mul(a, b)
+fn mul(a: Tensor[f32, 5, 7], b: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.mul(a, b)
 
-def rl(a: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.relu(a)
+fn rl(a: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.relu(a)
 
-def sg(a: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.sigmoid(a)
+fn sg(a: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.sigmoid(a)
 
-def sm(a: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.softmax(a)
+fn sm(a: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.softmax(a)
 
-def sc(a: Tensor[float32, [5, 7]]) -> Tensor[float32, [5, 7]]:
-    return std.tensor.scale(a, 2.5)
+fn sc(a: Tensor[f32, 5, 7]) -> Tensor[f32, 5, 7]:
+    std.tensor.scale(a, 2.5)
 
-def total(a: Tensor[float32, [5, 7]]) -> float32:
-    return std.tensor.sum(a)
+fn total(a: Tensor[f32, 5, 7]) -> f32:
+    std.tensor.sum(a)
 
-def avg(a: Tensor[float32, [5, 7]]) -> float32:
-    return std.tensor.mean(a)
+fn avg(a: Tensor[f32, 5, 7]) -> f32:
+    std.tensor.mean(a)
 
-def dt(a: Tensor[float32, [35]], b: Tensor[float32, [35]]) -> float32:
-    return std.tensor.dot(a, b)
+fn dt(a: Tensor[f32, 35], b: Tensor[f32, 35]) -> f32:
+    std.tensor.dot(a, b)
 "#;
     let cpu = load(src, Device::Cpu);
     let gpu = load(src, Device::Gpu);
@@ -115,8 +115,8 @@ def dt(a: Tensor[float32, [35]], b: Tensor[float32, [35]]) -> float32:
 #[test]
 fn gpu_matmul_handles_large_sizes() {
     let src = r#"
-def mm(a: Tensor[float32, [130, 70]], b: Tensor[float32, [70, 65]]) -> Tensor[float32, [130, 65]]:
-    return std.tensor.matmul(a, b)
+fn mm(a: Tensor[f32, 130, 70], b: Tensor[f32, 70, 65]) -> Tensor[f32, 130, 65]:
+    std.tensor.matmul(a, b)
 "#;
     let a = f32s(&[130, 70], &data(130 * 70, 13));
     let b = f32s(&[70, 65], &data(70 * 65, 7));

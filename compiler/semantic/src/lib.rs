@@ -2,6 +2,7 @@
 
 mod check;
 pub mod hir;
+mod named;
 pub mod stdlib;
 pub mod ty;
 
@@ -32,5 +33,10 @@ use telvax_diagnostics::Diagnostic;
 /// Checks a parsed program, returning its typed HIR and every diagnostic found.
 /// The HIR is always produced so later tooling can work on partially valid code.
 pub fn lower(program: &telvax_ast::Program) -> (hir::Program, Vec<Diagnostic>) {
-    check::lower(program)
+    // Named arguments and defaults are settled first, so the checker sees plain calls.
+    let mut program = program.clone();
+    let mut diags = named::resolve(&mut program);
+    let (hir, more) = check::lower(&program);
+    diags.extend(more);
+    (hir, diags)
 }

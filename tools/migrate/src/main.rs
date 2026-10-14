@@ -15,12 +15,22 @@ mod legacy_lexer;
 #[allow(dead_code)]
 mod legacy_parser;
 mod printer;
+#[allow(dead_code)]
+mod py_desugar;
+#[allow(dead_code)]
+mod py_lexer;
+#[allow(dead_code)]
+mod py_parser;
 
 use std::io::{Read, Write};
 
 /// Converts one source. `Ok((text, warnings))`, or the errors of the old parser.
-pub fn migrate(src: &str) -> Result<(String, Vec<String>), String> {
-    let (program, errors) = legacy_parser::parse(src);
+pub fn migrate(src: &str, from_py: bool) -> Result<(String, Vec<String>), String> {
+    let (program, errors) = if from_py {
+        py_parser::parse(src)
+    } else {
+        legacy_parser::parse(src)
+    };
     if !errors.is_empty() {
         let first = &errors[0];
         return Err(format!(
@@ -29,7 +39,8 @@ pub fn migrate(src: &str) -> Result<(String, Vec<String>), String> {
         ));
     }
     let program = program.ok_or("old syntax: nothing parsed")?;
-    let (text, mut warnings) = printer::Printer::new(src).program(&program);
+    let marker = if from_py { "#" } else { "//" };
+    let (text, mut warnings) = printer::Printer::new(src, marker).program(&program);
     let (_, new_errors) = telvax_parser::parse(&text);
     if let Some(e) = new_errors.first() {
         warnings.push(format!(
@@ -41,7 +52,9 @@ pub fn migrate(src: &str) -> Result<(String, Vec<String>), String> {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let from_py = args.iter().any(|a| a == "--from-py");
+    args.retain(|a| a != "--from-py");
     if args.first().map(String::as_str) == Some("--batch") {
         let mut input = String::new();
         std::io::stdin()
@@ -52,7 +65,7 @@ fn main() {
             if i > 0 {
                 out.push_str("\u{1}\n");
             }
-            match migrate(src) {
+            match migrate(src, from_py) {
                 Ok((text, warnings)) if warnings.is_empty() => {
                     out.push_str("OK\n");
                     out.push_str(&text);
@@ -87,7 +100,7 @@ fn main() {
                 continue;
             }
         };
-        match migrate(&src) {
+        match migrate(&src, from_py) {
             Ok((text, warnings)) => {
                 for w in &warnings {
                     eprintln!("{file}: warning: {w}");

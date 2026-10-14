@@ -5,27 +5,26 @@
 
 import std.http.Status
 
-class Input:
-    text: str
+type Input:
+    text: Text
 
-class Output:
-    label: str
-    score: int
+type Output:
+    label: Text
+    score: Int
 
-def score_of(text: str) -> int:
-    score = 0
+fn score_of(text: Text) -> Int:
+    var score = 0
     for word in text.to_lowercase().split(" "):
         if ["good", "great", "love"].contains(word):
             score += 1
         if ["bad", "awful", "hate"].contains(word):
             score -= 1
-    return score
+    score
 
-@endpoint(path="/v1/sentiment", method="POST")
-
-def sentiment(input: Input) -> Result[Output, Status]:
+@endpoint(POST, "/v1/sentiment")
+fn sentiment(input: Input) -> Result[Output, Status]:
     if input.text.is_empty():
         return Err(Status.BadRequest("empty text"))
-    score = score_of(input.text)
-    label = "positive" if score > 0 else "negative" if score < 0 else "neutral"
-    return Ok(Output(label=label, score=score))
+    let score = score_of(input.text)
+    let label = "positive" if score > 0 else "negative" if score < 0 else "neutral"
+    Ok(Output(label: label, score: score))

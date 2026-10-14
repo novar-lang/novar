@@ -150,7 +150,11 @@ where
         let row = ident()
             .then_ignore(just(Token::Colon))
             .then(ty.clone())
-            .map(|(name, ty)| Field { name, ty })
+            .map(|(name, ty)| Field {
+                name,
+                ty,
+                default: None,
+            })
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
@@ -1128,7 +1132,11 @@ where
             ident()
                 .then_ignore(just(Token::Colon))
                 .then(type_())
-                .map(|(name, ty)| Field { name, ty })
+                .map(|(name, ty)| Field {
+                    name,
+                    ty,
+                    default: None,
+                })
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -1216,6 +1224,7 @@ where
                     args: Vec::new(),
                     span,
                 },
+                default: None,
             }
         });
     let param = self_param.or(just(Token::Mut)
@@ -1227,6 +1236,7 @@ where
             mutable: m.is_some(),
             name,
             ty,
+            default: None,
         }));
 
     let func = attr
