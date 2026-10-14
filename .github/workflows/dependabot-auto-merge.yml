@@ -1,4 +1,4 @@
-name: Dependabot auto-merge
+name: Auto-merge
 
 # Turns on auto-merge for Dependabot pull requests that only change patch or minor versions.
 # Auto-merge itself waits for every required check, so nothing is merged unless all of them pass.
@@ -20,6 +20,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Pull requests from the owner: merge once every required check passes.
+  # Branch protection still decides; this only queues the merge.
+  own:
+    runs-on: ubuntu-latest
+    if: github.actor == 'ntsation' && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
