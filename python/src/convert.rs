@@ -110,7 +110,7 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
         }
         Ty::Tensor { elem, shape } => tensor_to_value(obj, elem, shape),
         // Same shapes as the JSON form: `"Unit"`, `{"One": value}`, `{"Many": [values..]}`.
-        Ty::Enum(_) => {
+        Ty::Enum(_) | Ty::Option(_) | Ty::Map(..) => {
             let json = py_to_json(obj)?;
             interp.value_from_json(ty, &json).map_err(NovarError::new_err)
         }
@@ -180,6 +180,18 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
         }
         // A unit variant is its name; one with values is `{"Variant": value}` (one value) or
         // `{"Variant": [values..]}`, the same shape as the JSON form.
+        // `None` is Python's `None`; `Some(x)` is just `x`.
+        Value::Enum(e) if e.name == "Option" => match e.fields.first() {
+            Some(v) => value_to_py(py, v.clone())?,
+            None => py.None(),
+        },
+        Value::Map(m) => {
+            let d = PyDict::new(py);
+            for (k, v) in m.entries() {
+                d.set_item(value_to_py(py, k.to_value())?, value_to_py(py, v)?)?;
+            }
+            d.into_any().unbind()
+        }
         Value::Enum(e) => match e.fields.as_slice() {
             [] => PyString::new(py, &e.variant).into_any().unbind(),
             fields => {
