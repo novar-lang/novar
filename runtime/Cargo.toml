@@ -21,7 +21,7 @@ live = ["dep:ureq", "dep:postgres"]
 tables = ["dep:datafusion", "dep:tokio", "dep:parquet"]
 
 [dependencies]
-arrow = { version = "59", default-features = false, features = ["csv"] }
+arrow = { version = "60", default-features = false, features = ["csv"] }
 datafusion = { version = "55.2.0", default-features = false, features = ["parquet", "sql", "math_expressions", "string_expressions", "datetime_expressions"], optional = true }
 parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
