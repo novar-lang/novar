@@ -26,6 +26,20 @@ pub fn handle(payload: QueryPayload) -> Result<Tensor<f32, [768]>, Status> {
 
 The full RAG service from the specification is in [`examples/rag-service.nv`](examples/rag-service.nv).
 
+> **Status: 0.0.1, an early alpha.** Good for trying the language and giving feedback; expect
+> bugs and breaking changes. What works, and what has not been run on real hardware, is listed in
+> [`docs/design/status.md`](docs/design/status.md). Bug reports and ideas are welcome in the issues.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.sh | sh
+novar --version
+```
+
+The script downloads a release binary or, if there is none for your system, builds from source
+(needs [Rust](https://rustup.rs)). To build by hand: `cargo install --locked --path cli`.
+
 ## Quick start
 
 ```sh
@@ -33,6 +47,7 @@ cargo build --release -p novar_cli          # target/release/novar
 novar check examples/rag-service.nv         # parse + type-check, diagnostics point at the exact span
 novar run examples/basics/primes.nv main    # interpret
 novar serve examples/rag-service.nv         # HTTP server on :8080 (offline model stand-ins)
+# curl -XPOST localhost:8080/v1/rag/query -H 'content-type: application/json' -d '{"query":"hello","top_k":3}'
 novar serve examples/rag-service.nv --live  # real Ollama / OpenAI / PostgreSQL+pgvector
 novar run model.nv infer --device gpu       # tensor ops on the GPU (build with --features gpu)
 novar build model.nv --emit stablehlo       # StableHLO for XLA / TPUs (--emit ptx for NVIDIA)
