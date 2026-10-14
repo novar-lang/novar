@@ -1131,3 +1131,55 @@ fn traits_with_dynamic_dispatch_and_dependency_injection() {
         json!(["first time, ana", "hello, ana", "first time, bo"])
     );
 }
+
+#[test]
+fn generic_functions_structs_and_impls_are_monomorphized() {
+    let src = "
+        trait Named { fn name(self) -> String; }
+        struct Dog { n: String }
+        impl Named for Dog { fn name(self) -> String { self.n } }
+        fn first<T>(xs: Vec<T>) -> T { xs[0] }
+        fn id<T>(x: T) -> T { x }
+        fn greet<T: Named>(x: T) -> String { f\"hi {x.name()}\" }
+        struct Pair<A, B> { a: A, b: B }
+        impl<A, B> Pair<A, B> {
+            fn new(a: A, b: B) -> Pair<A, B> { Pair { a: a, b: b } }
+            fn first(self) -> A { self.a }
+            fn second(self) -> B { self.b }
+        }
+        fn ints() -> i64 { let xs: Vec<i64> = [4, 5, 6]; let one: i64 = 1; first(xs) + id(one) }
+        fn texts() -> String { first([\"x\", \"y\"]) }
+        fn named() -> String { greet(Dog { n: \"rex\" }) }
+        fn pairs() -> String {
+            let p = Pair::new(7, \"seven\");
+            f\"{p.first()} {p.second()}\"
+        }
+    ";
+    assert_eq!(run(src, "ints", vec![]).to_json(), json!(5));
+    assert_eq!(text(run(src, "texts", vec![])), "x");
+    assert_eq!(text(run(src, "named", vec![])), "hi rex");
+    assert_eq!(text(run(src, "pairs", vec![])), "7 seven");
+}
+
+#[test]
+fn generic_enums_and_methods_are_monomorphized() {
+    let src = "
+        enum Tree<T> { Leaf, Node(T, Vec<T>) }
+        impl<T> Tree<T> {
+            fn size(self) -> u64 { match self { Tree::Leaf => 0, Tree::Node(_, rest) => 1 + rest.len() } }
+        }
+        struct Stack<T> { items: Vec<T> }
+        impl<T> Stack<T> {
+            fn new() -> Stack<T> { Stack { items: [] } }
+            fn count(self) -> u64 { self.items.len() }
+        }
+        fn sizes() -> u64 {
+            let t: Tree<i64> = Tree::Node(1, [2, 3]);
+            let e: Tree<String> = Tree::Leaf;
+            t.size() * 10 + e.size()
+        }
+        fn empty() -> u64 { let s: Stack<i64> = Stack::new(); s.count() }
+    ";
+    assert_eq!(run(src, "sizes", vec![]).to_json(), json!(30));
+    assert_eq!(run(src, "empty", vec![]).to_json(), json!(0));
+}

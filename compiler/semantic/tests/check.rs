@@ -1169,3 +1169,35 @@ fn traits_are_checked() {
     );
     assert_err("fn f() -> i32 ;", "needs a body");
 }
+
+#[test]
+fn generics_are_checked_and_instantiated() {
+    let base = "trait Named { fn name(self) -> String; }
+        struct Dog { n: String }
+        impl Named for Dog { fn name(self) -> String { self.n } }
+        fn id<T>(x: T) -> T { x }
+        fn greet<T: Named>(x: T) -> String { x.name() }
+        struct Boxed<T> { v: T }
+        enum Maybe<T> { Nothing, Just(T) }";
+    assert_clean(&format!(
+        "{base} fn a() -> String {{ greet(Dog {{ n: \"r\" }}) }}
+         fn b() -> String {{ let m: Maybe<String> = Maybe::Just(id(\"x\")); match m {{ Maybe::Just(s) => s, Maybe::Nothing => \"\" }} }}
+         fn c() -> Boxed<String> {{ Boxed {{ v: \"s\" }} }}"
+    ));
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ greet(3) }}"),
+        "does not implement `Named`",
+    );
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ let f = id; 0 }}"),
+        "has to be called",
+    );
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ let m = Maybe::Nothing; 0 }}"),
+        "cannot infer the type parameter `T`",
+    );
+    assert_err(
+        &format!("{base} fn a(b: Boxed<i32, i32>) -> i32 {{ 0 }}"),
+        "takes 1 type argument",
+    );
+}

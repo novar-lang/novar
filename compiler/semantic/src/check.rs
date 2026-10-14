@@ -14,8 +14,14 @@ type Span = std::ops::Range<usize>;
 /// A variant (or `Ok` / `Err`) with its enum name and payload types, for exhaustiveness checks.
 type Constructor = (Option<String>, String, Vec<Ty>);
 
-#[derive(Default)]
+/// A generic function (or method) instance waiting to have its body checked.
+struct Pending {
+    f: ast::Fn,
+    impl_ty: Option<String>,
+    subst: HashMap<String, Ty>,
+}
 
+#[derive(Default)]
 pub(crate) struct Checker {
     diags: Vec<Diagnostic>,
     /// Imported name -> its full path.
@@ -34,6 +40,18 @@ pub(crate) struct Checker {
     impl_spans: Vec<(String, String, Span)>,
     /// For a method defined in `impl Trait for Type`, the trait it belongs to.
     impl_of_fn: HashMap<String, String>,
+    /// Generic functions, structs, enums and `impl` blocks, instantiated for the types that use them.
+    generic_fns: HashMap<String, ast::Fn>,
+    generic_structs: HashMap<String, ast::Struct>,
+    generic_enums: HashMap<String, ast::Enum>,
+    generic_impls: HashMap<String, Vec<ast::Impl>>,
+    /// Type parameters in scope and the types they stand for.
+    type_params: HashMap<String, Ty>,
+    /// For an instance of a generic type (`Stack<i64>`): the generic it came from and its arguments.
+    instance_args: HashMap<String, (String, Vec<Ty>)>,
+    /// Instances whose bodies still have to be checked.
+    pending: Vec<Pending>,
+    anon_enums: Vec<hir::EnumDef>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
@@ -209,8 +227,34 @@ impl Checker {
 
         // Declare struct names first so fields and signatures may refer to any struct.
         let mut declared = HashSet::new();
+        // Generic definitions are kept as written and instantiated where they are used.
         for item in &program.items {
-            if let ast::Item::Struct(s) = item {
+            match item {
+                ast::Item::Struct(s) if !s.generics.is_empty() => {
+                    if !declared.insert(s.name.node.clone()) {
+                        self.err(
+                            s.name.span.clone(),
+                            format!("struct `{}` is defined twice", s.name.node),
+                        );
+                    }
+                    self.generic_structs.insert(s.name.node.clone(), s.clone());
+                }
+                ast::Item::Enum(en) if !en.generics.is_empty() => {
+                    if !declared.insert(en.name.node.clone()) {
+                        self.err(
+                            en.name.span.clone(),
+                            format!("`{}` is defined twice", en.name.node),
+                        );
+                    }
+                    self.generic_enums.insert(en.name.node.clone(), en.clone());
+                }
+                _ => {}
+            }
+        }
+        for item in &program.items {
+            if let ast::Item::Struct(s) = item
+                && s.generics.is_empty()
+            {
                 if !declared.insert(s.name.node.clone()) {
                     self.err(
                         s.name.span.clone(),
@@ -222,7 +266,9 @@ impl Checker {
             }
         }
         for item in &program.items {
-            if let ast::Item::Enum(en) = item {
+            if let ast::Item::Enum(en) = item
+                && en.generics.is_empty()
+            {
                 if !declared.insert(en.name.node.clone()) {
                     self.err(
                         en.name.span.clone(),
@@ -252,7 +298,9 @@ impl Checker {
         }
         let mut done = HashSet::new();
         for item in &program.items {
-            if let ast::Item::Struct(s) = item {
+            if let ast::Item::Struct(s) = item
+                && s.generics.is_empty()
+            {
                 if !done.insert(s.name.node.clone()) {
                     continue;
                 }
@@ -283,6 +331,9 @@ impl Checker {
         let mut enum_done = HashSet::new();
         for item in &program.items {
             let ast::Item::Enum(en) = item else { continue };
+            if !en.generics.is_empty() {
+                continue;
+            }
             if !enum_done.insert(en.name.node.clone()) {
                 continue;
             }
@@ -315,6 +366,33 @@ impl Checker {
         let mut fns: Vec<(ast::Fn, Option<String>)> = Vec::new();
         for item in &program.items {
             match item {
+                ast::Item::Fn(f) if !f.generics.is_empty() => {
+                    if self
+                        .generic_fns
+                        .insert(f.name.node.clone(), f.clone())
+                        .is_some()
+                    {
+                        self.err(
+                            f.name.span.clone(),
+                            format!("function `{}` is defined twice", f.name.node),
+                        );
+                    }
+                }
+                ast::Item::Impl(imp) if !imp.generics.is_empty() => {
+                    if self.generic_structs.contains_key(&imp.ty.node)
+                        || self.generic_enums.contains_key(&imp.ty.node)
+                    {
+                        self.generic_impls
+                            .entry(imp.ty.node.clone())
+                            .or_default()
+                            .push(imp.clone());
+                    } else {
+                        self.err(
+                            imp.ty.span.clone(),
+                            format!("cannot find the generic struct or enum `{}`", imp.ty.node),
+                        );
+                    }
+                }
                 ast::Item::Fn(f) => fns.push((f.clone(), None)),
                 ast::Item::Trait(t) => {
                     for f in &t.fns {
@@ -433,7 +511,16 @@ impl Checker {
                 self.impl_ty = None;
             }
         }
+        // Bodies of the instances created along the way (which may create more).
+        while let Some(p) = self.pending.pop() {
+            self.type_params = p.subst;
+            self.impl_ty = p.impl_ty;
+            out.fns.push(self.lower_fn(&p.f));
+            self.type_params.clear();
+            self.impl_ty = None;
+        }
         out.structs.append(&mut self.anon_structs);
+        out.enums.append(&mut self.anon_enums);
         out
     }
 
@@ -452,6 +539,9 @@ impl Checker {
             return Ty::Unknown;
         }
         let name = names[0];
+        if let Some(t) = self.type_params.get(name) {
+            return t.clone();
+        }
         let type_args: Vec<&ast::Type> = t
             .args
             .iter()
@@ -518,6 +608,14 @@ impl Checker {
             "Self" => match self.impl_ty.clone() {
                 Some(t) if self.traits.contains_key(&t) => Ty::Trait(t),
                 Some(t) if self.enums.contains_key(&t) => Ty::Enum(t),
+                Some(t)
+                    if self
+                        .instance_args
+                        .get(&t)
+                        .is_some_and(|(base, _)| self.generic_enums.contains_key(base)) =>
+                {
+                    Ty::Enum(t)
+                }
                 Some(t) => Ty::Struct(t),
                 None => {
                     self.err(t.span.clone(), "`Self` can only be used inside an `impl`");
@@ -571,6 +669,12 @@ impl Checker {
                     Ty::Unknown
                 }
             },
+            _ if self.generic_structs.contains_key(name)
+                || self.generic_enums.contains_key(name) =>
+            {
+                let args: Vec<Ty> = type_args.iter().map(|a| self.resolve_type(a)).collect();
+                self.instantiate_adt(name, args, &t.span)
+            }
             _ if self.struct_fields.contains_key(name) => {
                 no_args(self);
                 Ty::Struct(name.to_string())
@@ -1313,7 +1417,7 @@ impl Checker {
                     span,
                 )
             }
-            K::Path(p) => self.path(p, span),
+            K::Path(p) => self.path(p, expected, span),
             K::FString(parts) => {
                 let parts = parts
                     .iter()
@@ -1404,7 +1508,7 @@ impl Checker {
                     span,
                 )
             }
-            K::StructLit { path, fields } => self.struct_lit(path, fields, span),
+            K::StructLit { path, fields } => self.struct_lit(path, fields, expected, span),
             K::If {
                 cond,
                 then,
@@ -1780,6 +1884,462 @@ impl Checker {
         Self::mk(hir::ExprKind::For { var, iter, body }, Ty::Unit, span)
     }
 
+    // ---- generics: functions, structs, enums and impls instantiated per use ------------------
+
+    /// Whether `ty` mentions a type parameter (also through the arguments of a generic type).
+    fn has_param(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Param(_) => true,
+            Ty::Vec(t) | Ty::Option(t) => self.has_param(t),
+            Ty::Result(a, b) | Ty::Map(a, b) => self.has_param(a) || self.has_param(b),
+            Ty::Tuple(items) => items.iter().any(|t| self.has_param(t)),
+            Ty::Fn(ps, r) => ps.iter().any(|p| self.has_param(p)) || self.has_param(r),
+            Ty::Tensor { elem, .. } => self.has_param(elem),
+            Ty::Struct(k) | Ty::Enum(k) => self
+                .instance_args
+                .get(k)
+                .is_some_and(|(_, args)| args.iter().any(|a| self.has_param(a))),
+            _ => false,
+        }
+    }
+
+    /// Replaces the type parameters in `ty` by what `bind` says (`Unknown` when unbound).
+    fn subst_params(&mut self, ty: &Ty, bind: &HashMap<String, Ty>) -> Ty {
+        match ty {
+            Ty::Param(p) => bind.get(p).cloned().unwrap_or(Ty::Unknown),
+            Ty::Vec(t) => Ty::Vec(Box::new(self.subst_params(t, bind))),
+            Ty::Option(t) => Ty::Option(Box::new(self.subst_params(t, bind))),
+            Ty::Result(a, b) => Ty::Result(
+                Box::new(self.subst_params(a, bind)),
+                Box::new(self.subst_params(b, bind)),
+            ),
+            Ty::Map(a, b) => Ty::Map(
+                Box::new(self.subst_params(a, bind)),
+                Box::new(self.subst_params(b, bind)),
+            ),
+            Ty::Tuple(items) => {
+                Ty::Tuple(items.iter().map(|t| self.subst_params(t, bind)).collect())
+            }
+            Ty::Fn(ps, r) => Ty::Fn(
+                ps.iter().map(|p| self.subst_params(p, bind)).collect(),
+                Box::new(self.subst_params(r, bind)),
+            ),
+            Ty::Tensor { elem, shape } => Ty::Tensor {
+                elem: Box::new(self.subst_params(elem, bind)),
+                shape: shape.clone(),
+            },
+            Ty::Struct(k) | Ty::Enum(k) if self.has_param(ty) => {
+                let (base, args) = self.instance_args[k].clone();
+                let args: Vec<Ty> = args.iter().map(|a| self.subst_params(a, bind)).collect();
+                self.instantiate_adt(&base, args, &(0..0))
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Binds the type parameters in `declared` by matching it against `actual`.
+    fn infer_params(&self, declared: &Ty, actual: &Ty, bind: &mut HashMap<String, Ty>) {
+        let actual = self.resolve(actual);
+        match (declared, &actual) {
+            (Ty::Param(p), a) => {
+                if !matches!(a, Ty::Unknown | Ty::Never) {
+                    bind.entry(p.clone()).or_insert_with(|| a.clone());
+                }
+            }
+            (Ty::Vec(d), Ty::Vec(a)) | (Ty::Option(d), Ty::Option(a)) => {
+                self.infer_params(d, a, bind);
+            }
+            (Ty::Result(d1, d2), Ty::Result(a1, a2)) | (Ty::Map(d1, d2), Ty::Map(a1, a2)) => {
+                self.infer_params(d1, a1, bind);
+                self.infer_params(d2, a2, bind);
+            }
+            (Ty::Tuple(ds), Ty::Tuple(a)) if ds.len() == a.len() => {
+                for (d, a) in ds.iter().zip(a) {
+                    self.infer_params(d, a, bind);
+                }
+            }
+            (Ty::Fn(dp, dr), Ty::Fn(ap, ar)) if dp.len() == ap.len() => {
+                for (d, a) in dp.iter().zip(ap) {
+                    self.infer_params(d, a, bind);
+                }
+                self.infer_params(dr, ar, bind);
+            }
+            (Ty::Tensor { elem: d, .. }, Ty::Tensor { elem: a, .. }) => {
+                self.infer_params(d, a, bind)
+            }
+            (Ty::Struct(dk) | Ty::Enum(dk), Ty::Struct(ak) | Ty::Enum(ak)) => {
+                if let (Some((db, dargs)), Some((ab, aargs))) =
+                    (self.instance_args.get(dk), self.instance_args.get(ak))
+                    && db == ab
+                    && dargs.len() == aargs.len()
+                {
+                    for (d, a) in dargs.iter().zip(aargs) {
+                        self.infer_params(d, a, bind);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Reports a type argument that does not implement a trait its parameter is bounded by.
+    fn check_bounds(&mut self, param: &ast::GenericParam, ty: &Ty, span: &Span) {
+        for bound in &param.bounds {
+            if !self.traits.contains_key(&bound.node) {
+                self.err(
+                    bound.span.clone(),
+                    format!("cannot find the trait `{}`", bound.node),
+                );
+                continue;
+            }
+            let ok = match self.resolve(ty) {
+                Ty::Struct(n) | Ty::Enum(n) => self.impls.contains(&(bound.node.clone(), n)),
+                Ty::Trait(t) => t == bound.node,
+                Ty::Unknown | Ty::Never | Ty::Param(_) => true,
+                _ => false,
+            };
+            if !ok {
+                self.err(
+                    span.clone(),
+                    format!(
+                        "`{ty}` does not implement `{}`, which `{}` requires",
+                        bound.node, param.name.node
+                    ),
+                );
+            }
+        }
+    }
+
+    /// `Stack<i64>`: the generic struct or enum `name` for these arguments, created the first time.
+    /// With a type parameter among the arguments it only names the type (used to infer them).
+    fn instantiate_adt(&mut self, name: &str, args: Vec<Ty>, span: &Span) -> Ty {
+        let is_struct = self.generic_structs.contains_key(name);
+        let generics = if is_struct {
+            self.generic_structs[name].generics.clone()
+        } else {
+            self.generic_enums[name].generics.clone()
+        };
+        if args.len() != generics.len() {
+            self.err(
+                span.clone(),
+                format!(
+                    "`{name}` takes {} type argument(s), found {}",
+                    generics.len(),
+                    args.len()
+                ),
+            );
+            return Ty::Unknown;
+        }
+        let args: Vec<Ty> = args.iter().map(|a| self.finalize_ty(a)).collect();
+        let key = format!(
+            "{name}<{}>",
+            args.iter()
+                .map(Ty::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        self.instance_args
+            .entry(key.clone())
+            .or_insert((name.to_string(), args.clone()));
+        let ty = if is_struct {
+            Ty::Struct(key.clone())
+        } else {
+            Ty::Enum(key.clone())
+        };
+        if args.iter().any(|a| self.has_param(a))
+            || self.struct_fields.contains_key(&key)
+            || self.enums.contains_key(&key)
+        {
+            return ty;
+        }
+        for (g, a) in generics.iter().zip(&args) {
+            self.check_bounds(g, a, span);
+        }
+        let bind: HashMap<String, Ty> = generics
+            .iter()
+            .map(|g| g.name.node.clone())
+            .zip(args.iter().cloned())
+            .collect();
+        let saved_subst = std::mem::replace(&mut self.type_params, bind);
+        let saved_impl = self.impl_ty.take();
+        if is_struct {
+            self.struct_fields.insert(key.clone(), Vec::new());
+            let decl = self.generic_structs[name].clone();
+            let mut fields = Vec::new();
+            for f in &decl.fields {
+                let t = self.resolve_type(&f.ty);
+                fields.push((f.name.node.clone(), t));
+            }
+            self.struct_fields.insert(key.clone(), fields.clone());
+            self.anon_structs.push(hir::StructDef {
+                name: key.clone(),
+                name_span: decl.name.span.clone(),
+                is_pub: decl.is_pub,
+                fields,
+                span: decl.span.clone(),
+            });
+        } else {
+            self.enums.insert(key.clone(), Vec::new());
+            let decl = self.generic_enums[name].clone();
+            let mut variants = Vec::new();
+            for v in &decl.variants {
+                let tys: Vec<Ty> = v.fields.iter().map(|t| self.resolve_type(t)).collect();
+                variants.push((v.name.node.clone(), tys));
+            }
+            self.enums.insert(key.clone(), variants.clone());
+            self.anon_enums.push(hir::EnumDef {
+                name: key.clone(),
+                name_span: decl.name.span.clone(),
+                is_pub: decl.is_pub,
+                variants,
+                span: decl.span.clone(),
+            });
+        }
+        self.type_params = saved_subst;
+        self.impl_ty = saved_impl;
+        self.materialize_impls(name, &key, &args);
+        ty
+    }
+
+    /// The methods of every `impl<T> Name<T>` for one instance: their signatures now, their bodies
+    /// when the pending instances are checked.
+    fn materialize_impls(&mut self, name: &str, key: &str, args: &[Ty]) {
+        let impls = self.generic_impls.get(name).cloned().unwrap_or_default();
+        for imp in impls {
+            let mut bind: HashMap<String, Ty> = HashMap::new();
+            for (written, actual) in imp.ty_args.iter().zip(args) {
+                if written.path.len() == 1
+                    && imp
+                        .generics
+                        .iter()
+                        .any(|g| g.name.node == written.path[0].node)
+                {
+                    bind.insert(written.path[0].node.clone(), actual.clone());
+                }
+            }
+            if let Some(tr) = &imp.trait_name
+                && self.traits.contains_key(&tr.node)
+            {
+                self.impls.insert((tr.node.clone(), key.to_string()));
+            }
+            for f in &imp.fns {
+                if !f.generics.is_empty() {
+                    self.err(
+                        f.name.span.clone(),
+                        "methods with their own type parameters are not supported yet",
+                    );
+                    continue;
+                }
+                let full = format!("{key}::{}", f.name.node);
+                self.methods.insert(full.clone(), key.to_string());
+                if let Some(tr) = &imp.trait_name {
+                    self.impl_of_fn.insert(full.clone(), tr.node.clone());
+                }
+                let saved_subst = std::mem::replace(&mut self.type_params, bind.clone());
+                let saved_impl = self.impl_ty.replace(key.to_string());
+                let params: Vec<Ty> = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+                let ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
+                self.type_params = saved_subst;
+                self.impl_ty = saved_impl;
+                self.fn_sigs.insert(full.clone(), (params, ret));
+                let mut renamed = f.clone();
+                renamed.name.node = full;
+                self.pending.push(Pending {
+                    f: renamed,
+                    impl_ty: Some(key.to_string()),
+                    subst: bind.clone(),
+                });
+            }
+        }
+    }
+
+    /// A call of a generic function, or of an associated function of a generic type
+    /// (`Stack::new()`): infer the type arguments, create the instance, call it.
+    fn generic_call(
+        &mut self,
+        name: &str,
+        type_name: Option<&str>,
+        args: &[ast::Expr],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> hir::Expr {
+        let bad = |this: &mut Self, msg: String| {
+            this.err(span.clone(), msg);
+            Self::mk(hir::ExprKind::Error, Ty::Unknown, span)
+        };
+        // The declaration and the type parameters in play.
+        let (decl, generics, owner) = match type_name {
+            Some(t) => {
+                let found = self.generic_impls.get(t).and_then(|imps| {
+                    imps.iter().find_map(|imp| {
+                        imp.fns
+                            .iter()
+                            .find(|f| f.name.node == name)
+                            .map(|f| (f.clone(), imp.clone()))
+                    })
+                });
+                let Some((f, imp)) = found else {
+                    return bad(self, format!("`{t}` has no associated function `{name}`"));
+                };
+                if !f.generics.is_empty() {
+                    return bad(
+                        self,
+                        "methods with their own type parameters are not supported yet".into(),
+                    );
+                }
+                (f, imp.generics.clone(), Some(imp))
+            }
+            None => {
+                let f = self.generic_fns[name].clone();
+                let g = f.generics.clone();
+                (f, g, None)
+            }
+        };
+        // The signature with type parameters left as `Ty::Param`.
+        let param_types: HashMap<String, Ty> = generics
+            .iter()
+            .map(|g| (g.name.node.clone(), Ty::Param(g.name.node.clone())))
+            .collect();
+        let saved_subst = std::mem::replace(&mut self.type_params, param_types);
+        let saved_impl = self.impl_ty.take();
+        if let (Some(imp), Some(t)) = (&owner, type_name) {
+            let pattern: Vec<Ty> = imp.ty_args.iter().map(|a| self.resolve_type(a)).collect();
+            if let Ty::Struct(k) | Ty::Enum(k) = self.instantiate_adt(t, pattern, span) {
+                self.impl_ty = Some(k);
+            }
+        }
+        let decl_params: Vec<Ty> = decl
+            .params
+            .iter()
+            .map(|p| self.resolve_type(&p.ty))
+            .collect();
+        let decl_ret = decl.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
+        self.type_params = saved_subst;
+        self.impl_ty = saved_impl;
+        if decl_params.len() != args.len() {
+            return bad(
+                self,
+                format!(
+                    "expected {} argument(s), found {}",
+                    decl_params.len(),
+                    args.len()
+                ),
+            );
+        }
+        // Arguments first (closures wait until the types they need are known).
+        let mut bind: HashMap<String, Ty> = HashMap::new();
+        let mut checked: Vec<Option<hir::Expr>> = Vec::new();
+        for (a, declared) in args.iter().zip(&decl_params) {
+            if matches!(a.node, ast::ExprKind::Closure { .. }) {
+                checked.push(None);
+            } else {
+                let e = self.expr(a, None);
+                self.infer_params(declared, &e.ty, &mut bind);
+                checked.push(Some(e));
+            }
+        }
+        if let Some(want) = expected {
+            let want = self.resolve(want);
+            self.infer_params(&decl_ret, &want, &mut bind);
+        }
+        for (i, a) in args.iter().enumerate() {
+            if checked[i].is_none() {
+                let hint = self.subst_params(&decl_params[i], &bind);
+                let e = self.expr(a, Some(&hint));
+                self.infer_params(&decl_params[i], &e.ty, &mut bind);
+                checked[i] = Some(e);
+            }
+        }
+        for g in &generics {
+            if !bind.contains_key(&g.name.node) {
+                return bad(
+                    self,
+                    format!(
+                        "cannot infer the type parameter `{}` of `{name}`: add a type annotation",
+                        g.name.node
+                    ),
+                );
+            }
+        }
+        let bind: HashMap<String, Ty> = bind
+            .into_iter()
+            .map(|(k, v)| {
+                let v = self.finalize_ty(&v);
+                (k, v)
+            })
+            .collect();
+        for g in &generics {
+            let ty = bind[&g.name.node].clone();
+            self.check_bounds(g, &ty, span);
+        }
+        let params: Vec<Ty> = decl_params
+            .iter()
+            .map(|p| self.subst_params(p, &bind))
+            .collect();
+        let ret = self.subst_params(&decl_ret, &bind);
+        // The instance to call.
+        let full = match (&owner, type_name) {
+            (Some(imp), Some(t)) => {
+                let type_args: Vec<Ty> = imp
+                    .ty_args
+                    .iter()
+                    .map(|a| {
+                        if a.path.len() == 1 {
+                            bind.get(&a.path[0].node).cloned().unwrap_or(Ty::Unknown)
+                        } else {
+                            Ty::Unknown
+                        }
+                    })
+                    .collect();
+                match self.instantiate_adt(t, type_args, span) {
+                    Ty::Struct(k) | Ty::Enum(k) => format!("{k}::{name}"),
+                    _ => return Self::mk(hir::ExprKind::Error, Ty::Unknown, span),
+                }
+            }
+            _ => {
+                let shown: Vec<String> = generics
+                    .iter()
+                    .map(|g| bind[&g.name.node].to_string())
+                    .collect();
+                let key = format!("{name}<{}>", shown.join(", "));
+                if !self.fn_sigs.contains_key(&key) {
+                    self.fn_sigs
+                        .insert(key.clone(), (params.clone(), ret.clone()));
+                    let mut renamed = decl.clone();
+                    renamed.name.node = key.clone();
+                    renamed.generics = Vec::new();
+                    self.pending.push(Pending {
+                        f: renamed,
+                        impl_ty: None,
+                        subst: bind.clone(),
+                    });
+                }
+                key
+            }
+        };
+        let args: Vec<hir::Expr> = checked
+            .into_iter()
+            .zip(&params)
+            .map(|(e, p)| {
+                let e = e.expect("every argument was checked");
+                self.coerce(e, p)
+            })
+            .collect();
+        let callee = Self::mk(
+            hir::ExprKind::Fn(full),
+            Ty::Fn(params, Box::new(ret.clone())),
+            span,
+        );
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            ret,
+            span,
+        )
+    }
+
     /// The full name (`Point::norm`) of the method `name` of a struct or enum type, if there is one.
     fn method_of(&self, ty: &Ty, name: &str) -> Option<String> {
         let type_name = match self.resolve(ty) {
@@ -2019,6 +2579,13 @@ impl Checker {
         span: &Span,
     ) -> hir::Expr {
         let ty = Ty::Enum(enum_name.to_string());
+        if !self.enums.contains_key(enum_name) {
+            // The type arguments could not be inferred (already reported).
+            for a in args {
+                let _ = self.expr(a, None);
+            }
+            return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+        }
         let Some(fields) = self.enums[enum_name]
             .iter()
             .find(|(n, _)| *n == variant.node)
@@ -2230,6 +2797,38 @@ impl Checker {
                 };
                 (None, one.node.clone(), vec![payload])
             }
+            [en, v] if self.generic_enums.contains_key(&en.node) => {
+                let key = match &ty {
+                    Ty::Enum(k)
+                        if self
+                            .instance_args
+                            .get(k)
+                            .is_some_and(|(b, _)| *b == en.node) =>
+                    {
+                        k.clone()
+                    }
+                    _ => {
+                        return bad(
+                            self,
+                            format!(
+                                "pattern of type `{}` cannot match a value of type `{ty}`",
+                                en.node
+                            ),
+                        );
+                    }
+                };
+                let Some(fields) = self.enums[&key]
+                    .iter()
+                    .find(|(n, _)| *n == v.node)
+                    .map(|(_, f)| f.clone())
+                else {
+                    return bad(
+                        self,
+                        format!("enum `{}` has no variant `{}`", en.node, v.node),
+                    );
+                };
+                (Some(key), v.node.clone(), fields)
+            }
             [en, v] if self.enums.contains_key(&en.node) => {
                 let enum_ty = Ty::Enum(en.node.clone());
                 if !ty.accepts(&enum_ty) {
@@ -2411,7 +3010,7 @@ impl Checker {
         self.exhaustive(&sub, rest_tys)
     }
 
-    fn path(&mut self, p: &[ast::Ident], span: &Span) -> hir::Expr {
+    fn path(&mut self, p: &[ast::Ident], expected: Option<&Ty>, span: &Span) -> hir::Expr {
         let mut names: Vec<String> = p.iter().map(|i| i.node.clone()).collect();
         // `Self::new` inside an `impl` is `Type::new`.
         if names.len() == 2
@@ -2431,6 +3030,13 @@ impl Checker {
             if let Some((params, ret)) = self.fn_sigs.get(first) {
                 let ty = Ty::Fn(params.clone(), Box::new(ret.clone()));
                 return Self::mk(hir::ExprKind::Fn(first.to_string()), ty, span);
+            }
+            if self.generic_fns.contains_key(first) {
+                self.err(
+                    span.clone(),
+                    format!("the generic function `{first}` has to be called, it cannot be used as a value"),
+                );
+                return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
             }
             if self.struct_fields.contains_key(first) {
                 self.err(
@@ -2457,6 +3063,10 @@ impl Checker {
             }
             if self.enums.contains_key(first) {
                 return self.enum_ctor(first, &p[1], &[], span);
+            }
+            if self.generic_enums.contains_key(first) {
+                let key = self.generic_enum_instance(first, &p[1], &[], expected, span);
+                return self.enum_ctor(&key, &p[1], &[], span);
             }
         }
         let resolved = if first == "std" {
@@ -2717,6 +3327,31 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        if let ast::ExprKind::Path(p) = &callee.node {
+            if p.len() == 1
+                && self.lookup_local(&p[0].node).is_none()
+                && !self.fn_sigs.contains_key(&p[0].node)
+                && self.generic_fns.contains_key(&p[0].node)
+            {
+                return self.generic_call(&p[0].node.clone(), None, args, expected, span);
+            }
+            if p.len() == 2
+                && (self.generic_structs.contains_key(&p[0].node)
+                    || self.generic_enums.contains_key(&p[0].node))
+                && self.generic_impls.get(&p[0].node).is_some_and(|imps| {
+                    imps.iter()
+                        .any(|i| i.fns.iter().any(|f| f.name.node == p[1].node))
+                })
+            {
+                return self.generic_call(
+                    &p[1].node.clone(),
+                    Some(&p[0].node.clone()),
+                    args,
+                    expected,
+                    span,
+                );
+            }
+        }
         if let ast::ExprKind::Path(p) = &callee.node
             && p.len() == 2
         {
@@ -2731,6 +3366,15 @@ impl Checker {
                 .is_some_and(|vs| vs.iter().any(|(v, _)| *v == p[1].node));
             if is_variant {
                 return self.enum_ctor(&first, &p[1], args, span);
+            }
+            if self.generic_enums.contains_key(&first)
+                && self.generic_enums[&first]
+                    .variants
+                    .iter()
+                    .any(|v| v.name.node == p[1].node)
+            {
+                let key = self.generic_enum_instance(&first, &p[1], args, expected, span);
+                return self.enum_ctor(&key, &p[1], args, span);
             }
         }
         if let ast::ExprKind::Path(p) = &callee.node
@@ -3217,10 +3861,141 @@ impl Checker {
         )
     }
 
+    /// Which instance of the generic struct `base` a literal builds: the expected type, the
+    /// enclosing `impl`, or what its field values say.
+    fn generic_struct_instance(
+        &mut self,
+        base: &str,
+        fields: &[(ast::Ident, ast::Expr)],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> String {
+        let of_base =
+            |this: &Self, k: &str| this.instance_args.get(k).is_some_and(|(b, _)| b == base);
+        if let Some(Ty::Struct(k)) = expected.map(|t| self.resolve(t))
+            && of_base(self, &k)
+        {
+            return k;
+        }
+        if let Some(k) = self.impl_ty.clone()
+            && of_base(self, &k)
+        {
+            return k;
+        }
+        let decl = self.generic_structs[base].clone();
+        let param_types: HashMap<String, Ty> = decl
+            .generics
+            .iter()
+            .map(|g| (g.name.node.clone(), Ty::Param(g.name.node.clone())))
+            .collect();
+        let saved = std::mem::replace(&mut self.type_params, param_types);
+        let declared: Vec<(String, Ty)> = decl
+            .fields
+            .iter()
+            .map(|f| (f.name.node.clone(), self.resolve_type(&f.ty)))
+            .collect();
+        self.type_params = saved;
+        let mut bind = HashMap::new();
+        let keep = self.diags.len();
+        for (fname, value) in fields {
+            if let Some((_, d)) = declared.iter().find(|(n, _)| *n == fname.node) {
+                let e = self.expr(value, None);
+                self.infer_params(d, &e.ty, &mut bind);
+            }
+        }
+        self.diags.truncate(keep);
+        let mut args = Vec::new();
+        for g in &decl.generics {
+            match bind.get(&g.name.node) {
+                Some(t) => args.push(t.clone()),
+                None => {
+                    self.err(
+                        span.clone(),
+                        format!(
+                            "cannot infer the type parameter `{}` of `{base}`: add a type annotation",
+                            g.name.node
+                        ),
+                    );
+                    return base.to_string();
+                }
+            }
+        }
+        match self.instantiate_adt(base, args, span) {
+            Ty::Struct(k) => k,
+            _ => base.to_string(),
+        }
+    }
+
+    /// Which instance of the generic enum `base` a variant builds: the expected type, the
+    /// enclosing `impl`, or what the variant's values say.
+    fn generic_enum_instance(
+        &mut self,
+        base: &str,
+        variant: &ast::Ident,
+        args: &[ast::Expr],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> String {
+        let of_base =
+            |this: &Self, k: &str| this.instance_args.get(k).is_some_and(|(b, _)| b == base);
+        if let Some(Ty::Enum(k)) = expected.map(|t| self.resolve(t))
+            && of_base(self, &k)
+        {
+            return k;
+        }
+        if let Some(k) = self.impl_ty.clone()
+            && of_base(self, &k)
+        {
+            return k;
+        }
+        let decl = self.generic_enums[base].clone();
+        let param_types: HashMap<String, Ty> = decl
+            .generics
+            .iter()
+            .map(|g| (g.name.node.clone(), Ty::Param(g.name.node.clone())))
+            .collect();
+        let saved = std::mem::replace(&mut self.type_params, param_types);
+        let declared: Vec<Ty> = decl
+            .variants
+            .iter()
+            .find(|v| v.name.node == variant.node)
+            .map(|v| v.fields.iter().map(|t| self.resolve_type(t)).collect())
+            .unwrap_or_default();
+        self.type_params = saved;
+        let mut bind = HashMap::new();
+        let keep = self.diags.len();
+        for (a, d) in args.iter().zip(&declared) {
+            let e = self.expr(a, None);
+            self.infer_params(d, &e.ty, &mut bind);
+        }
+        self.diags.truncate(keep);
+        let mut targs = Vec::new();
+        for g in &decl.generics {
+            match bind.get(&g.name.node) {
+                Some(t) => targs.push(t.clone()),
+                None => {
+                    self.err(
+                        span.clone(),
+                        format!(
+                            "cannot infer the type parameter `{}` of `{base}`: add a type annotation",
+                            g.name.node
+                        ),
+                    );
+                    return base.to_string();
+                }
+            }
+        }
+        match self.instantiate_adt(base, targs, span) {
+            Ty::Enum(k) => k,
+            _ => base.to_string(),
+        }
+    }
+
     fn struct_lit(
         &mut self,
         path: &[ast::Ident],
         fields: &[(ast::Ident, ast::Expr)],
+        expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
         let mut name = path
@@ -3233,8 +4008,13 @@ impl Checker {
         {
             name = t.clone();
         }
+        if self.generic_structs.contains_key(&name) {
+            name = self.generic_struct_instance(&name, fields, expected, span);
+        }
         let Some(decl) = self.struct_fields.get(&name).cloned() else {
-            self.err(span.clone(), format!("cannot find struct `{name}`"));
+            if !self.generic_structs.contains_key(&name) {
+                self.err(span.clone(), format!("cannot find struct `{name}`"));
+            }
             for (_, e) in fields {
                 let _ = self.expr(e, None);
             }
