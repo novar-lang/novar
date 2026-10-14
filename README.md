@@ -26,9 +26,22 @@ pub fn handle(payload: QueryPayload) -> Result<Tensor<f32, [768]>, Status> {
 
 The full RAG service from the specification is in [`examples/rag-service.nv`](examples/rag-service.nv).
 
-> **Status: 0.0.1, an early alpha.** Good for trying the language and giving feedback; expect
+> **Status: 0.0.4, an early alpha.** Good for trying the language and giving feedback; expect
 > bugs and breaking changes. What works, and what has not been run on real hardware, is listed in
 > [`docs/design/status.md`](docs/design/status.md). Bug reports and ideas are welcome in the issues.
+
+## What you can build
+
+| Use case | Example |
+|---|---|
+| Summarise a CSV / Parquet file with typed columns and SQL | [`examples/dataframe/sales.nv`](examples/dataframe/sales.nv) |
+| Models whose tensor shapes are checked before they run | [`examples/ml/forward.nv`](examples/ml/forward.nv) |
+| Turn a function into a validated JSON HTTP route | [`examples/service/sentiment.nv`](examples/service/sentiment.nv) |
+| A RAG service: embeddings, vector search, an LLM | [`examples/rag-service.nv`](examples/rag-service.nv) |
+| Text processing with `Map`, `Vec` and iterator methods | [`examples/text/word-count.nv`](examples/text/word-count.nv) |
+| Errors as values: `Result`, `Option`, `?`, `if let` | [`examples/errors/parse-config.nv`](examples/errors/parse-config.nv) |
+
+Each one comes with the commands to run it in [`docs/guide/use-cases.md`](docs/guide/use-cases.md).
 
 ## Install
 
@@ -67,7 +80,7 @@ novar build model.nv --emit stablehlo       # StableHLO for XLA / TPUs (--emit p
 novar build --serve examples/rag-service.nv -o service --dockerfile   # one binary + Dockerfile
 ```
 
-Nightly Rust is required (`rust-toolchain.toml` selects it). More in [`docs/guide`](docs/guide/tour.md).
+Nightly Rust is required (`rust-toolchain.toml` selects it). More in the [tour](docs/guide/tour.md) and the [use cases](docs/guide/use-cases.md).
 
 ## What is here
 
