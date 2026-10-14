@@ -77,6 +77,7 @@ impl<'a> Rewriter<'a> {
                 self.enum_path(path);
                 args.iter_mut().for_each(|a| self.pattern(a));
             }
+            PatKind::Tuple(items) => items.iter_mut().for_each(|a| self.pattern(a)),
             PatKind::Wild | PatKind::Lit(_) => {}
         }
     }
@@ -165,7 +166,8 @@ impl<'a> Rewriter<'a> {
                 args.iter_mut().for_each(|a| self.expr(a));
             }
             ExprKind::Field { base, .. } => self.expr(base),
-            ExprKind::Unary { expr, .. } => self.expr(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
+            ExprKind::Tuple(items) => items.iter_mut().for_each(|a| self.expr(a)),
             ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
                 self.expr(lhs);
                 self.expr(rhs);
