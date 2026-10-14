@@ -193,14 +193,14 @@ fn check_tensor(
     let Some(items) = v.as_array() else {
         return errors.push(format!("{path}: expected an array, found {}", describe(v)));
     };
-    if let Some(n) = dim {
-        if items.len() as u64 != *n {
-            errors.push(format!(
-                "{path}: expected {n} element(s), found {}",
-                items.len()
-            ));
-            return;
-        }
+    if let Some(n) = dim
+        && items.len() as u64 != *n
+    {
+        errors.push(format!(
+            "{path}: expected {n} element(s), found {}",
+            items.len()
+        ));
+        return;
     }
     for (i, item) in items.iter().enumerate() {
         check_tensor(elem, rest, item, &format!("{path}[{i}]"), errors);
