@@ -12,8 +12,9 @@ use telvax_runtime::{Interp, Value};
 const USAGE: &str = "\
 usage:
   telvax check <file.tvx>
-  telvax lint <file.tvx> [--deny-warnings]                    unused variables, `mut` and functions
+  telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
+  telvax test <file.tvx> [name]                             run the `test_*` functions
   telvax run <file.tvx> <function> [args...] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
@@ -63,6 +64,8 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         }
         ["check", file] => check(file).map(|_| ()),
         ["run", file, func, rest @ ..] => run(file, func, rest),
+        ["test", file] => test(file, None),
+        ["test", file, filter] => test(file, Some(filter)),
         ["serve", file, rest @ ..] => {
             let (workers, rest) = take_workers(rest);
             let opts = serve::Options::parse("127.0.0.1", &rest)?;
@@ -274,6 +277,39 @@ fn parse_arg(raw: &str) -> Value {
     } else {
         Value::str(raw)
     }
+}
+
+/// `telvax test <file> [name]`: runs every function called `test_*` that takes no arguments. A
+/// test passes when it returns and fails when it stops with an error (`assert`, `assert_eq`, ...).
+fn test(file: &str, filter: Option<&str>) -> Result<(), CliError> {
+    let checked = check_project(file)?;
+    let mut names: Vec<String> = checked
+        .hir
+        .fns
+        .iter()
+        .filter(|f| f.name.starts_with("test_") && f.params.is_empty())
+        .filter(|f| filter.is_none_or(|n| f.name.contains(n)))
+        .map(|f| f.name.clone())
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return failed(
+            "no test functions found (a test is a function named `test_...` without arguments)",
+        );
+    }
+    let interp = Interp::new(checked.hir).or_else(|e| failed(e.to_string()))?;
+    let mut failures = 0;
+    for name in &names {
+        match interp.call(name, vec![]) {
+            Ok(_) => println!("ok      {name}"),
+            Err(e) => {
+                failures += 1;
+                println!("FAILED  {name}: {e}");
+            }
+        }
+    }
+    println!("{} passed, {failures} failed", names.len() - failures);
+    if failures > 0 { failed("") } else { Ok(()) }
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {

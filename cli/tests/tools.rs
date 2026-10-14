@@ -70,3 +70,21 @@ fn main() -> i32:
     assert!(!ok);
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }
+
+#[test]
+fn test_runs_the_test_functions() {
+    let src = "fn double(x: Int) -> Int:\n    x * 2\n\nfn test_double():\n    assert_eq(double(2), 4)\n\nfn test_wrong():\n    assert_eq(double(3), 7)\n";
+    let file = scratch("tests", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path]);
+    assert!(!ok, "a failing test must fail the run");
+    assert!(out.contains("ok      test_double"), "{out}");
+    assert!(
+        out.contains("FAILED  test_wrong") && out.contains("left is `6`, right is `7`"),
+        "{out}"
+    );
+    assert!(out.contains("1 passed, 1 failed"), "{out}{err}");
+    let (ok, out, _) = run(&["test", path, "double"]);
+    assert!(ok && out.contains("1 passed, 0 failed"), "{out}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
