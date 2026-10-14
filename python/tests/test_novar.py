@@ -376,3 +376,34 @@ def test_enums_use_the_json_shape():
     assert p.call("make", 2) == "Empty"
     with pytest.raises(novar.NovarError):
         p.call("area", "Triangle")
+
+
+# ---- Option, Map and the shorter syntax ----------------------------------------------------
+
+
+OPT_MAP = """
+fn find(words: Vec<String>, w: String) -> Option<u64> { words.contains(w) && true; words.first().is_some() && w.len() > 0; w.find(\"a\") }
+fn word_counts(text: String) -> Map<String, i64> {
+    let counts: Map<String, i64> = std::map::new();
+    for w in text.split(\" \") { counts.insert(w, counts.get(w).unwrap_or(0) + 1); }
+    counts
+}
+fn lookup(m: Map<String, i64>, k: String) -> i64 { m.get(k).unwrap_or(0 - 1) }
+fn maybe(flag: bool) -> Option<String> { if flag { Some(\"yes\") } else { None } }
+fn total(x: Tensor<f32, [4]>) -> f32 { (x * 2.0 + x).sum() }
+"""
+
+
+def test_option_and_map_cross_the_boundary():
+    p = novar.compile(OPT_MAP)
+    assert p.call("maybe", True) == "yes"
+    assert p.call("maybe", False) is None
+    assert p.call("word_counts", "a b a") == {"a": 2, "b": 1}
+    assert p.call("lookup", {"x": 5}, "x") == 5
+    assert p.call("lookup", {"x": 5}, "y") == -1
+    assert p.call("find", ["a"], "banana") == 1
+
+
+def test_tensor_operators_run_from_python():
+    p = novar.compile(OPT_MAP)
+    assert p.call("total", np.ones(4, np.float32)) == 12.0

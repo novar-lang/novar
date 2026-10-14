@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.0.4
+
+### Language
+* **Friendlier syntax** (all additive): `println`, `print`, `read_csv` and `read_parquet` work
+  without `std::`; tensors have methods (`x.matmul(w).relu().softmax()`, `sales.price.mean()`) and
+  operators (`a + b`, `a * 2.0`); tables have `.sql(...)`; a row type can be written in place
+  (`Table<{ region: String, revenue: f64 }>`); `fn main()` may return nothing.
+* `Option<T>` (`Some`, `None`, `match`, `unwrap`, `unwrap_or`, ...) and `Map<K, V>` (`std::map::new()`,
+  `insert`, `get`, `remove`, `contains_key`, `keys`, `values`, ...), also across the Python and JSON
+  boundaries. `Vec` gains `first`, `last`, `pop`, `get`, `sort`, `reverse`; `String` gains `find`,
+  `to_int`, `to_float`, `chars`, `lines`.
+* Closure parameters can be annotated (`|x: i64| x + 1`), and assigning to a captured variable is a
+  compile error (closures capture by value).
+
+### Tools
+* The language server finds references and renames variables and functions (a rename that would
+  collide with another name is refused). `novar fmt` indents the line after a trailing `=`.
+* Quantization: `--quantize int8-channel` and `--quantize int4-channel` (interpreter only).
+
+### GPU
+* Nested tensor operations (`softmax(matmul(relu(matmul(x, w1)), w2))`) keep their intermediate
+  results on the GPU. On the M4 a 3-layer network takes 44 ms against 9.0 s in the CPU interpreter;
+  the chaining itself saves little there because memory is shared.
+
+### Verification
+* The playground page is tested in a real Chromium (Playwright), the extension inside a real VS
+  Code, and every published release is installed and run on Linux, macOS and Windows by the release
+  workflow. The LLVM job is blocking.
+* CI also runs a build of the ~10 MB `lite` binary.
+
+
 ## 0.0.3
 
 ### Size

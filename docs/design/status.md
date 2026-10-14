@@ -60,8 +60,8 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 
 | Item | State |
 |---|---|
-| VS Code extension with LSP | done: language server (diagnostics, hover, completion, definition, inferred-type hints, module aware) tested over real stdio; the extension compiles, packages (`.vsix`) and its TextMate grammar is tested with the real tokenizer. It has **not been run inside VS Code** |
-| WebAssembly playground | done: the engine is tested as a real `.wasm` under Node (check, run, hover, step limit). The web page itself was **not exercised in a browser** |
+| VS Code extension with LSP | done: language server (diagnostics, hover, completion, definition, references, rename, formatting, inferred-type hints, module aware) tested over real stdio, and the extension is exercised **inside a real VS Code** (downloaded by `@vscode/test-electron`: language mapping, diagnostics, hover, definition, references, rename, completion, formatting; run locally on macOS and as the `vscode-host` CI job). The TextMate grammar is tested with the real tokenizer |
+| WebAssembly playground | done: the engine is tested as a real `.wasm` under Node (check, run, hover, step limit) and the page itself runs in a **real Chromium** through Playwright (load, run, Ctrl+Enter, type errors, runtime errors, examples, share link; run locally and as the `playground-browser` CI job). Only Chromium has been tried |
 | Dual Apache-2.0 / MIT | done |
 
 ## 7. Ecosystem
@@ -80,5 +80,5 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `novar build`).
 * Enums and `match` run in the interpreter only; the native backend reports them as unsupported.
 * `novar fmt` keeps the line breaks you wrote (it fixes indentation, spacing and blank lines); it does not re-wrap long lines. `novar lint` only finds unused variables, needless `mut` and unused private functions.
-* Windows builds come from CI and have not been exercised on a real Windows machine; the native backend is not built there.
+* Windows builds come from CI and have not been exercised on a real Windows machine; the native backend is not built there. Each published release is now installed and run on Windows, Linux and macOS by the `verify` job of the release workflow (it first runs with the 0.0.4 release).
 * PTX and StableHLO output have not been executed on NVIDIA or TPU hardware.
