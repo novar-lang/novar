@@ -13,6 +13,7 @@ pub struct Program {
     /// Fully qualified names brought in by `import`.
     pub imports: Vec<Vec<String>>,
     pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub globals: Vec<Global>,
     pub fns: Vec<FnDef>,
 }
@@ -23,6 +24,16 @@ pub struct StructDef {
     pub name_span: Span,
     pub is_pub: bool,
     pub fields: Vec<(String, Ty)>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub name_span: Span,
+    pub is_pub: bool,
+    /// Variant names with their payload types.
+    pub variants: Vec<(String, Vec<Ty>)>,
     pub span: Span,
 }
 
@@ -135,6 +146,16 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Break,
     Continue,
+    /// `Shape::Circle(1.0)`, `Shape::Empty`
+    EnumCtor {
+        enum_name: String,
+        variant: String,
+        args: Vec<Expr>,
+    },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<Arm>,
+    },
     FString(Vec<FPart>),
     /// Assignment to a place rooted in a mutable local; evaluates to unit. The value is
     /// evaluated first, then the place's index expressions left to right.
@@ -157,6 +178,25 @@ pub enum ExprKind {
     },
     Array(Vec<Expr>),
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arm {
+    pub pat: Pat,
+    pub body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pat {
+    Wild,
+    Bind(Local),
+    Lit(Lit),
+    /// A variant of a user enum (`enum_name` is `Some`) or `Ok` / `Err` of a `Result` (`None`).
+    Variant {
+        enum_name: Option<String>,
+        variant: String,
+        args: Vec<Pat>,
+    },
 }
 
 /// Assignable location: a `let mut` local (or `mut` parameter) followed by field / index steps.

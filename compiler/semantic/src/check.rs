@@ -17,6 +17,8 @@ pub(crate) struct Checker {
     /// Imported name -> its full path.
     imports: HashMap<String, Vec<String>>,
     struct_fields: HashMap<String, Vec<(String, Ty)>>,
+    /// Enum name -> its variants and their payload types.
+    enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
     globals: HashMap<String, Ty>,
     scopes: Vec<HashMap<String, (LocalId, Ty, bool)>>,
@@ -88,6 +90,18 @@ impl Checker {
                 }
             }
         }
+        for item in &program.items {
+            if let ast::Item::Enum(en) = item {
+                if !declared.insert(en.name.node.clone()) {
+                    self.err(
+                        en.name.span.clone(),
+                        format!("`{}` is defined twice", en.name.node),
+                    );
+                } else {
+                    self.enums.insert(en.name.node.clone(), Vec::new());
+                }
+            }
+        }
         let mut done = HashSet::new();
         for item in &program.items {
             if let ast::Item::Struct(s) = item {
@@ -116,6 +130,34 @@ impl Checker {
                     span: s.span.clone(),
                 });
             }
+        }
+
+        let mut enum_done = HashSet::new();
+        for item in &program.items {
+            let ast::Item::Enum(en) = item else { continue };
+            if !enum_done.insert(en.name.node.clone()) {
+                continue;
+            }
+            let mut variants: Vec<(String, Vec<Ty>)> = Vec::new();
+            for v in &en.variants {
+                if variants.iter().any(|(n, _)| *n == v.name.node) {
+                    self.err(
+                        v.name.span.clone(),
+                        format!("variant `{}` is declared twice", v.name.node),
+                    );
+                    continue;
+                }
+                let tys = v.fields.iter().map(|t| self.resolve_type(t)).collect();
+                variants.push((v.name.node.clone(), tys));
+            }
+            self.enums.insert(en.name.node.clone(), variants.clone());
+            out.enums.push(hir::EnumDef {
+                name: en.name.node.clone(),
+                name_span: en.name.span.clone(),
+                is_pub: en.is_pub,
+                variants,
+                span: en.span.clone(),
+            });
         }
 
         self.structs_resolved = true;
@@ -271,6 +313,10 @@ impl Checker {
                 no_args(self);
                 Ty::Struct(name.to_string())
             }
+            _ if self.enums.contains_key(name) => {
+                no_args(self);
+                Ty::Enum(name.to_string())
+            }
             _ if self.imports.contains_key(name) => Ty::Named(name.to_string()),
             _ => {
                 self.err(
@@ -378,6 +424,18 @@ impl Checker {
         }
     }
 
+    fn finalize_pat(&mut self, p: &mut hir::Pat) {
+        match p {
+            hir::Pat::Bind(l) => l.ty = self.finalize_ty(&l.ty),
+            hir::Pat::Variant { args, .. } => {
+                for a in args {
+                    self.finalize_pat(a);
+                }
+            }
+            hir::Pat::Wild | hir::Pat::Lit(_) => {}
+        }
+    }
+
     /// Like `resolve`, but also pins still-free literal variables to their defaults.
     fn finalize_ty(&mut self, ty: &Ty) -> Ty {
         match self.resolve(ty) {
@@ -479,6 +537,18 @@ impl Checker {
                 }
             }
             K::Break | K::Continue => {}
+            K::EnumCtor { args, .. } => {
+                for a in args {
+                    self.finalize_expr(a);
+                }
+            }
+            K::Match { scrutinee, arms } => {
+                self.finalize_expr(scrutinee);
+                for arm in arms {
+                    self.finalize_pat(&mut arm.pat);
+                    self.finalize_expr(&mut arm.body);
+                }
+            }
             K::FString(parts) => {
                 for p in parts {
                     if let hir::FPart::Expr(x) = p {
@@ -1011,6 +1081,7 @@ impl Checker {
                 let (block, ty) = self.block(b, expected);
                 Self::mk(hir::ExprKind::Block(block), ty, span)
             }
+            K::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, expected, span),
             K::Break | K::Continue => {
                 let (word, kind) = if matches!(e.node, K::Break) {
                     ("break", hir::ExprKind::Break)
@@ -1255,6 +1326,333 @@ impl Checker {
         Self::mk(hir::ExprKind::For { var, iter, body }, Ty::Unit, span)
     }
 
+    /// `Enum::Variant` or `Enum::Variant(args..)`.
+    fn enum_ctor(
+        &mut self,
+        enum_name: &str,
+        variant: &ast::Ident,
+        args: &[ast::Expr],
+        span: &Span,
+    ) -> hir::Expr {
+        let ty = Ty::Enum(enum_name.to_string());
+        let Some(fields) = self.enums[enum_name]
+            .iter()
+            .find(|(n, _)| *n == variant.node)
+            .map(|(_, f)| f.clone())
+        else {
+            self.err(
+                variant.span.clone(),
+                format!("enum `{enum_name}` has no variant `{}`", variant.node),
+            );
+            return Self::mk(hir::ExprKind::Error, ty, span);
+        };
+        if fields.len() != args.len() {
+            self.err(
+                span.clone(),
+                format!(
+                    "`{enum_name}::{}` takes {} value(s), found {}",
+                    variant.node,
+                    fields.len(),
+                    args.len()
+                ),
+            );
+        }
+        let args = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let want = fields.get(i);
+                let a = self.expr(a, want);
+                match want {
+                    Some(w) => self.coerce(a, w),
+                    None => a,
+                }
+            })
+            .collect();
+        Self::mk(
+            hir::ExprKind::EnumCtor {
+                enum_name: enum_name.to_string(),
+                variant: variant.node.clone(),
+                args,
+            },
+            ty,
+            span,
+        )
+    }
+
+    fn match_expr(
+        &mut self,
+        scrutinee: &ast::Expr,
+        arms: &[ast::Arm],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> hir::Expr {
+        let scrut = self.expr(scrutinee, None);
+        let sty = self.resolve(&scrut.ty);
+        if arms.is_empty() {
+            self.err(span.clone(), "a `match` needs at least one arm");
+        }
+        let expected = expected.cloned();
+        let mut ty = Ty::Never;
+        let mut out = Vec::new();
+        for arm in arms {
+            self.scopes.push(HashMap::new());
+            let pat = self.pattern(&arm.pat, &sty);
+            let want = expected
+                .clone()
+                .or_else(|| (ty != Ty::Never).then(|| ty.clone()));
+            let body = self.expr(&arm.body, want.as_ref());
+            self.scopes.pop();
+            if self.unify(&ty, &body.ty) {
+                if ty == Ty::Never {
+                    ty = body.ty.clone();
+                }
+            } else {
+                self.err(
+                    body.span.clone(),
+                    format!(
+                        "`match` arms have incompatible types: `{}` and `{}`",
+                        self.resolve(&ty),
+                        self.resolve(&body.ty)
+                    ),
+                );
+                ty = Ty::Unknown;
+            }
+            out.push(hir::Arm { pat, body });
+        }
+        self.check_exhaustive(&sty, &out, span);
+        Self::mk(
+            hir::ExprKind::Match {
+                scrutinee: Box::new(scrut),
+                arms: out,
+            },
+            ty,
+            span,
+        )
+    }
+
+    fn pattern(&mut self, p: &ast::Pattern, ty: &Ty) -> hir::Pat {
+        use ast::PatKind as P;
+        let ty = self.resolve(ty);
+        match &p.node {
+            P::Wild => hir::Pat::Wild,
+            P::Bind(name) => {
+                let id = ast::Ident {
+                    node: name.clone(),
+                    span: p.span.clone(),
+                };
+                hir::Pat::Bind(self.declare(&id, ty))
+            }
+            P::Lit(l) => {
+                let lit_ty = match l {
+                    ast::Lit::Int(_) => self.fresh(false),
+                    ast::Lit::Float(_) => self.fresh(true),
+                    ast::Lit::Str(_) => Ty::str(),
+                    ast::Lit::Bool(_) => Ty::bool(),
+                };
+                if !self.unify(&ty, &lit_ty) {
+                    self.err(
+                        p.span.clone(),
+                        format!("this pattern does not match a value of type `{ty}`"),
+                    );
+                }
+                hir::Pat::Lit(l.clone())
+            }
+            P::Variant { path, args } => self.variant_pattern(p, path, args, &ty),
+        }
+    }
+
+    fn variant_pattern(
+        &mut self,
+        p: &ast::Pattern,
+        path: &[ast::Ident],
+        args: &[ast::Pattern],
+        ty: &Ty,
+    ) -> hir::Pat {
+        let bad = |this: &mut Self, msg: String| {
+            this.err(p.span.clone(), msg);
+            hir::Pat::Wild
+        };
+        let (enum_name, variant, field_tys) = match path {
+            [one] if matches!(one.node.as_str(), "Ok" | "Err") => {
+                let payload = match ty {
+                    Ty::Result(o, e) => Some(if one.node == "Ok" {
+                        (**o).clone()
+                    } else {
+                        (**e).clone()
+                    }),
+                    Ty::Unknown => Some(Ty::Unknown),
+                    _ => None,
+                };
+                let Some(payload) = payload else {
+                    return bad(
+                        self,
+                        format!("`{}` patterns need a `Result`, found `{ty}`", one.node),
+                    );
+                };
+                (None, one.node.clone(), vec![payload])
+            }
+            [en, v] if self.enums.contains_key(&en.node) => {
+                let enum_ty = Ty::Enum(en.node.clone());
+                if !ty.accepts(&enum_ty) {
+                    return bad(
+                        self,
+                        format!(
+                            "pattern of type `{}` cannot match a value of type `{ty}`",
+                            en.node
+                        ),
+                    );
+                }
+                let Some(fields) = self.enums[&en.node]
+                    .iter()
+                    .find(|(n, _)| *n == v.node)
+                    .map(|(_, f)| f.clone())
+                else {
+                    return bad(
+                        self,
+                        format!("enum `{}` has no variant `{}`", en.node, v.node),
+                    );
+                };
+                (Some(en.node.clone()), v.node.clone(), fields)
+            }
+            _ => {
+                let name = path
+                    .iter()
+                    .map(|i| i.node.as_str())
+                    .collect::<Vec<_>>()
+                    .join("::");
+                return bad(self, format!("`{name}` is not a variant of a known enum"));
+            }
+        };
+        if field_tys.len() != args.len() {
+            self.err(
+                p.span.clone(),
+                format!(
+                    "`{variant}` has {} value(s), the pattern has {}",
+                    field_tys.len(),
+                    args.len()
+                ),
+            );
+        }
+        let args = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| self.pattern(a, field_tys.get(i).unwrap_or(&Ty::Unknown)))
+            .collect();
+        hir::Pat::Variant {
+            enum_name,
+            variant,
+            args,
+        }
+    }
+
+    /// Reports a `match` that can fall through.
+    fn check_exhaustive(&mut self, sty: &Ty, arms: &[hir::Arm], span: &Span) {
+        let rows: Vec<Vec<Option<&hir::Pat>>> = arms.iter().map(|a| vec![Some(&a.pat)]).collect();
+        if self.exhaustive(&rows, std::slice::from_ref(sty)) {
+            return;
+        }
+        let missing = match sty {
+            Ty::Enum(name) => {
+                let variants = self.enums.get(name).cloned().unwrap_or_default();
+                let names: Vec<_> = variants
+                    .iter()
+                    .filter(|(v, fields)| {
+                        let sub = self.specialize(&rows, Some(name), v, fields.len());
+                        let mut tys = fields.clone();
+                        !self.exhaustive(&sub, &tys.split_off(0))
+                    })
+                    .map(|(v, _)| format!("`{name}::{v}`"))
+                    .collect();
+                format!(": missing {}", names.join(", "))
+            }
+            _ => ": add a `_` arm".to_string(),
+        };
+        self.err(span.clone(), format!("non-exhaustive `match`{missing}"));
+    }
+
+    /// Rows whose first column can match `variant`, with that column replaced by its fields.
+    fn specialize<'p>(
+        &self,
+        rows: &[Vec<Option<&'p hir::Pat>>],
+        enum_name: Option<&str>,
+        variant: &str,
+        arity: usize,
+    ) -> Vec<Vec<Option<&'p hir::Pat>>> {
+        let mut out = Vec::new();
+        for row in rows {
+            let rest = &row[1..];
+            match row[0] {
+                None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
+                    let mut r = vec![None; arity];
+                    r.extend_from_slice(rest);
+                    out.push(r);
+                }
+                Some(hir::Pat::Variant {
+                    enum_name: en,
+                    variant: v,
+                    args,
+                }) if v == variant && en.as_deref() == enum_name => {
+                    let mut r: Vec<Option<&hir::Pat>> = args.iter().map(Some).collect();
+                    r.resize(arity, None);
+                    r.extend_from_slice(rest);
+                    out.push(r);
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The classic usefulness check: does every value of `tys` match some row?
+    fn exhaustive(&self, rows: &[Vec<Option<&hir::Pat>>], tys: &[Ty]) -> bool {
+        let Some((first, rest_tys)) = tys.split_first() else {
+            return !rows.is_empty();
+        };
+        let constructors: Option<Vec<(Option<String>, String, Vec<Ty>)>> = match self.resolve(first)
+        {
+            Ty::Enum(name) => self.enums.get(&name).map(|vs| {
+                vs.iter()
+                    .map(|(v, f)| (Some(name.clone()), v.clone(), f.clone()))
+                    .collect()
+            }),
+            Ty::Result(o, e) => Some(vec![
+                (None, "Ok".to_string(), vec![*o]),
+                (None, "Err".to_string(), vec![*e]),
+            ]),
+            _ => None,
+        };
+        if let Some(ctors) = constructors {
+            return ctors.iter().all(|(en, v, fields)| {
+                let sub = self.specialize(rows, en.as_deref(), v, fields.len());
+                let mut next = fields.clone();
+                next.extend_from_slice(rest_tys);
+                self.exhaustive(&sub, &next)
+            });
+        }
+        if matches!(self.resolve(first), Ty::Prim(Prim::Bool)) {
+            return [true, false].iter().all(|b| {
+                let sub: Vec<Vec<Option<&hir::Pat>>> = rows
+                    .iter()
+                    .filter(|r| match r[0] {
+                        None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => true,
+                        Some(hir::Pat::Lit(ast::Lit::Bool(x))) => x == b,
+                        _ => false,
+                    })
+                    .map(|r| r[1..].to_vec())
+                    .collect();
+                self.exhaustive(&sub, rest_tys)
+            });
+        }
+        // Numbers, strings and unknown types: only a catch-all covers every value.
+        let sub: Vec<Vec<Option<&hir::Pat>>> = rows
+            .iter()
+            .filter(|r| matches!(r[0], None | Some(hir::Pat::Wild | hir::Pat::Bind(_))))
+            .map(|r| r[1..].to_vec())
+            .collect();
+        self.exhaustive(&sub, rest_tys)
+    }
+
     fn path(&mut self, p: &[ast::Ident], span: &Span) -> hir::Expr {
         let names: Vec<String> = p.iter().map(|i| i.node.clone()).collect();
         let first = names[0].as_str();
@@ -1281,6 +1679,9 @@ impl Checker {
         }
         if matches!(first, "Ok" | "Err") && names.len() == 1 {
             return Self::mk(hir::ExprKind::Extern(names), Ty::Unknown, span);
+        }
+        if names.len() == 2 && self.enums.contains_key(first) {
+            return self.enum_ctor(first, &p[1], &[], span);
         }
         let resolved = if first == "std" {
             Some(names.clone())
@@ -1377,6 +1778,12 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        if let ast::ExprKind::Path(p) = &callee.node
+            && p.len() == 2
+            && self.enums.contains_key(&p[0].node)
+        {
+            return self.enum_ctor(&p[0].node, &p[1], args, span);
+        }
         // `Ok(x)` / `Err(x)` build a `Result`, typed from context when available.
         if let ast::ExprKind::Path(p) = &callee.node {
             if p.len() == 1

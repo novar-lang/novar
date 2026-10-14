@@ -772,3 +772,82 @@ fn distributed_map_needs_a_named_function() {
         "fn d(x: i32) -> i32 { x } fn f(v: Vec<i32>) -> Vec<i32> { std::iter::map(v, d) }",
     );
 }
+
+// ---- enums and match -------------------------------------------------------------------------
+
+const SHAPES: &str = "
+    enum Shape { Circle(f64), Rect(f64, f64), Empty }
+    fn area(s: Shape) -> f64 {
+        match s {
+            Shape::Circle(r) => r * r * 3.0,
+            Shape::Rect(w, h) => w * h,
+            Shape::Empty => 0.0,
+        }
+    }
+    fn make() -> Shape { Shape::Rect(2.0, 3.0) }
+    fn nothing() -> Shape { Shape::Empty }
+";
+
+#[test]
+fn enums_and_exhaustive_match_are_clean() {
+    assert_clean(SHAPES);
+    let (hir, _) = check(SHAPES);
+    assert_eq!(hir.enums.len(), 1);
+    assert_eq!(hir.enums[0].variants[1].1.len(), 2);
+}
+
+#[test]
+fn match_must_be_exhaustive() {
+    assert_err(
+        "enum E { A, B, C } fn f(e: E) -> i32 { match e { E::A => 1, E::B => 2 } }",
+        "missing `E::C`",
+    );
+    assert_err(
+        "fn f(n: i32) -> i32 { match n { 0 => 1, 1 => 2 } }",
+        "add a `_` arm",
+    );
+    assert_err(
+        "fn f(b: bool) -> i32 { match b { true => 1 } }",
+        "non-exhaustive",
+    );
+    assert_clean("fn f(b: bool) -> i32 { match b { true => 1, false => 0 } }");
+    assert_clean("fn f(n: i32) -> i32 { match n { 0 => 1, other => other } }");
+    assert_clean(
+        "enum E { A(bool), B } fn f(e: E) -> i32 { match e { E::A(true) => 1, E::A(false) => 2, E::B => 3 } }",
+    );
+    assert_err(
+        "enum E { A(bool), B } fn f(e: E) -> i32 { match e { E::A(true) => 1, E::B => 3 } }",
+        "non-exhaustive",
+    );
+}
+
+#[test]
+fn match_on_results() {
+    assert_clean("fn f(r: Result<i32, String>) -> i32 { match r { Ok(v) => v, Err(_) => 0 } }");
+    assert_err(
+        "fn f(r: Result<i32, String>) -> i32 { match r { Ok(v) => v } }",
+        "non-exhaustive",
+    );
+}
+
+#[test]
+fn enum_type_errors() {
+    assert_err("enum E { A(i32) } fn f() -> E { E::A }", "takes 1 value");
+    assert_err("enum E { A } fn f() -> E { E::B }", "no variant `B`");
+    assert_err(
+        "enum E { A(i32) } fn f() -> E { E::A(true) }",
+        "mismatched types",
+    );
+    assert_err(
+        "enum E { A } enum F { B } fn f(e: E) -> i32 { match e { F::B => 1, E::A => 2 } }",
+        "cannot match",
+    );
+    assert_err(
+        "fn f(n: i32) -> i32 { match n { 0 => 1, _ => \"x\" } }",
+        "incompatible types",
+    );
+    assert_err(
+        "fn f(n: i32) -> i32 { match n { \"a\" => 1, _ => 2 } }",
+        "does not match",
+    );
+}
