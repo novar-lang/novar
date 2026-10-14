@@ -290,3 +290,24 @@ fn bundled_sources_rebuild_the_same_program_without_the_file_system() {
     assert!(again.diagnostics.is_empty(), "{:?}", again.diagnostics);
     assert_eq!(ok(&again), "12");
 }
+
+#[test]
+fn enums_cross_modules_and_do_not_collide() {
+    let p = Project::new("enums");
+    p.file(
+        "main.nv",
+        "import crate::shapes::{Shape, area};\n\
+         enum Shape2 { Dot }\n\
+         fn main() -> i32 {\n\
+             let s = Shape::Square(3);\n\
+             let n = match s { Shape::Square(k) => k, Shape::Dot => 0 };\n\
+             area(Shape::Square(4)) + n\n\
+         }\n",
+    )
+    .file(
+        "shapes.nv",
+        "pub enum Shape { Square(i32), Dot }\n\
+         pub fn area(s: Shape) -> i32 { match s { Shape::Square(k) => k * k, Shape::Dot => 0 } }\n",
+    );
+    assert_eq!(ok(&load(&p.path("main.nv"), &[]).unwrap()), "19");
+}

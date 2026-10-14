@@ -51,7 +51,33 @@ impl<'a> Rewriter<'a> {
                     self.ty(&mut f.ty);
                 }
             }
+            Item::Enum(e) => {
+                self.rename(&mut e.name);
+                for v in &mut e.variants {
+                    for t in &mut v.fields {
+                        self.ty(t);
+                    }
+                }
+            }
             Item::Fn(f) => self.function(f),
+        }
+    }
+
+    /// Renames the enum in a path such as `Shape::Circle` (the variant is not a module item).
+    fn enum_path(&self, p: &mut [Ident]) {
+        if p.len() == 2 && !self.bound(&p[0].node) {
+            self.rename(&mut p[0]);
+        }
+    }
+
+    fn pattern(&mut self, pat: &mut Pattern) {
+        match &mut pat.node {
+            PatKind::Bind(name) => self.bind(name),
+            PatKind::Variant { path, args } => {
+                self.enum_path(path);
+                args.iter_mut().for_each(|a| self.pattern(a));
+            }
+            PatKind::Wild | PatKind::Lit(_) => {}
         }
     }
 
@@ -119,6 +145,17 @@ impl<'a> Rewriter<'a> {
             ExprKind::Path(p) => {
                 if p.len() == 1 && !self.bound(&p[0].node) {
                     self.rename(&mut p[0]);
+                } else {
+                    self.enum_path(p);
+                }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                self.expr(scrutinee);
+                for arm in arms {
+                    self.scopes.push(HashSet::new());
+                    self.pattern(&mut arm.pat);
+                    self.expr(&mut arm.body);
+                    self.scopes.pop();
                 }
             }
             ExprKind::Call { callee, args } => {

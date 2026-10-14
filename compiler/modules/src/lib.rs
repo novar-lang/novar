@@ -302,6 +302,9 @@ impl Loader<'_> {
                 Item::Struct(s) => {
                     out.insert(s.name.node.clone(), s.is_pub);
                 }
+                Item::Enum(e) => {
+                    out.insert(e.name.node.clone(), e.is_pub);
+                }
                 _ => {}
             }
         }
@@ -443,6 +446,7 @@ impl Loader<'_> {
                 let n = match item {
                     Item::Fn(f) => &f.name,
                     Item::Struct(s) => &s.name,
+                    Item::Enum(e) => &e.name,
                     Item::Let(l) => &l.name,
                     Item::Import(_) => continue,
                 };
