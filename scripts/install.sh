@@ -15,10 +15,12 @@ esac
 
 if [ -n "$target" ] && command -v curl >/dev/null 2>&1; then
   if [ "$version" = latest ]; then
-    url="https://github.com/$repo/releases/latest/download/novar-$target.tar.gz"
+    # `releases/latest` skips pre-releases, which is all there is during the alpha.
+    tag="$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=1" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   else
-    url="https://github.com/$repo/releases/download/v$version/novar-$target.tar.gz"
+    tag="v$version"
   fi
+  url="https://github.com/$repo/releases/download/$tag/novar-$target.tar.gz"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   if curl -fsSL "$url" -o "$tmp/novar.tar.gz"; then
