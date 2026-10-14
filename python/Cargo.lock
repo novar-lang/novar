@@ -2011,18 +2011,18 @@ dependencies = [
 
 [[package]]
 name = "novar_ast"
-version = "0.0.3"
+version = "0.0.4"
 
 [[package]]
 name = "novar_diagnostics"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ariadne",
 ]
 
 [[package]]
 name = "novar_hir"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "novar_ast",
  "novar_diagnostics",
@@ -2030,14 +2030,14 @@ dependencies = [
 
 [[package]]
 name = "novar_lexer"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "novar_parser"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "chumsky",
  "novar_ast",
@@ -2047,7 +2047,7 @@ dependencies = [
 
 [[package]]
 name = "novar_py"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "arrow",
  "novar_diagnostics",
@@ -2060,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "novar_runtime"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "arrow",
  "datafusion",

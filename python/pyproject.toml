@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "novar"
-version = "0.0.3"
+version = "0.0.4"
 description = "Python bindings for the Novar language runtime"
 requires-python = ">=3.9"
 license = { text = "MIT OR Apache-2.0" }

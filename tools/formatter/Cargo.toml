@@ -12,4 +12,4 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_lexer = { version = "0.0.3", path = "../../compiler/lexer" }
+novar_lexer = { version = "0.0.4", path = "../../compiler/lexer" }

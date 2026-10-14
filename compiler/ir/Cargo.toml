@@ -17,9 +17,9 @@ llvm = ["dep:melior", "dep:novar_hir"]
 
 [dependencies]
 melior = { version = "0.27", optional = true }
-novar_diagnostics = { version = "0.0.3", path = "../diagnostics" }
-novar_hir = { version = "0.0.3", path = "../semantic", optional = true }
+novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+novar_hir = { version = "0.0.4", path = "../semantic", optional = true }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.3", path = "../parser" }
-novar_runtime = { version = "0.0.3", path = "../../runtime" }
+novar_parser = { version = "0.0.4", path = "../parser" }
+novar_runtime = { version = "0.0.4", path = "../../runtime" }

@@ -16,24 +16,24 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-novar_lint = { version = "0.0.3", path = "../tools/linter" }
-novar_fmt = { version = "0.0.3", path = "../tools/formatter" }
-novar_accel = { version = "0.0.3", path = "../compiler/accel" }
-novar_codegen = { version = "0.0.3", path = "../compiler/codegen", optional = true }
-novar_mlir = { version = "0.0.3", path = "../compiler/ir", optional = true }
+novar_lint = { version = "0.0.4", path = "../tools/linter" }
+novar_fmt = { version = "0.0.4", path = "../tools/formatter" }
+novar_accel = { version = "0.0.4", path = "../compiler/accel" }
+novar_codegen = { version = "0.0.4", path = "../compiler/codegen", optional = true }
+novar_mlir = { version = "0.0.4", path = "../compiler/ir", optional = true }
 axum = "0.8.9"
-novar_diagnostics = { version = "0.0.3", path = "../compiler/diagnostics" }
-novar_hir = { version = "0.0.3", path = "../compiler/semantic" }
-novar_parser = { version = "0.0.3", path = "../compiler/parser" }
-novar_runtime = { version = "0.0.3", path = "../runtime", default-features = false }
-novar_server = { version = "0.0.3", path = "../server" }
+novar_diagnostics = { version = "0.0.4", path = "../compiler/diagnostics" }
+novar_hir = { version = "0.0.4", path = "../compiler/semantic" }
+novar_parser = { version = "0.0.4", path = "../compiler/parser" }
+novar_runtime = { version = "0.0.4", path = "../runtime", default-features = false }
+novar_server = { version = "0.0.4", path = "../server" }
 serde_json = "1.0.154"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "macros", "signal"] }
-novar_lsp = { version = "0.0.3", path = "../tools/lsp" }
-novar_pkg = { version = "0.0.3", path = "../tools/package-manager" }
-novar_modules = { version = "0.0.3", path = "../compiler/modules" }
+novar_lsp = { version = "0.0.4", path = "../tools/lsp" }
+novar_pkg = { version = "0.0.4", path = "../tools/package-manager" }
+novar_modules = { version = "0.0.4", path = "../compiler/modules" }
 serde = { version = "1.0.229", features = ["derive"] }
-novar_cluster = { version = "0.0.3", path = "../tools/cluster" }
+novar_cluster = { version = "0.0.4", path = "../tools/cluster" }
 
 [features]
 default = ["tables", "live"]
@@ -47,5 +47,5 @@ gpu = ["novar_runtime/gpu"]
 llvm = ["novar_accel/llvm", "dep:novar_codegen", "dep:novar_mlir", "novar_codegen/llvm", "novar_mlir/llvm"]
 
 [dev-dependencies]
-novar_pkg = { version = "0.0.3", path = "../tools/package-manager" }
+novar_pkg = { version = "0.0.4", path = "../tools/package-manager" }
 serde_json = "1.0.154"

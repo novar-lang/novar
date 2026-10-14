@@ -2,7 +2,7 @@
   "name": "novar",
   "displayName": "Novar",
   "description": "Language support for Novar: syntax highlighting, diagnostics, hover, completion, go to definition and inferred-type hints.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "novar-lang",
   "license": "MIT OR Apache-2.0",
   "repository": {

@@ -15,11 +15,11 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-novar_diagnostics = { version = "0.0.3", path = "../compiler/diagnostics" }
-novar_hir = { version = "0.0.3", path = "../compiler/semantic" }
-novar_lsp = { version = "0.0.3", path = "../tools/lsp", default-features = false }
-novar_parser = { version = "0.0.3", path = "../compiler/parser" }
+novar_diagnostics = { version = "0.0.4", path = "../compiler/diagnostics" }
+novar_hir = { version = "0.0.4", path = "../compiler/semantic" }
+novar_lsp = { version = "0.0.4", path = "../tools/lsp", default-features = false }
+novar_parser = { version = "0.0.4", path = "../compiler/parser" }
 # No DataFusion or network clients in the browser.
-novar_runtime = { version = "0.0.3", path = "../runtime", default-features = false }
+novar_runtime = { version = "0.0.4", path = "../runtime", default-features = false }
 serde_json = "1"
 wasm-bindgen = "=0.2.129"
