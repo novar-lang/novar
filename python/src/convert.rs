@@ -110,7 +110,7 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
         }
         Ty::Tensor { elem, shape } => tensor_to_value(obj, elem, shape),
         // Same shapes as the JSON form: `"Unit"`, `{"One": value}`, `{"Many": [values..]}`.
-        Ty::Enum(_) | Ty::Option(_) | Ty::Map(..) => {
+        Ty::Enum(_) | Ty::Option(_) | Ty::Map(..) | Ty::Tuple(_) => {
             let json = py_to_json(obj)?;
             interp.value_from_json(ty, &json).map_err(NovarError::new_err)
         }
@@ -206,6 +206,10 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
                 d.into_any().unbind()
             }
         },
+        Value::Tuple(items) => {
+            let parts = items.iter().map(|i| value_to_py(py, i.clone())).collect::<PyResult<Vec<_>>>()?;
+            pyo3::types::PyTuple::new(py, parts)?.into_any().unbind()
+        }
         Value::Tensor(t) => Py::new(py, Tensor { inner: t })?.into_any(),
         Value::Table(t) => Py::new(py, Table { inner: t })?.into_any(),
         Value::Ok(v) => value_to_py(py, *v)?,

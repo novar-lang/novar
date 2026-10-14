@@ -75,6 +75,29 @@ fn method_module(ty: &Ty, name: &str) -> Option<&'static str> {
             Some("tensor")
         }
         Ty::Table(_) if name == "sql" => Some("table"),
+        Ty::Vec(_)
+            if matches!(
+                name,
+                "map"
+                    | "filter"
+                    | "take"
+                    | "count"
+                    | "any"
+                    | "all"
+                    | "find"
+                    | "for_each"
+                    | "fold"
+                    | "enumerate"
+                    | "zip"
+                    | "sum"
+                    | "min"
+                    | "max"
+                    | "skip"
+            ) =>
+        {
+            Some("iter")
+        }
+        Ty::Vec(_) if name == "join" => Some("string"),
         _ => None,
     }
 }
@@ -400,6 +423,7 @@ impl Checker {
                     Ty::Vec(Box::new(Ty::Unknown))
                 }
             },
+            "(tuple)" => Ty::Tuple(type_args.iter().map(|a| self.resolve_type(a)).collect()),
             "Option" => match type_args.as_slice() {
                 [inner] if t.args.len() == 1 => Ty::Option(Box::new(self.resolve_type(inner))),
                 _ => {
@@ -604,6 +628,7 @@ impl Checker {
             Ty::Vec(t) => Ty::Vec(Box::new(self.resolve(t))),
             Ty::Result(a, b) => Ty::Result(Box::new(self.resolve(a)), Box::new(self.resolve(b))),
             Ty::Option(t) => Ty::Option(Box::new(self.resolve(t))),
+            Ty::Tuple(items) => Ty::Tuple(items.iter().map(|t| self.resolve(t)).collect()),
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Fn(ps, r) => Ty::Fn(
                 ps.iter().map(|p| self.resolve(p)).collect(),
@@ -621,6 +646,7 @@ impl Checker {
                     self.finalize_pat(a);
                 }
             }
+            hir::Pat::Tuple(items) => items.iter_mut().for_each(|a| self.finalize_pat(a)),
             hir::Pat::Wild | hir::Pat::Lit(_) => {}
         }
     }
@@ -638,6 +664,7 @@ impl Checker {
             }
             Ty::Vec(t) => Ty::Vec(Box::new(self.finalize_ty(&t))),
             Ty::Option(t) => Ty::Option(Box::new(self.finalize_ty(&t))),
+            Ty::Tuple(items) => Ty::Tuple(items.iter().map(|t| self.finalize_ty(t)).collect()),
             Ty::Map(k, v) => Ty::Map(
                 Box::new(self.finalize_ty(&k)),
                 Box::new(self.finalize_ty(&v)),
@@ -674,6 +701,13 @@ impl Checker {
             }
             (Ty::Vec(x), Ty::Vec(y)) => self.unify(x, y),
             (Ty::Option(x), Ty::Option(y)) => self.unify(x, y),
+            (Ty::Tuple(xs), Ty::Tuple(ys)) if xs.len() == ys.len() => {
+                let mut ok = true;
+                for (x, y) in xs.iter().zip(ys) {
+                    ok &= self.unify(x, y);
+                }
+                ok
+            }
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => {
                 let ok = self.unify(k1, k2);
                 self.unify(v1, v2) && ok
@@ -736,6 +770,8 @@ impl Checker {
                 }
             }
             K::Break | K::Continue => {}
+            K::Try(inner) => self.finalize_expr(inner),
+            K::Tuple(items) => items.iter_mut().for_each(|i| self.finalize_expr(i)),
             K::EnumCtor { args, .. } => {
                 for a in args {
                     self.finalize_expr(a);
@@ -1305,6 +1341,70 @@ impl Checker {
                 Self::mk(hir::ExprKind::Block(block), ty, span)
             }
             K::Match { scrutinee, arms } => self.match_expr(scrutinee, arms, expected, span),
+            K::Tuple(items) => {
+                let hints: Vec<Option<Ty>> = match expected.map(|e| self.resolve(e)) {
+                    Some(Ty::Tuple(ts)) if ts.len() == items.len() => {
+                        ts.into_iter().map(Some).collect()
+                    }
+                    _ => vec![None; items.len()],
+                };
+                let parts: Vec<hir::Expr> = items
+                    .iter()
+                    .zip(&hints)
+                    .map(|(item, hint)| self.expr(item, hint.as_ref()))
+                    .collect();
+                let ty = Ty::Tuple(parts.iter().map(|p| p.ty.clone()).collect());
+                Self::mk(hir::ExprKind::Tuple(parts), ty, span)
+            }
+            K::Try(inner) => {
+                let value = self.expr(inner, None);
+                let operand = self.resolve(&value.ty);
+                let ret = self.resolve(&self.ret.clone());
+                let out = match &operand {
+                    Ty::Result(ok, err) => {
+                        match &ret {
+                            Ty::Result(_, ret_err) => {
+                                if !ret_err.accepts(err) {
+                                    self.err(
+                                        span.clone(),
+                                        format!(
+                                            "`?` cannot turn the error `{err}` into `{ret_err}`, the error type of this function"
+                                        ),
+                                    );
+                                }
+                            }
+                            Ty::Unknown | Ty::Never => {}
+                            other => self.err(
+                                span.clone(),
+                                format!(
+                                    "`?` can only be used in a function that returns `Result`, this one returns `{other}`"
+                                ),
+                            ),
+                        }
+                        (**ok).clone()
+                    }
+                    Ty::Option(inner_ty) => {
+                        if !matches!(ret, Ty::Option(_) | Ty::Unknown | Ty::Never) {
+                            self.err(
+                                span.clone(),
+                                format!(
+                                    "`?` on an `Option` can only be used in a function that returns `Option`, this one returns `{ret}`"
+                                ),
+                            );
+                        }
+                        (**inner_ty).clone()
+                    }
+                    Ty::Unknown | Ty::Never => Ty::Unknown,
+                    other => {
+                        self.err(
+                            value.span.clone(),
+                            format!("`?` needs a `Result` or an `Option`, found `{other}`"),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                Self::mk(hir::ExprKind::Try(Box::new(value)), out, span)
+            }
             K::Break | K::Continue => {
                 let (word, kind) = if matches!(e.node, K::Break) {
                     ("break", hir::ExprKind::Break)
@@ -1680,6 +1780,29 @@ impl Checker {
         let ty = self.resolve(ty);
         match &p.node {
             P::Wild => hir::Pat::Wild,
+            P::Tuple(items) => {
+                let parts: Vec<Ty> = match &ty {
+                    Ty::Tuple(ts) if ts.len() == items.len() => ts.clone(),
+                    Ty::Unknown => vec![Ty::Unknown; items.len()],
+                    other => {
+                        self.err(
+                            p.span.clone(),
+                            format!(
+                                "a pattern with {} parts cannot match `{other}`",
+                                items.len()
+                            ),
+                        );
+                        vec![Ty::Unknown; items.len()]
+                    }
+                };
+                hir::Pat::Tuple(
+                    items
+                        .iter()
+                        .zip(&parts)
+                        .map(|(item, t)| self.pattern(item, t))
+                        .collect(),
+                )
+            }
             P::Bind(name) if name == "None" => {
                 if !matches!(ty, Ty::Option(_) | Ty::Unknown) {
                     self.err(
@@ -1859,6 +1982,11 @@ impl Checker {
                 (None, "Ok".to_string(), vec![*o]),
                 (None, "Err".to_string(), vec![*e]),
             ]),
+            Ty::Tuple(parts) => Some(vec![(
+                Some("(tuple)".to_string()),
+                "(tuple)".to_string(),
+                parts,
+            )]),
             Ty::Option(t) => Some(vec![
                 (Some("Option".to_string()), "Some".to_string(), vec![*t]),
                 (Some("Option".to_string()), "None".to_string(), vec![]),
@@ -1881,6 +2009,12 @@ impl Checker {
             match row[0] {
                 None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
                     let mut r = vec![None; arity];
+                    r.extend_from_slice(rest);
+                    out.push(r);
+                }
+                Some(hir::Pat::Tuple(args)) if variant == "(tuple)" => {
+                    let mut r: Vec<Option<&hir::Pat>> = args.iter().map(Some).collect();
+                    r.resize(arity, None);
                     r.extend_from_slice(rest);
                     out.push(r);
                 }
@@ -2028,6 +2162,24 @@ impl Checker {
 
     fn field_ty(&mut self, base: &hir::Expr, name: &ast::Ident) -> Ty {
         let n = name.node.as_str();
+        // Methods that `call` turns into std functions are not looked up here.
+        if method_module(&self.resolve(&base.ty), n).is_some() {
+            return Ty::Unknown;
+        }
+        // `pair.0`, `pair.1`: the parts of a tuple.
+        if let Ty::Tuple(parts) = self.resolve(&base.ty) {
+            return match n.parse::<usize>().ok().and_then(|i| parts.get(i)) {
+                Some(t) => t.clone(),
+                None => {
+                    let ty = base.ty.clone();
+                    self.err(
+                        name.span.clone(),
+                        format!("`{ty}` has no part `{n}` (parts are numbered from 0)"),
+                    );
+                    Ty::Unknown
+                }
+            };
+        }
         match &base.ty {
             Ty::Struct(s) => {
                 let found = self
@@ -2127,6 +2279,13 @@ impl Checker {
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
                 "keys" => Ty::Fn(vec![], Box::new(Ty::Vec(k.clone()))),
+                "entries" => Ty::Fn(
+                    vec![],
+                    Box::new(Ty::Vec(Box::new(Ty::Tuple(vec![
+                        (**k).clone(),
+                        (**v).clone(),
+                    ])))),
+                ),
                 "values" => Ty::Fn(vec![], Box::new(Ty::Vec(v.clone()))),
                 _ => {
                     let shown = base.ty.to_string();
@@ -2142,6 +2301,7 @@ impl Checker {
                             "is_empty",
                             "keys",
                             "values",
+                            "entries",
                         ],
                     )
                 }

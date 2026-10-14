@@ -1250,6 +1250,8 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
             ExprKind::EnumCtor { .. } | ExprKind::Match { .. } => {
                 Err(self.unsupported("enums and `match`", &e.span))
             }
+            ExprKind::Try(_) => Err(self.unsupported("the `?` operator", &e.span)),
+            ExprKind::Tuple(_) => Err(self.unsupported("tuples", &e.span)),
             ExprKind::Break | ExprKind::Continue => {
                 let Some(&(next, exit)) = self.loops.last() else {
                     return Err(self.unsupported("`break` outside a loop", &e.span));

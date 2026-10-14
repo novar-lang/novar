@@ -156,17 +156,36 @@ where
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBrace), just(Token::RBrace))
             .map(TypeArg::Row);
-        let arg = ty.map(TypeArg::Type).or(shape).or(row);
+        let arg = ty.clone().map(TypeArg::Type).or(shape).or(row);
         let args = arg
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::Lt), just(Token::Gt));
-        path().then(args.or_not()).map_with(|(path, args), e| Type {
+        // `(i64, String)`: a tuple type is spelled with a name no program can write.
+        let tuple_ty = ty
+            .clone()
+            .separated_by(just(Token::Comma))
+            .at_least(2)
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map_with(|items, e| {
+                let span = rng(e.span());
+                Type {
+                    path: vec![Ident {
+                        node: "(tuple)".into(),
+                        span: span.clone(),
+                    }],
+                    args: items.into_iter().map(TypeArg::Type).collect(),
+                    span,
+                }
+            });
+        tuple_ty.or(path().then(args.or_not()).map_with(|(path, args), e| Type {
             path,
             args: args.unwrap_or_default(),
             span: rng(e.span()),
-        })
+        }))
     })
 }
 
@@ -251,6 +270,8 @@ fn fstring_parts(body: &str, offset: usize) -> Result<Vec<FPart>, Diagnostic> {
 
 enum BlockItem {
     Let(Let),
+    /// `let (a, b) = value;` becomes a temporary and one `let` per name.
+    Lets(Vec<Let>),
     Expr(Expr, bool),
 }
 
@@ -287,6 +308,87 @@ where
         })
 }
 
+/// `(a, b, _)`: names for the parts of a tuple (`_` skips one).
+fn tuple_names<'a, 's: 'a, I>() -> impl Parser<'a, I, Vec<Ident>, Extra<'a, 's>> + Clone
+where
+    I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
+{
+    ident()
+        .separated_by(just(Token::Comma))
+        .at_least(2)
+        .allow_trailing()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LParen), just(Token::RParen))
+}
+
+/// The `let`s a tuple pattern stands for: a temporary holding the value, then `name = temp.N`.
+fn tuple_lets(
+    names: Vec<Ident>,
+    temp: Ident,
+    init: Option<Expr>,
+    mutable: bool,
+    span: Span,
+) -> Vec<Let> {
+    let mut out = Vec::new();
+    if let Some(init) = init {
+        out.push(Let {
+            mutable: false,
+            name: temp.clone(),
+            ty: None,
+            init,
+            span: span.clone(),
+        });
+    }
+    for (i, name) in names.into_iter().enumerate() {
+        if name.node == "_" {
+            continue;
+        }
+        let at = name.span.clone();
+        out.push(Let {
+            mutable,
+            name,
+            ty: None,
+            init: Spanned {
+                node: ExprKind::Field {
+                    base: Box::new(Spanned {
+                        node: ExprKind::Path(vec![temp.clone()]),
+                        span: at.clone(),
+                    }),
+                    name: Spanned {
+                        node: i.to_string(),
+                        span: at.clone(),
+                    },
+                },
+                span: at,
+            },
+            span: span.clone(),
+        });
+    }
+    out
+}
+
+fn let_tuple_stmt<'a, 's: 'a, I>(
+    expr: impl Parser<'a, I, Expr, Extra<'a, 's>> + Clone,
+) -> impl Parser<'a, I, Vec<Let>, Extra<'a, 's>> + Clone
+where
+    I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
+{
+    just(Token::Let)
+        .ignore_then(just(Token::Mut).or_not().map(|m| m.is_some()))
+        .then(tuple_names())
+        .then_ignore(just(Token::Eq))
+        .then(expr)
+        .then_ignore(just(Token::Semi))
+        .map_with(|((mutable, names), init), e| {
+            let span = rng(e.span());
+            let temp = Ident {
+                node: format!("__tuple{}", span.start),
+                span: span.clone(),
+            };
+            tuple_lets(names, temp, Some(init), mutable, span)
+        })
+}
+
 fn pattern<'a, 's: 'a, I>() -> impl Parser<'a, I, Pattern, Extra<'a, 's>> + Clone
 where
     I: ValueInput<'a, Token = Token<'s>, Span = SimpleSpan>,
@@ -310,7 +412,8 @@ where
             .map(|b| PatKind::Lit(Lit::Bool(b)));
         let variant = path()
             .then(
-                pat.separated_by(just(Token::Comma))
+                pat.clone()
+                    .separated_by(just(Token::Comma))
                     .allow_trailing()
                     .collect::<Vec<_>>()
                     .delimited_by(just(Token::LParen), just(Token::RParen))
@@ -331,7 +434,15 @@ where
                     }
                 }
             });
-        choice((int, float, string, boolean, variant)).map_with(|k, e| spanned(k, e.span()))
+        let tuple = pat
+            .clone()
+            .separated_by(just(Token::Comma))
+            .at_least(2)
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .map(PatKind::Tuple);
+        choice((int, float, string, boolean, tuple, variant)).map_with(|k, e| spanned(k, e.span()))
     })
 }
 
@@ -367,8 +478,56 @@ where
 
         let block = block(expr.clone());
 
+        let pattern = pattern();
+
         let if_ = recursive(|if_| {
-            just(Token::If)
+            let else_branch = just(Token::Else).ignore_then(
+                if_.clone().or(block
+                    .clone()
+                    .map_with(|b, e| spanned(ExprKind::Block(b), e.span()))),
+            );
+            // `if let PATTERN = value { .. } else { .. }` is a `match` with a catch-all arm.
+            let if_let = just(Token::If)
+                .ignore_then(just(Token::Let))
+                .ignore_then(pattern.clone())
+                .then_ignore(just(Token::Eq))
+                .then(expr.clone())
+                .then(block.clone())
+                .then(else_branch.or_not())
+                .map_with(|(((pat, scrutinee), then), otherwise), e| {
+                    let span = e.span();
+                    let unit = || {
+                        spanned(
+                            ExprKind::Block(Block {
+                                stmts: Vec::new(),
+                                tail: None,
+                                span: rng(span),
+                            }),
+                            span,
+                        )
+                    };
+                    let then_span = then.span.clone();
+                    spanned(
+                        ExprKind::Match {
+                            scrutinee: Box::new(scrutinee),
+                            arms: vec![
+                                Arm {
+                                    pat,
+                                    body: Spanned {
+                                        node: ExprKind::Block(then),
+                                        span: then_span,
+                                    },
+                                },
+                                Arm {
+                                    pat: spanned(PatKind::Wild, span),
+                                    body: otherwise.unwrap_or_else(unit),
+                                },
+                            ],
+                        },
+                        span,
+                    )
+                });
+            let plain_if = just(Token::If)
                 .ignore_then(expr.clone())
                 .then(block.clone())
                 .then(
@@ -389,25 +548,65 @@ where
                         },
                         e.span(),
                     )
-                })
+                });
+            if_let.or(plain_if)
         });
 
+        // A closure parameter is a name (optionally typed) or a tuple of names: `|(i, s)| ..`.
+        let closure_param = ident()
+            .then(just(Token::Colon).ignore_then(type_()).or_not())
+            .map(|(name, ty)| (name, ty, Vec::new()))
+            .or(tuple_names().map_with(|names, e| {
+                let at = rng(e.span());
+                (
+                    Ident {
+                        node: format!("__arg{}", at.start),
+                        span: at,
+                    },
+                    None,
+                    names,
+                )
+            }));
         let closure_params = choice((
             just(Token::OrOr).to(Vec::new()),
-            ident()
-                .then(just(Token::Colon).ignore_then(type_()).or_not())
+            closure_param
                 .separated_by(just(Token::Comma))
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::Bar), just(Token::Bar)),
         ));
-        let closure = closure_params.then(expr.clone()).map(|(params, body)| {
-            let (params, types) = params.into_iter().unzip();
-            ExprKind::Closure {
-                params,
-                types,
-                body: Box::new(body),
-            }
-        });
+        let closure = closure_params
+            .then(expr.clone())
+            .map_with(|(params, body), e| {
+                let mut names = Vec::new();
+                let mut types = Vec::new();
+                let mut lets = Vec::new();
+                for (name, ty, parts) in params {
+                    if !parts.is_empty() {
+                        let span = name.span.clone();
+                        lets.extend(tuple_lets(parts, name.clone(), None, false, span));
+                    }
+                    names.push(name);
+                    types.push(ty);
+                }
+                // The parts of tuple parameters are bound at the top of the body.
+                let body = if lets.is_empty() {
+                    body
+                } else {
+                    spanned(
+                        ExprKind::Block(Block {
+                            stmts: lets.into_iter().map(Stmt::Let).collect(),
+                            tail: Some(Box::new(body)),
+                            span: rng(e.span()),
+                        }),
+                        e.span(),
+                    )
+                };
+                ExprKind::Closure {
+                    params: names,
+                    types,
+                    body: Box::new(body),
+                }
+            });
 
         let return_ = just(Token::Return)
             .ignore_then(expr.clone().or_not())
@@ -432,10 +631,28 @@ where
             )
             .map(|(path, fields)| ExprKind::StructLit { path, fields });
 
-        let paren = expr
+        // `(a, b)` is a tuple; `(a)` is just `a` in parentheses.
+        let tuple = expr
             .clone()
+            .then(
+                just(Token::Comma)
+                    .ignore_then(expr.clone())
+                    .repeated()
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(just(Token::Comma).or_not())
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|e| e.node)
+            .map(|(first, rest)| {
+                let mut items = vec![first];
+                items.extend(rest);
+                ExprKind::Tuple(items)
+            });
+        let paren = tuple
+            .or(expr
+                .clone()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .map(|e| e.node))
             .recover_with(via_parser(nested_delimiters(
                 Token::LParen,
                 Token::RParen,
@@ -446,7 +663,53 @@ where
                 |_| ExprKind::Error,
             )));
 
-        let while_ = just(Token::While)
+        // `while let PATTERN = value { body }` loops until the pattern stops matching.
+        let while_let = just(Token::While)
+            .ignore_then(just(Token::Let))
+            .ignore_then(pattern.clone())
+            .then_ignore(just(Token::Eq))
+            .then(expr.clone())
+            .then(block.clone())
+            .map_with(|((pat, scrutinee), body), e| {
+                let span = e.span();
+                let body_span = body.span.clone();
+                let leave = Block {
+                    stmts: vec![Stmt::Expr(spanned(ExprKind::Break, span))],
+                    tail: None,
+                    span: rng(span),
+                };
+                let matched = spanned(
+                    ExprKind::Match {
+                        scrutinee: Box::new(scrutinee),
+                        arms: vec![
+                            Arm {
+                                pat,
+                                body: Spanned {
+                                    node: ExprKind::Block(body),
+                                    span: body_span,
+                                },
+                            },
+                            Arm {
+                                pat: spanned(PatKind::Wild, span),
+                                body: spanned(ExprKind::Block(leave), span),
+                            },
+                        ],
+                    },
+                    span,
+                );
+                spanned(
+                    ExprKind::While {
+                        cond: Box::new(spanned(ExprKind::Lit(Lit::Bool(true)), span)),
+                        body: Block {
+                            stmts: Vec::new(),
+                            tail: Some(Box::new(matched)),
+                            span: rng(span),
+                        },
+                    },
+                    span,
+                )
+            });
+        let while_plain = just(Token::While)
             .ignore_then(expr.clone())
             .then(block.clone())
             .map_with(|(cond, body), e| {
@@ -458,6 +721,7 @@ where
                     e.span(),
                 )
             });
+        let while_ = while_let.or(while_plain);
 
         let for_iter = expr
             .clone()
@@ -477,16 +741,34 @@ where
                 },
                 None => ForIter::Expr(Box::new(first)),
             });
+        // `for (a, b) in items` loops over a temporary and binds the parts at the top of the body.
+        let for_var = ident()
+            .map(|v| (v, Vec::new()))
+            .or(tuple_names().map_with(|names, e| {
+                let at = rng(e.span());
+                (
+                    Ident {
+                        node: format!("__item{}", at.start),
+                        span: at,
+                    },
+                    names,
+                )
+            }));
         let for_ = just(Token::For)
-            .ignore_then(ident())
+            .ignore_then(for_var)
             .then_ignore(just(Token::In))
             .then(for_iter)
             .then(block.clone())
-            .map_with(|((var, iter), body), e| {
+            .map_with(|(((var, names), iter), mut body), e| {
+                if !names.is_empty() {
+                    let lets = tuple_lets(names, var.clone(), None, false, var.span.clone());
+                    let mut stmts: Vec<Stmt> = lets.into_iter().map(Stmt::Let).collect();
+                    stmts.append(&mut body.stmts);
+                    body.stmts = stmts;
+                }
                 spanned(ExprKind::For { var, iter, body }, e.span())
             });
 
-        let pattern = pattern();
         let match_ = just(Token::Match)
             .ignore_then(expr.clone())
             .then(
@@ -539,10 +821,13 @@ where
         .or(match_)
         .or(block.map_with(|b, e| spanned(ExprKind::Block(b), e.span())));
 
+        #[derive(Clone)]
         enum Postfix {
             Call(Vec<Expr>),
             Field(Ident),
             Index(Expr),
+            Try,
+            Fields(Vec<Ident>),
         }
         let call = expr
             .clone()
@@ -560,28 +845,61 @@ where
                 ],
                 |_| Postfix::Call(Vec::new()),
             )));
-        let field = just(Token::Dot).ignore_then(ident()).map(Postfix::Field);
+        // `pair.1` lexes as `.` and an integer, and `pair.0.1` as `.` and the float `0.1`.
+        let numeric_field =
+            select! { Token::Int(n) => n.to_string(), Token::Float(n) => n.to_string() }.map_with(
+                |text, e| {
+                    let at = rng(e.span());
+                    Postfix::Fields(
+                        text.split('.')
+                            .map(|part| Ident {
+                                node: part.to_string(),
+                                span: at.clone(),
+                            })
+                            .collect(),
+                    )
+                },
+            );
+        let field = just(Token::Dot).ignore_then(ident().map(Postfix::Field).or(numeric_field));
+        let try_ = just(Token::Question).to(Postfix::Try);
         let index = expr
             .clone()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
             .map(Postfix::Index);
-        let postfix = primary.foldl_with(call.or(field).or(index).repeated(), |base, op, e| {
-            let kind = match op {
-                Postfix::Index(index) => ExprKind::Index {
-                    base: Box::new(base),
-                    index: Box::new(index),
-                },
-                Postfix::Call(args) => ExprKind::Call {
-                    callee: Box::new(base),
-                    args,
-                },
-                Postfix::Field(name) => ExprKind::Field {
-                    base: Box::new(base),
-                    name,
-                },
-            };
-            spanned(kind, e.span())
-        });
+        let postfix = primary.foldl_with(
+            call.or(field).or(index).or(try_).repeated(),
+            |base, op, e| {
+                let kind = match op {
+                    Postfix::Index(index) => ExprKind::Index {
+                        base: Box::new(base),
+                        index: Box::new(index),
+                    },
+                    Postfix::Call(args) => ExprKind::Call {
+                        callee: Box::new(base),
+                        args,
+                    },
+                    Postfix::Try => ExprKind::Try(Box::new(base)),
+                    Postfix::Fields(names) => {
+                        let mut current = base;
+                        for name in names {
+                            current = spanned(
+                                ExprKind::Field {
+                                    base: Box::new(current),
+                                    name,
+                                },
+                                e.span(),
+                            );
+                        }
+                        current.node
+                    }
+                    Postfix::Field(name) => ExprKind::Field {
+                        base: Box::new(base),
+                        name,
+                    },
+                };
+                spanned(kind, e.span())
+            },
+        );
 
         let unary = select! { Token::Minus => UnOp::Neg, Token::Bang => UnOp::Not }
             .repeated()
@@ -692,6 +1010,7 @@ where
 {
     let item = let_stmt(expr.clone())
         .map(BlockItem::Let)
+        .or(let_tuple_stmt(expr.clone()).map(BlockItem::Lets))
         .or(expr
             .then(just(Token::Semi).or_not())
             .map(|(e, semi)| BlockItem::Expr(e, semi.is_some())))
@@ -710,6 +1029,7 @@ where
             for (i, item) in items.into_iter().enumerate() {
                 match item {
                     BlockItem::Let(l) => stmts.push(Stmt::Let(l)),
+                    BlockItem::Lets(ls) => stmts.extend(ls.into_iter().map(Stmt::Let)),
                     BlockItem::Expr(e, true) => stmts.push(Stmt::Expr(e)),
                     BlockItem::Expr(e, false) if i + 1 == n => tail = Some(Box::new(e)),
                     BlockItem::Expr(e, false) if is_block_like(&e) => stmts.push(Stmt::Expr(e)),
