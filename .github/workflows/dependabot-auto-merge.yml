@@ -1,8 +1,14 @@
 name: Auto-merge
 
-# Turns on auto-merge for Dependabot pull requests that only change patch or minor versions.
-# Auto-merge itself waits for every required check, so nothing is merged unless all of them pass.
-# Major updates are left for a person.
+# Turns on auto-merge for Dependabot pull requests that only change patch or minor versions, and for
+# the owner's pull requests. Auto-merge itself waits for every required check.
+#
+# A merge made with the built-in GITHUB_TOKEN does not start any workflow, so CI and the release
+# would never run on main. The owner's job therefore needs the AUTO_MERGE_TOKEN secret (a
+# fine-grained personal access token with read/write on Contents and Pull requests of this
+# repository) and does nothing without it; enable auto-merge by hand then (`gh pr merge --auto`).
+# Dependabot reads secrets from its own store (Settings, Secrets, Dependabot): add the same token
+# there to get releases for its updates too, otherwise they merge with GITHUB_TOKEN as before.
 on: pull_request
 
 permissions:
@@ -19,18 +25,21 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --squash --delete-branch "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
 
   # Pull requests from the owner: merge once every required check passes.
   # Branch protection still decides; this only queues the merge.
   own:
     runs-on: ubuntu-latest
     if: github.actor == 'ntsation' && github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
     steps:
-      - run: gh pr merge --auto --squash "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: env.GH_TOKEN != ''
+        run: gh pr merge --auto --squash --delete-branch "$PR_URL"
+      - if: env.GH_TOKEN == ''
+        run: echo "AUTO_MERGE_TOKEN is not set: not enabling auto-merge, because a merge made with GITHUB_TOKEN would not run CI or the release"
