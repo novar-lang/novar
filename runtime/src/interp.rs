@@ -9,6 +9,9 @@ use novar_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
 use serde_json::Value as Json;
 
 use crate::std_impl;
+
+#[cfg(feature = "gpu")]
+mod gpu_chain;
 use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
 
 /// Where `std::tensor` operations on `f32` tensors run.
@@ -856,6 +859,10 @@ impl Interp {
                 self.call_fn(f, args, ctx.depth)
             }
             ExprKind::Extern(path) => {
+                #[cfg(feature = "gpu")]
+                if let Some(v) = self.gpu_chain(path, args, result, ctx)? {
+                    return Ok(v);
+                }
                 let mut args = eval_args(self, ctx)?;
                 match path.as_slice() {
                     [n] if n == "Ok" || n == "Err" => {

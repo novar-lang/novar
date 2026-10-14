@@ -5,6 +5,7 @@
 //! `f64`) in the last bits; they agree to ordinary single-precision tolerances.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use wgpu::util::DeviceExt;
@@ -133,11 +134,36 @@ pub enum Elementwise {
     Sigmoid = 6,
 }
 
+/// `f32` data that lives on the GPU. Operations on `GpuBuf`s chain without copying through the
+/// host; only [`Gpu::download`] brings a result back.
+pub struct GpuBuf {
+    buffer: wgpu::Buffer,
+    len: usize,
+}
+
+impl GpuBuf {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl std::fmt::Debug for GpuBuf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GpuBuf({} floats)", self.len)
+    }
+}
+
 pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipelines: Mutex<HashMap<&'static str, Arc<wgpu::ComputePipeline>>>,
     name: String,
+    uploads: AtomicU64,
+    downloads: AtomicU64,
 }
 
 // SAFETY: on native targets wgpu's device, queue and pipelines are `Send + Sync`; the compiler
@@ -189,6 +215,8 @@ impl Gpu {
                 queue,
                 pipelines: Mutex::new(HashMap::new()),
                 name: format!("{} ({:?})", info.name, info.backend),
+                uploads: AtomicU64::new(0),
+                downloads: AtomicU64::new(0),
             })
         })
     }
@@ -261,15 +289,14 @@ impl Gpu {
             })
     }
 
-    /// Runs `pipeline` over `groups` workgroups and reads `out` (`len` floats) back.
-    fn run(
+    /// Records one compute pass over `groups` workgroups and submits it. The result stays in the
+    /// buffers; later passes on the same queue see it in order.
+    fn dispatch(
         &self,
         pipeline: &wgpu::ComputePipeline,
         buffers: &[&wgpu::Buffer],
         groups: (u32, u32, u32),
-        out: &wgpu::Buffer,
-        len: usize,
-    ) -> Result<Vec<f32>, String> {
+    ) {
         let layout = pipeline.get_bind_group_layout(0);
         let entries: Vec<wgpu::BindGroupEntry> = buffers
             .iter()
@@ -284,12 +311,6 @@ impl Gpu {
             layout: &layout,
             entries: &entries,
         });
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: (len.max(1) * 4) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
@@ -297,7 +318,30 @@ impl Gpu {
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(groups.0, groups.1, groups.2);
         }
-        enc.copy_buffer_to_buffer(out, 0, &readback, 0, (len.max(1) * 4) as u64);
+        self.queue.submit([enc.finish()]);
+    }
+
+    /// Copies `data` to the GPU.
+    pub fn upload(&self, data: &[f32]) -> GpuBuf {
+        self.uploads.fetch_add(1, Ordering::Relaxed);
+        GpuBuf {
+            buffer: self.storage(data),
+            len: data.len(),
+        }
+    }
+
+    /// Reads a GPU buffer back (this waits for every pass that writes it).
+    pub fn download(&self, buf: &GpuBuf) -> Result<Vec<f32>, String> {
+        self.downloads.fetch_add(1, Ordering::Relaxed);
+        let size = (buf.len.max(1) * 4) as u64;
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(&buf.buffer, 0, &readback, 0, size);
         self.queue.submit([enc.finish()]);
 
         let slice = readback.slice(..);
@@ -314,10 +358,86 @@ impl Gpu {
         let data = slice
             .get_mapped_range()
             .map_err(|e| format!("cannot read the GPU result: {e}"))?;
-        let out: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&data)[..len].to_vec();
+        let out: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&data)[..buf.len].to_vec();
         drop(data);
         readback.unmap();
         Ok(out)
+    }
+
+    /// `(uploads, downloads)` since the GPU was opened: how many times data crossed the bus.
+    pub fn transfers(&self) -> (u64, u64) {
+        (
+            self.uploads.load(Ordering::Relaxed),
+            self.downloads.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Elementwise `op` on device buffers. `b` is ignored by the unary operations and `Scale`.
+    pub fn elementwise_buf(
+        &self,
+        op: Elementwise,
+        a: &GpuBuf,
+        b: Option<&GpuBuf>,
+        scalar: f32,
+    ) -> GpuBuf {
+        let n = a.len;
+        let out = self.output(n);
+        let groups_total = (n as u32).div_ceil(WORKGROUP).max(1);
+        let gx = groups_total.min(MAX_GROUPS_X);
+        let gy = groups_total.div_ceil(gx);
+        let params = self.uniform(&[n as u32, op as u32, scalar.to_bits(), gx * WORKGROUP]);
+        let pipeline = self.pipeline("elementwise", ELEMENTWISE);
+        let second = b.map_or(&a.buffer, |b| &b.buffer);
+        self.dispatch(&pipeline, &[&a.buffer, second, &out, &params], (gx, gy, 1));
+        GpuBuf {
+            buffer: out,
+            len: n,
+        }
+    }
+
+    /// `[m, k] x [k, n]` row-major, on device buffers.
+    pub fn matmul_buf(&self, a: &GpuBuf, b: &GpuBuf, m: usize, k: usize, n: usize) -> GpuBuf {
+        let out = self.output(m * n);
+        let dims = self.uniform(&[m as u32, k as u32, n as u32, 0]);
+        let pipeline = self.pipeline("matmul", MATMUL);
+        let groups = (
+            (n as u32).div_ceil(16).max(1),
+            (m as u32).div_ceil(16).max(1),
+            1,
+        );
+        self.dispatch(&pipeline, &[&a.buffer, &b.buffer, &out, &dims], groups);
+        GpuBuf {
+            buffer: out,
+            len: m * n,
+        }
+    }
+
+    /// Softmax over the last axis of a `[rows, cols]` matrix, on a device buffer.
+    pub fn softmax_buf(&self, a: &GpuBuf, rows: usize, cols: usize) -> GpuBuf {
+        let out = self.output(rows * cols);
+        let dims = self.uniform(&[rows as u32, cols as u32, 0, 0]);
+        let pipeline = self.pipeline("softmax", SOFTMAX);
+        self.dispatch(
+            &pipeline,
+            &[&a.buffer, &out, &dims],
+            ((rows as u32).div_ceil(64).max(1), 1, 1),
+        );
+        GpuBuf {
+            buffer: out,
+            len: rows * cols,
+        }
+    }
+
+    /// `sum(a[i] * b[i])` on device buffers, read back as one number.
+    pub fn dot_buf(&self, a: &GpuBuf, b: &GpuBuf) -> Result<f32, String> {
+        let out = self.output(1);
+        let params = self.uniform(&[a.len as u32, 0, 0, 0]);
+        let pipeline = self.pipeline("reduce", REDUCE);
+        self.dispatch(&pipeline, &[&a.buffer, &b.buffer, &out, &params], (1, 1, 1));
+        Ok(self.download(&GpuBuf {
+            buffer: out,
+            len: 1,
+        })?[0])
     }
 
     pub fn elementwise(
@@ -327,18 +447,9 @@ impl Gpu {
         b: &[f32],
         scalar: f32,
     ) -> Result<Vec<f32>, String> {
-        let n = a.len();
-        let (pa, pb, out) = (
-            self.storage(a),
-            self.storage(if b.is_empty() { a } else { b }),
-            self.output(n),
-        );
-        let groups_total = (n as u32).div_ceil(WORKGROUP).max(1);
-        let gx = groups_total.min(MAX_GROUPS_X);
-        let gy = groups_total.div_ceil(gx);
-        let params = self.uniform(&[n as u32, op as u32, scalar.to_bits(), gx * WORKGROUP]);
-        let pipeline = self.pipeline("elementwise", ELEMENTWISE);
-        self.run(&pipeline, &[&pa, &pb, &out, &params], (gx, gy, 1), &out, n)
+        let pa = self.upload(a);
+        let pb = (!b.is_empty()).then(|| self.upload(b));
+        self.download(&self.elementwise_buf(op, &pa, pb.as_ref(), scalar))
     }
 
     /// `[m, k] x [k, n]` row-major.
@@ -350,37 +461,20 @@ impl Gpu {
         k: usize,
         n: usize,
     ) -> Result<Vec<f32>, String> {
-        let (pa, pb, out) = (self.storage(a), self.storage(b), self.output(m * n));
-        let dims = self.uniform(&[m as u32, k as u32, n as u32, 0]);
-        let pipeline = self.pipeline("matmul", MATMUL);
-        let groups = (
-            (n as u32).div_ceil(16).max(1),
-            (m as u32).div_ceil(16).max(1),
-            1,
-        );
-        self.run(&pipeline, &[&pa, &pb, &out, &dims], groups, &out, m * n)
+        let (pa, pb) = (self.upload(a), self.upload(b));
+        self.download(&self.matmul_buf(&pa, &pb, m, k, n))
     }
 
     /// Softmax over the last axis of a `[rows, cols]` matrix.
     pub fn softmax(&self, a: &[f32], rows: usize, cols: usize) -> Result<Vec<f32>, String> {
-        let (pa, out) = (self.storage(a), self.output(rows * cols));
-        let dims = self.uniform(&[rows as u32, cols as u32, 0, 0]);
-        let pipeline = self.pipeline("softmax", SOFTMAX);
-        self.run(
-            &pipeline,
-            &[&pa, &out, &dims],
-            ((rows as u32).div_ceil(64).max(1), 1, 1),
-            &out,
-            rows * cols,
-        )
+        let pa = self.upload(a);
+        self.download(&self.softmax_buf(&pa, rows, cols))
     }
 
     /// `sum(a[i] * b[i])`; pass the same slice twice for a sum of squares, or use [`Gpu::sum`].
     pub fn dot(&self, a: &[f32], b: &[f32]) -> Result<f32, String> {
-        let (pa, pb, out) = (self.storage(a), self.storage(b), self.output(1));
-        let params = self.uniform(&[a.len() as u32, 0, 0, 0]);
-        let pipeline = self.pipeline("reduce", REDUCE);
-        Ok(self.run(&pipeline, &[&pa, &pb, &out, &params], (1, 1, 1), &out, 1)?[0])
+        let (pa, pb) = (self.upload(a), self.upload(b));
+        self.dot_buf(&pa, &pb)
     }
 
     pub fn sum(&self, a: &[f32]) -> Result<f32, String> {
