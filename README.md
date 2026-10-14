@@ -33,7 +33,7 @@ The full RAG service from the specification is in [`examples/rag-service.nv`](ex
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/novar-lang/novar/main/scripts/install.sh | sh
 novar --version
 ```
 
@@ -47,7 +47,7 @@ included; `std::table::sql` and Parquet report a clear error there. `NOVAR_LITE=
 On Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/novar-lang/novar/main/scripts/install.ps1 | iex
 ```
 
 Windows builds are new and have only been compiled and tested by CI, not by hand. The native

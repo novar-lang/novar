@@ -1,6 +1,6 @@
 # Novar for VS Code
 
-Language support for [Novar](https://github.com/ntsation/novar), powered by the compiler itself:
+Language support for [Novar](https://github.com/novar-lang/novar), powered by the compiler itself:
 
 * **Syntax highlighting** for `.nv` files (keywords, `@endpoint`, f-strings with interpolation, the `|>` operator, tensor and table types).
 * **Diagnostics** from the real parser and type checker, including tensor-shape mismatches.
