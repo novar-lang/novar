@@ -109,6 +109,11 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
             Ok(Value::Struct(Arc::new(StructVal { name: name.clone(), fields: out })))
         }
         Ty::Tensor { elem, shape } => tensor_to_value(obj, elem, shape),
+        // Same shapes as the JSON form: `"Unit"`, `{"One": value}`, `{"Many": [values..]}`.
+        Ty::Enum(_) => {
+            let json = py_to_json(obj)?;
+            interp.value_from_json(ty, &json).map_err(NovarError::new_err)
+        }
         Ty::Table(schema) => {
             let batch = match obj.cast::<Table>() {
                 Ok(t) => t.get().inner.batch.clone(),
@@ -173,6 +178,22 @@ pub fn value_to_py(py: Python<'_>, v: Value) -> PyResult<Py<PyAny>> {
             }
             d.into_any().unbind()
         }
+        // A unit variant is its name; one with values is `{"Variant": value}` (one value) or
+        // `{"Variant": [values..]}`, the same shape as the JSON form.
+        Value::Enum(e) => match e.fields.as_slice() {
+            [] => PyString::new(py, &e.variant).into_any().unbind(),
+            fields => {
+                let d = PyDict::new(py);
+                let payload = if let [one] = fields {
+                    value_to_py(py, one.clone())?
+                } else {
+                    let items = fields.iter().map(|f| value_to_py(py, f.clone())).collect::<PyResult<Vec<_>>>()?;
+                    PyList::new(py, items)?.into_any().unbind()
+                };
+                d.set_item(&e.variant, payload)?;
+                d.into_any().unbind()
+            }
+        },
         Value::Tensor(t) => Py::new(py, Tensor { inner: t })?.into_any(),
         Value::Table(t) => Py::new(py, Table { inner: t })?.into_any(),
         Value::Ok(v) => value_to_py(py, *v)?,

@@ -350,3 +350,29 @@ def test_mapped_calls_run_as_ray_tasks():
         assert prog.call("squares", []) == []
     finally:
         ray.shutdown()
+
+
+# ---- enums ---------------------------------------------------------------------------------
+
+
+ENUMS = """
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+fn area(s: Shape) -> f64 {
+    match s { Shape::Circle(r) => r * r * 3.0, Shape::Rect(w, h) => w * h, Shape::Empty => 0.0 }
+}
+fn make(kind: i64) -> Shape {
+    match kind { 0 => Shape::Circle(1.5), 1 => Shape::Rect(2.0, 3.0), _ => Shape::Empty }
+}
+"""
+
+
+def test_enums_use_the_json_shape():
+    p = novar.compile(ENUMS)
+    assert p.call("area", {"Circle": 2.0}) == 12.0
+    assert p.call("area", {"Rect": [2.0, 3.5]}) == 7.0
+    assert p.call("area", "Empty") == 0.0
+    assert p.call("make", 0) == {"Circle": 1.5}
+    assert p.call("make", 1) == {"Rect": [2.0, 3.0]}
+    assert p.call("make", 2) == "Empty"
+    with pytest.raises(novar.NovarError):
+        p.call("area", "Triangle")
