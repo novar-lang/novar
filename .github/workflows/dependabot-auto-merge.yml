@@ -42,4 +42,4 @@ jobs:
       - if: env.GH_TOKEN != ''
         run: gh pr merge --auto --squash --delete-branch "$PR_URL"
       - if: env.GH_TOKEN == ''
-        run: echo "AUTO_MERGE_TOKEN is not set: not enabling auto-merge, because a merge made with GITHUB_TOKEN would not run CI or the release"
+        run: echo "AUTO_MERGE_TOKEN is not set, so auto-merge is not enabled (a merge made with GITHUB_TOKEN would not run CI or the release)"
