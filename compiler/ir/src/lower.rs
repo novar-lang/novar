@@ -430,6 +430,7 @@ fn lower_fn<'c>(cx: &Cx<'c, '_>, f: &hir::FnDef) -> Result<melior::ir::Operation
             entry,
             func: f,
             loc,
+            loops: Vec::new(),
         };
         for p in f.params.iter().filter(|p| p.mutable) {
             if let Some(Binding::Vals(vals)) = env.get(&p.id).cloned() {
@@ -498,6 +499,8 @@ struct Emitter<'c, 'b, 'p> {
     entry: BlockRef<'c, 'b>,
     func: &'p hir::FnDef,
     loc: Location<'c>,
+    /// Enclosing loops, innermost last: where `continue` and `break` jump to.
+    loops: Vec<(BlockRef<'c, 'b>, BlockRef<'c, 'b>)>,
 }
 
 impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
@@ -833,7 +836,10 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
             &[],
             self.loc,
         ));
-        let (bend, bflow) = self.block(body, body_blk, env)?;
+        self.loops.push((header, exit));
+        let result = self.block(body, body_blk, env);
+        self.loops.pop();
+        let (bend, bflow) = result?;
         if let Flow::Value(_) = bflow {
             bend.append_operation(cf::br(&header, &[], self.loc));
         }
@@ -883,30 +889,38 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                 header.append_operation(cf::cond_br(ctx, go, &body_blk, &exit, &[], &[], self.loc));
 
                 env.insert(var.id, Binding::Vals(vec![i]));
-                let (bend, bflow) = self.block(body, body_blk, env)?;
+                // Both the end of the body and `continue` arrive here to advance the counter.
+                let advance = self.new_block(&[]);
+                self.loops.push((advance, exit));
+                let result = self.block(body, body_blk, env);
+                self.loops.pop();
+                let (bend, bflow) = result?;
                 if let Flow::Value(_) = bflow {
-                    let latch = if *inclusive {
-                        // Stop at the end bound before incrementing so `..=MAX` cannot wrap.
-                        let step = self.new_block(&[]);
-                        let last =
-                            self.push(bend, arith::cmpi(ctx, CmpiPredicate::Eq, i, en, self.loc));
-                        bend.append_operation(cf::cond_br(
-                            ctx,
-                            last,
-                            &exit,
-                            &step,
-                            &[],
-                            &[],
-                            self.loc,
-                        ));
-                        step
-                    } else {
-                        bend
-                    };
-                    let one = self.int_const(latch, int_ty, 1);
-                    let next = self.push(latch, arith::addi(i, one, self.loc));
-                    latch.append_operation(cf::br(&header, &[next], self.loc));
+                    bend.append_operation(cf::br(&advance, &[], self.loc));
                 }
+                let latch = if *inclusive {
+                    // Stop at the end bound before incrementing so `..=MAX` cannot wrap.
+                    let step = self.new_block(&[]);
+                    let last = self.push(
+                        advance,
+                        arith::cmpi(ctx, CmpiPredicate::Eq, i, en, self.loc),
+                    );
+                    advance.append_operation(cf::cond_br(
+                        ctx,
+                        last,
+                        &exit,
+                        &step,
+                        &[],
+                        &[],
+                        self.loc,
+                    ));
+                    step
+                } else {
+                    advance
+                };
+                let one = self.int_const(latch, int_ty, 1);
+                let next = self.push(latch, arith::addi(i, one, self.loc));
+                latch.append_operation(cf::br(&header, &[next], self.loc));
                 Ok((exit, Flow::Value(vec![])))
             }
             hir::ForIter::Vec(v) => {
@@ -941,12 +955,17 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                     llvm::load(ctx, at, elem, self.loc, LoadStoreOptions::new()),
                 );
                 env.insert(var.id, Binding::Vals(vec![item]));
-                let (bend, bflow) = self.block(body, body_blk, env)?;
+                let advance = self.new_block(&[]);
+                self.loops.push((advance, exit));
+                let result = self.block(body, body_blk, env);
+                self.loops.pop();
+                let (bend, bflow) = result?;
                 if let Flow::Value(_) = bflow {
-                    let one = self.int_const(bend, i64_ty, 1);
-                    let next = self.push(bend, arith::addi(idx, one, self.loc));
-                    bend.append_operation(cf::br(&header, &[next], self.loc));
+                    bend.append_operation(cf::br(&advance, &[], self.loc));
                 }
+                let one = self.int_const(advance, i64_ty, 1);
+                let next = self.push(advance, arith::addi(idx, one, self.loc));
+                advance.append_operation(cf::br(&header, &[next], self.loc));
                 Ok((exit, Flow::Value(vec![])))
             }
         }
@@ -1221,6 +1240,18 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                 };
                 cur.append_operation(func::r#return(&vals, self.loc));
                 Ok((cur, Flow::Diverged))
+            }
+            ExprKind::Break | ExprKind::Continue => {
+                let Some(&(next, exit)) = self.loops.last() else {
+                    return Err(self.unsupported("`break` outside a loop", &e.span));
+                };
+                let target = if matches!(e.kind, ExprKind::Break) {
+                    exit
+                } else {
+                    next
+                };
+                blk.append_operation(cf::br(&target, &[], self.loc));
+                Ok((blk, Flow::Diverged))
             }
             ExprKind::Closure { .. } => Err(self.unsupported("closures", &e.span)),
             ExprKind::FString(parts) => self.fstring(parts, blk, env),

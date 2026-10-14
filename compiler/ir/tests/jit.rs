@@ -789,3 +789,100 @@ fn native_tensor_indexing_is_bounds_checked_and_symbolic_shapes_are_rejected() {
         );
     }
 }
+
+// ---- break and continue ----------------------------------------------------------------------
+
+const BREAK_CONTINUE: &str = "
+    fn first_square_over(limit: i32) -> i32 {
+        let mut found = -1;
+        for i in 1..1000 { if i * i > limit { found = i; break; } }
+        found
+    }
+    fn sum_odd(n: i32) -> i32 {
+        let mut s = 0;
+        for i in 0..=n { if i % 2 == 0 { continue; } s += i; }
+        s
+    }
+    fn while_mix(n: i32) -> i32 {
+        let mut i = 0; let mut s = 0;
+        while true {
+            i += 1;
+            if i > n { break; }
+            if i % 3 == 0 { continue; }
+            s += i;
+        }
+        s
+    }
+    fn nested(n: i32) -> i32 {
+        let mut count = 0;
+        for a in 0..n {
+            for b in 0..n {
+                if b > a { break; }
+                if (a + b) % 2 == 1 { continue; }
+                count += 1;
+            }
+        }
+        count
+    }
+    fn over_vec(n: i32) -> i32 {
+        let v = [5, 8, 13, 21, 34];
+        let mut s = 0;
+        for x in v { if x > n { break; } if x == 8 { continue; } s += x; }
+        s
+    }
+";
+
+#[test]
+fn break_and_continue_match_the_interpreter() {
+    let h = hir(BREAK_CONTINUE);
+    let interp = novar_runtime::Interp::new(h.clone()).unwrap();
+    for (f, args) in [
+        ("first_square_over", vec![50]),
+        ("first_square_over", vec![5000000]),
+        ("sum_odd", vec![10]),
+        ("sum_odd", vec![0]),
+        ("while_mix", vec![20]),
+        ("nested", vec![9]),
+        ("over_vec", vec![20]),
+        ("over_vec", vec![100]),
+    ] {
+        let want = interp
+            .call(
+                f,
+                args.iter().map(|a| novar_runtime::Value::Int(*a)).collect(),
+            )
+            .unwrap();
+        let novar_runtime::Value::Int(want) = want else {
+            panic!("{want:?}")
+        };
+        let got = jit_call(
+            &h,
+            f,
+            &args.iter().map(|a| JitValue::Int(*a)).collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|e| panic!("{f}{args:?}: {e}"));
+        assert_eq!(got, JitValue::Int(want), "{f}{args:?}");
+    }
+    let sq = interp
+        .call("first_square_over", vec![novar_runtime::Value::Int(50)])
+        .unwrap();
+    assert!(matches!(sq, novar_runtime::Value::Int(8)));
+}
+
+#[test]
+fn break_outside_a_loop_is_an_error() {
+    let (ast, _) = novar_parser::parse(
+        "fn f() -> i32 { break; 1 }\nfn g() -> i32 { let h = || { continue }; 2 }",
+    );
+    let (_, diags) = novar_hir::lower(&ast.unwrap());
+    let msgs: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("`break` outside of a loop")),
+        "{msgs:?}"
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("`continue` outside of a loop")),
+        "{msgs:?}"
+    );
+}
