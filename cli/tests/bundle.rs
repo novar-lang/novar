@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -19,9 +19,31 @@ fn scratch(name: &str) -> PathBuf {
     dir.join(name)
 }
 
-/// A scratch path for an executable written by `novar build --serve` (`.exe` on Windows).
-fn scratch_exe(name: &str) -> PathBuf {
-    scratch(&format!("{name}{}", std::env::consts::EXE_SUFFIX))
+/// A scratch path for an executable written by `novar build --serve` (`.exe` on Windows). Each
+/// one is a full copy of the `novar` binary (over a gigabyte in a debug build), so it is deleted
+/// when the test ends, passing or not.
+struct TempExe(PathBuf);
+
+impl Drop for TempExe {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TempExe {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl AsRef<Path> for TempExe {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+fn scratch_exe(name: &str) -> TempExe {
+    TempExe(scratch(&format!("{name}{}", std::env::consts::EXE_SUFFIX)))
 }
 
 fn free_port() -> u16 {
@@ -152,11 +174,12 @@ fn the_dockerfile_is_multi_stage_and_names_the_program() {
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("app.nv");
     std::fs::write(&src, APP).unwrap();
+    let exe = scratch_exe("docker-app/app");
     let out = Command::new(NOVAR)
         .args(["build", "--serve"])
         .arg(&src)
         .arg("-o")
-        .arg(dir.join("app"))
+        .arg(&exe)
         .arg("--dockerfile")
         .output()
         .unwrap();
