@@ -381,6 +381,8 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                             new_text,
                         })
                         .collect();
+                    // `WorkspaceEdit::changes` is keyed by `Uri`, which clippy flags; it is never mutated.
+                    #[allow(clippy::mutable_key_type)]
                     let changes = std::collections::HashMap::from([(pos.text_document.uri, edits)]);
                     reply(
                         id,
