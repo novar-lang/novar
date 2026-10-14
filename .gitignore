@@ -24,3 +24,7 @@ __pycache__/
 .pytest_cache/
 playground/pkg/
 playground/pkg-node/
+
+# Browser test output
+playground/e2e/test-results/
+playground/e2e/playwright-report/
