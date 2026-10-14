@@ -135,7 +135,9 @@ novar fmt --check file.nv    # list files that would change (exit 1), for CI
 novar lint file.nv           # unused variables, needless `mut`, unused private functions
 ```
 
-The language server formats documents too, so VS Code can format on save.
+The language server formats documents too, so VS Code can format on save. It also finds all
+references to a variable or function and renames them (a rename is refused when the new name
+would collide with another one in scope, or when the symbol is a struct or lives in another file).
 
 ## Strings and vectors
 
@@ -151,3 +153,33 @@ String: `len`, `is_empty`, `trim`, `to_lowercase`, `to_uppercase`, `contains`, `
 `ends_with`, `replace`, `split`. Vec: `len`, `is_empty`, `push`, `contains`. A method that does not
 exist is a compile error with a "did you mean" hint. These methods run in the interpreter; the
 native backend still only has `len` and `is_empty`.
+
+## Option, Map and closures
+
+```novar
+fn demo(text: String) -> i64 {
+    let counts: Map<String, i64> = std::map::new();
+    for word in text.split(" ") {
+        let seen = counts.get(word).unwrap_or(0);   // Option<i64>
+        counts.insert(word, seen + 1);
+    }
+    match counts.get("novar") {
+        Some(n) => n,
+        None => 0,
+    }
+}
+```
+
+* `Option<T>` is `Some(value)` or `None`; `match` must cover both. Methods: `is_some`, `is_none`,
+  `unwrap` (an error on `None`), `unwrap_or`. Several methods return one: `Vec::first`, `last`,
+  `pop`, `get`, `String::find`, `to_int`, `to_float`, `Map::get`, `remove`. As JSON, `None` is
+  `null` and `Some(x)` is just `x`.
+* `Map<K, V>` has `String`, integer or `bool` keys. It is created with `std::map::new()` and a
+  type annotation, and has `insert`, `get`, `remove`, `contains_key`, `len`, `is_empty`, `keys` and
+  `values`. Like `Vec`, copies share the same entries. Keys are kept in order; JSON objects use
+  string keys.
+* `Vec` also has `sort` (numbers, strings, bools) and `reverse`; `String` has `chars` and `lines`.
+* Closure parameters can be annotated (`|x: i64| x + 1`). A closure captures variables by value,
+  so assigning to a variable from outside is a compile error; shared `Vec` and `Map` values can
+  still be changed from inside one.
+* These run in the interpreter; the native backend does not compile them yet.
