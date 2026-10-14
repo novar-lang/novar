@@ -447,6 +447,7 @@ impl Loader<'_> {
                     Item::Fn(f) => &f.name,
                     Item::Struct(s) => &s.name,
                     Item::Enum(e) => &e.name,
+                    Item::Impl(_) => continue,
                     Item::Let(l) => &l.name,
                     Item::Import(_) => continue,
                 };

@@ -311,3 +311,27 @@ fn enums_cross_modules_and_do_not_collide() {
     );
     assert_eq!(ok(&load(&p.path("main.nv"), &[]).unwrap()), "19");
 }
+
+#[test]
+fn impl_blocks_travel_with_their_type() {
+    let p = Project::new("impls");
+    p.file(
+        "main.nv",
+        "import crate::shapes::Rect;\n\
+         struct Rect2 { w: i32 }\n\
+         impl Rect2 { fn area(self) -> i32 { self.w * self.w } }\n\
+         fn area() -> i32 { 1 }\n\
+         fn main() -> i32 { Rect::new(3, 4).area() + Rect2 { w: 2 }.area() + area() }\n",
+    )
+    .file(
+        "shapes.nv",
+        "pub struct Rect { w: i32, h: i32 }\n\
+         fn area() -> i32 { 100 }\n\
+         impl Rect {\n\
+             pub fn new(w: i32, h: i32) -> Rect { Rect { w: w, h: h } }\n\
+             pub fn area(self) -> i32 { self.w * self.h }\n\
+         }\n",
+    );
+    // `area` the method, `area` the function of each module, and the one in main do not clash.
+    assert_eq!(ok(&load(&p.path("main.nv"), &[]).unwrap()), "17");
+}

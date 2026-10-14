@@ -1095,3 +1095,37 @@ fn iterator_methods_are_typed() {
     );
     assert_err("fn f(v: Vec<i64>) -> bool { v.any(|x| x + 1) }", "bool");
 }
+
+#[test]
+fn impl_blocks_are_checked() {
+    let src = "struct P { x: i64 }
+        impl P { fn get(self) -> i64 { self.x } fn make(x: i64) -> P { P { x: x } } fn add(self, n: i64) -> P { Self { x: self.x + n } } }
+        fn f() -> i64 { P::make(1).add(2).get() }";
+    assert_clean(src);
+    let (hir, _) = check(src);
+    assert!(
+        hir.fns.iter().any(|f| f.name == "P::get"),
+        "methods are functions named Type::name"
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.y } }",
+        "no field `y`",
+    );
+    assert_err(
+        "impl Nothing { fn f() {} }",
+        "cannot find the struct or enum `Nothing`",
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn make() -> P { P { x: 1 } } } fn f(p: P) -> P { p.make() }",
+        "has no `self` parameter",
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.x } } fn f(p: P) -> i64 { p.get(1) }",
+        "expected 0 argument",
+    );
+    assert_err("fn f() -> Self { 1 }", "only be used inside an `impl`");
+    assert_err(
+        "struct P { x: i64 } impl P { fn a(self) {} fn a(self) {} }",
+        "defined twice",
+    );
+}

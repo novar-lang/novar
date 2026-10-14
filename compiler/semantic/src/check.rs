@@ -25,6 +25,10 @@ pub(crate) struct Checker {
     enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
     /// Row types written inline (`Table<{ a: i64 }>`), turned into structs named by their text.
     anon_structs: Vec<hir::StructDef>,
+    /// While checking the functions of an `impl`, the type it is for (what `Self` means).
+    impl_ty: Option<String>,
+    /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
+    methods: HashMap<String, String>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
     globals: HashMap<String, Ty>,
     scopes: Vec<HashMap<String, (LocalId, Ty, bool)>>,
@@ -282,21 +286,47 @@ impl Checker {
 
         self.structs_resolved = true;
 
+        // Every function: the free ones, and the methods of `impl` blocks under the name
+        // `Type::method`.
+        let mut fns: Vec<(ast::Fn, Option<String>)> = Vec::new();
+        for item in &program.items {
+            match item {
+                ast::Item::Fn(f) => fns.push((f.clone(), None)),
+                ast::Item::Impl(imp) => {
+                    let ty = imp.ty.node.clone();
+                    if !self.struct_fields.contains_key(&ty) && !self.enums.contains_key(&ty) {
+                        self.err(
+                            imp.ty.span.clone(),
+                            format!("cannot find the struct or enum `{ty}` to implement"),
+                        );
+                        continue;
+                    }
+                    for f in &imp.fns {
+                        let mut f = f.clone();
+                        f.name.node = format!("{ty}::{}", f.name.node);
+                        self.methods.insert(f.name.node.clone(), ty.clone());
+                        fns.push((f, Some(ty.clone())));
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Function signatures.
         let mut sig_done = HashSet::new();
-        for item in &program.items {
-            if let ast::Item::Fn(f) = item {
-                if !sig_done.insert(f.name.node.clone()) {
-                    self.err(
-                        f.name.span.clone(),
-                        format!("function `{}` is defined twice", f.name.node),
-                    );
-                    continue;
-                }
-                let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-                let ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
-                self.fn_sigs.insert(f.name.node.clone(), (params, ret));
+        for (f, impl_ty) in &fns {
+            if !sig_done.insert(f.name.node.clone()) {
+                self.err(
+                    f.name.span.clone(),
+                    format!("function `{}` is defined twice", f.name.node),
+                );
+                continue;
             }
+            self.impl_ty = impl_ty.clone();
+            let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
+            let ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
+            self.impl_ty = None;
+            self.fn_sigs.insert(f.name.node.clone(), (params, ret));
         }
 
         // Globals, in source order.
@@ -334,11 +364,11 @@ impl Checker {
         }
 
         let mut lowered = HashSet::new();
-        for item in &program.items {
-            if let ast::Item::Fn(f) = item
-                && lowered.insert(f.name.node.clone())
-            {
+        for (f, impl_ty) in &fns {
+            if lowered.insert(f.name.node.clone()) {
+                self.impl_ty = impl_ty.clone();
                 out.fns.push(self.lower_fn(f));
+                self.impl_ty = None;
             }
         }
         out.structs.append(&mut self.anon_structs);
@@ -421,6 +451,14 @@ impl Checker {
                         format!("`{name}` takes at most one type argument"),
                     );
                     Ty::Vec(Box::new(Ty::Unknown))
+                }
+            },
+            "Self" => match self.impl_ty.clone() {
+                Some(t) if self.enums.contains_key(&t) => Ty::Enum(t),
+                Some(t) => Ty::Struct(t),
+                None => {
+                    self.err(t.span.clone(), "`Self` can only be used inside an `impl`");
+                    Ty::Unknown
                 }
             },
             "(tuple)" => Ty::Tuple(type_args.iter().map(|a| self.resolve_type(a)).collect()),
@@ -1670,6 +1708,70 @@ impl Checker {
         Self::mk(hir::ExprKind::For { var, iter, body }, Ty::Unit, span)
     }
 
+    /// The full name (`Point::norm`) of the method `name` of a struct or enum type, if there is one.
+    fn method_of(&self, ty: &Ty, name: &str) -> Option<String> {
+        let type_name = match self.resolve(ty) {
+            Ty::Struct(n) | Ty::Enum(n) => n,
+            _ => return None,
+        };
+        let full = format!("{type_name}::{name}");
+        self.methods.contains_key(&full).then_some(full)
+    }
+
+    /// Checks `receiver.method(args)` against the signature of `full` (receiver first).
+    fn method_call(
+        &mut self,
+        full: &str,
+        receiver: hir::Expr,
+        args: &[ast::Expr],
+        span: &Span,
+    ) -> hir::Expr {
+        let (params, ret) = self.fn_sigs[full].clone();
+        let takes_self = params.first().is_some_and(|p| {
+            matches!((p, self.methods.get(full)), (Ty::Struct(n) | Ty::Enum(n), Some(t)) if n == t)
+        });
+        let name = full.rsplit("::").next().unwrap_or(full).to_string();
+        if !takes_self {
+            self.err(
+                span.clone(),
+                format!("`{name}` has no `self` parameter, call it as `{full}(..)`"),
+            );
+            return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+        }
+        if params.len() != args.len() + 1 {
+            self.err(
+                span.clone(),
+                format!(
+                    "expected {} argument(s), found {}",
+                    params.len() - 1,
+                    args.len()
+                ),
+            );
+        }
+        let mut checked = vec![receiver];
+        for (i, a) in args.iter().enumerate() {
+            let want = params.get(i + 1);
+            let a = self.expr(a, want);
+            checked.push(match want {
+                Some(w) => self.coerce(a, w),
+                None => a,
+            });
+        }
+        let callee = Self::mk(
+            hir::ExprKind::Fn(full.to_string()),
+            Ty::Fn(params, Box::new(ret.clone())),
+            span,
+        );
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args: checked,
+            },
+            ret,
+            span,
+        )
+    }
+
     /// `Enum::Variant` or `Enum::Variant(args..)`.
     fn enum_ctor(
         &mut self,
@@ -2072,7 +2174,14 @@ impl Checker {
     }
 
     fn path(&mut self, p: &[ast::Ident], span: &Span) -> hir::Expr {
-        let names: Vec<String> = p.iter().map(|i| i.node.clone()).collect();
+        let mut names: Vec<String> = p.iter().map(|i| i.node.clone()).collect();
+        // `Self::new` inside an `impl` is `Type::new`.
+        if names.len() == 2
+            && names[0] == "Self"
+            && let Some(t) = &self.impl_ty
+        {
+            names[0] = t.clone();
+        }
         let first = names[0].as_str();
         if names.len() == 1 {
             if let Some((id, ty)) = self.lookup_local(first) {
@@ -2098,8 +2207,19 @@ impl Checker {
         if matches!(first, "Ok" | "Err") && names.len() == 1 {
             return Self::mk(hir::ExprKind::Extern(names), Ty::Unknown, span);
         }
-        if names.len() == 2 && self.enums.contains_key(first) {
-            return self.enum_ctor(first, &p[1], &[], span);
+        if names.len() == 2 {
+            let is_variant = self
+                .enums
+                .get(first)
+                .is_some_and(|vs| vs.iter().any(|(v, _)| *v == names[1]));
+            let full = format!("{first}::{}", names[1]);
+            if !is_variant && let Some((params, ret)) = self.fn_sigs.get(&full) {
+                let ty = Ty::Fn(params.clone(), Box::new(ret.clone()));
+                return Self::mk(hir::ExprKind::Fn(full), ty, span);
+            }
+            if self.enums.contains_key(first) {
+                return self.enum_ctor(first, &p[1], &[], span);
+            }
         }
         let resolved = if first == "std" {
             Some(names.clone())
@@ -2162,6 +2282,10 @@ impl Checker {
 
     fn field_ty(&mut self, base: &hir::Expr, name: &ast::Ident) -> Ty {
         let n = name.node.as_str();
+        // Methods of the user's own types are called, not read.
+        if self.method_of(&base.ty, n).is_some() {
+            return Ty::Unknown;
+        }
         // Methods that `call` turns into std functions are not looked up here.
         if method_module(&self.resolve(&base.ty), n).is_some() {
             return Ty::Unknown;
@@ -2346,9 +2470,19 @@ impl Checker {
     ) -> hir::Expr {
         if let ast::ExprKind::Path(p) = &callee.node
             && p.len() == 2
-            && self.enums.contains_key(&p[0].node)
         {
-            return self.enum_ctor(&p[0].node, &p[1], args, span);
+            let first = if p[0].node == "Self" {
+                self.impl_ty.clone().unwrap_or_default()
+            } else {
+                p[0].node.clone()
+            };
+            let is_variant = self
+                .enums
+                .get(&first)
+                .is_some_and(|vs| vs.iter().any(|(v, _)| *v == p[1].node));
+            if is_variant {
+                return self.enum_ctor(&first, &p[1], args, span);
+            }
         }
         if let ast::ExprKind::Path(p) = &callee.node
             && self.is_option_ctor(p, "Some")
@@ -2376,6 +2510,13 @@ impl Checker {
         }
 
         let callee = self.expr(callee, None);
+        // `p.norm()` where `norm` is a method of `p`'s type: `Point::norm(p)`.
+        if let hir::ExprKind::Field { base, name } = &callee.kind
+            && let Some(full) = self.method_of(&base.ty, name)
+        {
+            let receiver = (**base).clone();
+            return self.method_call(&full, receiver, args, span);
+        }
         // `t.relu()`, `x.matmul(w)`, `sales.sql("..")`: a method on a tensor or table is the std
         // function of the same name with the receiver as its first argument.
         if let hir::ExprKind::Field { base, name } = &callee.kind
@@ -2826,11 +2967,16 @@ impl Checker {
         fields: &[(ast::Ident, ast::Expr)],
         span: &Span,
     ) -> hir::Expr {
-        let name = path
+        let mut name = path
             .iter()
             .map(|i| i.node.as_str())
             .collect::<Vec<_>>()
             .join("::");
+        if name == "Self"
+            && let Some(t) = &self.impl_ty
+        {
+            name = t.clone();
+        }
         let Some(decl) = self.struct_fields.get(&name).cloned() else {
             self.err(span.clone(), format!("cannot find struct `{name}`"));
             for (_, e) in fields {
