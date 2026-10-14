@@ -64,3 +64,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -p novar_runtime -p novar_cli --features novar_cli/gpu --all-targets
       - run: cargo test -p novar_runtime --features gpu --no-run
+
+  # Windows runs the same tests as Linux. Not required yet: it has not been exercised much.
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace

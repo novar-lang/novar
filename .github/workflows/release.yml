@@ -51,13 +51,20 @@ jobs:
     needs: plan
     if: needs.plan.outputs.publish == 'true'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: macos-15-intel, target: x86_64-apple-darwin }
+          # Not exercised on a real Windows machine yet: a failure here must not block the release.
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, experimental: true }
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,13 +75,21 @@ jobs:
       - name: Package
         run: |
           mkdir dist
-          cp target/release/novar target/release/nvpm dist/
-          tar -czf novar-${{ matrix.target }}.tar.gz -C dist novar nvpm
-          shasum -a 256 novar-${{ matrix.target }}.tar.gz > novar-${{ matrix.target }}.tar.gz.sha256
+          if [ "${{ runner.os }}" = Windows ]; then
+            cp target/release/novar.exe target/release/nvpm.exe dist/
+            (cd dist && 7z a -tzip ../novar-${{ matrix.target }}.zip novar.exe nvpm.exe)
+            sha256sum novar-${{ matrix.target }}.zip > novar-${{ matrix.target }}.zip.sha256
+          else
+            cp target/release/novar target/release/nvpm dist/
+            tar -czf novar-${{ matrix.target }}.tar.gz -C dist novar nvpm
+            shasum -a 256 novar-${{ matrix.target }}.tar.gz > novar-${{ matrix.target }}.tar.gz.sha256
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: novar-${{ matrix.target }}
-          path: novar-${{ matrix.target }}.tar.gz*
+          path: |
+            novar-${{ matrix.target }}.tar.gz*
+            novar-${{ matrix.target }}.zip*
 
   publish:
     needs: [plan, build]
