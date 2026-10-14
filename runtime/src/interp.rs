@@ -69,6 +69,8 @@ pub struct EndpointError {
 
 enum Ctrl {
     Return(Value),
+    Break,
+    Continue,
     Fail(RuntimeError),
 }
 
@@ -147,6 +149,9 @@ impl Interp {
             let v = interp.eval(&g.init, &mut ctx).map_err(|c| match c {
                 Ctrl::Fail(e) => RuntimeError::new(format!("while initialising `{}`: {e}", g.name)),
                 Ctrl::Return(_) => RuntimeError::new("`return` outside a function"),
+                Ctrl::Break | Ctrl::Continue => {
+                    RuntimeError::new("`break` or `continue` outside a loop")
+                }
             })?;
             interp
                 .globals
@@ -380,6 +385,9 @@ impl Interp {
         self.call_fn(f, args, 0).map_err(|c| match c {
             Ctrl::Fail(e) => e,
             Ctrl::Return(_) => RuntimeError::new("unexpected return"),
+            Ctrl::Break | Ctrl::Continue => {
+                RuntimeError::new("`break` or `continue` outside a loop")
+            }
         })
     }
 
@@ -424,6 +432,9 @@ impl Interp {
         self.apply_at(f, args, 0).map_err(|c| match c {
             Ctrl::Fail(e) => e,
             Ctrl::Return(v) => RuntimeError::new(format!("stray return of {v}")),
+            Ctrl::Break | Ctrl::Continue => {
+                RuntimeError::new("`break` or `continue` outside a loop")
+            }
         })
     }
 
@@ -487,6 +498,15 @@ impl Interp {
         }
     }
 
+    /// Runs one loop iteration; `Ok(false)` means the body executed `break`.
+    fn loop_body(&self, body: &hir::Block, ctx: &mut Ctx) -> Result<bool, Ctrl> {
+        match self.block(body, ctx) {
+            Ok(_) | Err(Ctrl::Continue) => Ok(true),
+            Err(Ctrl::Break) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
     fn block(&self, b: &hir::Block, ctx: &mut Ctx) -> Eval {
         for s in &b.stmts {
             match s {
@@ -542,7 +562,9 @@ impl Interp {
                 loop {
                     match self.eval(cond, ctx)? {
                         Value::Bool(true) => {
-                            self.block(body, ctx)?;
+                            if !self.loop_body(body, ctx)? {
+                                break;
+                            }
                         }
                         Value::Bool(false) => break,
                         other => {
@@ -571,7 +593,9 @@ impl Interp {
                         let (mut i, last) = (i128::from(a), i128::from(b));
                         while i < last || (*inclusive && i == last) {
                             ctx.env.insert(var.id, Value::Int(i as i64));
-                            self.block(body, ctx)?;
+                            if !self.loop_body(body, ctx)? {
+                                break;
+                            }
                             i += 1;
                         }
                     }
@@ -581,7 +605,9 @@ impl Interp {
                             Value::Table(t) => {
                                 for i in 0..t.rows() {
                                     ctx.env.insert(var.id, t.row(i)?);
-                                    self.block(body, ctx)?;
+                                    if !self.loop_body(body, ctx)? {
+                                        break;
+                                    }
                                 }
                                 return Ok(Value::Unit);
                             }
@@ -592,7 +618,9 @@ impl Interp {
                         for i in 0..items.len() {
                             let Some(item) = items.get(i) else { break };
                             ctx.env.insert(var.id, item);
-                            self.block(body, ctx)?;
+                            if !self.loop_body(body, ctx)? {
+                                break;
+                            }
                         }
                     }
                 }
@@ -768,6 +796,8 @@ impl Interp {
                 };
                 Err(Ctrl::Return(v))
             }
+            ExprKind::Break => Err(Ctrl::Break),
+            ExprKind::Continue => Err(Ctrl::Continue),
         }
     }
 

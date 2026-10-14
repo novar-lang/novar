@@ -563,3 +563,23 @@ fn call_json_converts_by_the_parameter_types() {
     );
     assert!(i.call_json("boom", &[]).unwrap_err().contains("Err(no)"));
 }
+
+#[test]
+fn break_and_continue_in_every_kind_of_loop() {
+    let src = "
+        fn range_break(n: i64) -> i64 { let mut s = 0; for i in 0..n { if i == 5 { break; } s += i; } s }
+        fn range_continue(n: i64) -> i64 { let mut s = 0; for i in 0..n { if i % 2 == 0 { continue; } s += i; } s }
+        fn while_loop() -> i64 { let mut i = 0; let mut s = 0; while true { i += 1; if i > 10 { break; } if i % 3 == 0 { continue; } s += i; } s }
+        fn nested() -> i64 {
+            let mut c = 0;
+            for a in 0..5 { for b in 0..5 { if b > a { break; } c += 1; } }
+            c
+        }
+        fn return_inside(n: i64) -> i64 { for i in 0..n { if i == 3 { return i * 100; } } 0 - 1 }
+    ";
+    assert_eq!(int(run(src, "range_break", vec![Value::Int(100)])), 10);
+    assert_eq!(int(run(src, "range_continue", vec![Value::Int(10)])), 25);
+    assert_eq!(int(run(src, "while_loop", vec![])), 37);
+    assert_eq!(int(run(src, "nested", vec![])), 15);
+    assert_eq!(int(run(src, "return_inside", vec![Value::Int(10)])), 300);
+}
