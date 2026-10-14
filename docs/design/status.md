@@ -45,14 +45,14 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 | `@endpoint` -> routing table, validation, JSON | done (`novar_server`); validation derives from the types, including tensor shapes (tested) |
 | Embedded Axum server | done, but the handlers run in the **interpreter**; native binaries do not serve HTTP |
 | `novar build --serve` | done: one binary containing the program (all modules, no source tree needed at run time) (tested) |
-| Dockerfile | generated (multi-stage, distroless runtime) and its content tested; **never built** because Docker is not available here |
+| Dockerfile | generated (multi-stage, distroless runtime) and its content tested. A CI job builds it and calls the container, but that job has **not run yet** and Docker is not available on the development machine |
 | Real services | Ollama, OpenAI-compatible chat, PostgreSQL+pgvector: HTTP clients tested against local stand-in servers; pgvector tested against a real PostgreSQL 17; Ollama exercised against a real local Ollama (`nomic-embed-text`). The OpenAI client was only tested against a stand-in server (no API key) |
 
 ## 5. Alpha 0.1.0 targets (`benchmarks/`)
 
 | Target | Measured |
 |---|---|
-| RAG overhead < 15 ms | p99 0.88 ms (1 connection), 6.0 ms (8 connections), 2,000 documents, with the offline model stand-ins. Real model and database latency adds to this |
+| RAG overhead < 15 ms | with the offline stand-ins: p99 0.88 ms (1 connection), 6.0 ms (8 connections), 2,000 documents. With a real Ollama and a real PostgreSQL+pgvector (500 documents, sequential, LLM stubbed): about 1.9 ms mean overhead, ~6 ms p99, 14 MB RSS (see `benchmarks/README.md`) |
 | Base RSS < 30 MB | 17.8 MB idle |
 | High-throughput vector ingestion | CSV 19.7 M rows/s, Parquet read 88 M rows/s, 84 K embedded documents/s into the in-memory store |
 
@@ -77,4 +77,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 * The native backend supports a subset (see the README); tables, SQL, closures and most of `std` are interpreter-only.
 * Strings, vectors and tensors allocated by native code are never freed.
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `novar build`).
-* PTX and StableHLO output have not been executed on NVIDIA or TPU hardware; no formatter or linter, no `break`/`continue`, no enums.
+* Enums and `match` run in the interpreter only; the native backend reports them as unsupported.
+* `novar fmt` keeps the line breaks you wrote (it fixes indentation, spacing and blank lines); it does not re-wrap long lines. `novar lint` only finds unused variables, needless `mut` and unused private functions.
+* Windows builds come from CI and have not been exercised on a real Windows machine; the native backend is not built there.
+* PTX and StableHLO output have not been executed on NVIDIA or TPU hardware.

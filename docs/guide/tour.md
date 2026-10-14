@@ -94,3 +94,40 @@ identical results.
 * `novar build file.nv --emit ptx [--sm sm_80]` prints PTX kernels for the tensor operations the file uses (needs `--features llvm`).
 
 PTX and StableHLO are generated and checked, not executed: see `docs/design/status.md`.
+
+## Enums, `match`, `break` and `continue`
+
+```novar
+enum Shape { Circle(f64), Rect(f64, f64), Empty }
+
+fn area(s: Shape) -> f64 {
+    match s {
+        Shape::Circle(r) => r * r * 3.14159,
+        Shape::Rect(w, h) => w * h,
+        Shape::Empty => 0.0,
+    }
+}
+
+fn first_over(limit: i32) -> i32 {
+    let mut found = -1;
+    for i in 1..1000 {
+        if i * i > limit { found = i; break; }
+    }
+    found
+}
+```
+
+`match` must cover every case (the compiler names the missing variants) and also works on
+`Result` (`Ok(v)` / `Err(e)`), integers, strings, booleans and `_`. Enums travel as JSON: a unit
+variant is its name (`"Empty"`), one with values is `{"Circle": 2.0}` or `{"Rect": [2.0, 3.0]}`.
+Enums run in the interpreter; the native backend does not compile them yet.
+
+## Formatting and linting
+
+```sh
+novar fmt file.nv            # rewrite in place
+novar fmt --check file.nv    # list files that would change (exit 1), for CI
+novar lint file.nv           # unused variables, needless `mut`, unused private functions
+```
+
+The language server formats documents too, so VS Code can format on save.
