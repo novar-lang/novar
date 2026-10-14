@@ -2554,234 +2554,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "telvax_accel"
-version = "0.0.4"
-dependencies = [
- "inkwell",
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_parser",
-]
-
-[[package]]
-name = "telvax_ast"
-version = "0.0.4"
-
-[[package]]
-name = "telvax_bench"
-version = "0.0.4"
-dependencies = [
- "telvax_hir",
- "telvax_parser",
- "telvax_runtime",
- "serde_json",
-]
-
-[[package]]
-name = "telvax_cli"
-version = "0.0.4"
-dependencies = [
- "axum",
- "telvax_accel",
- "telvax_cluster",
- "telvax_codegen",
- "telvax_diagnostics",
- "telvax_fmt",
- "telvax_hir",
- "telvax_lint",
- "telvax_lsp",
- "telvax_mlir",
- "telvax_modules",
- "telvax_parser",
- "telvax_pkg",
- "telvax_runtime",
- "telvax_server",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "telvax_cluster"
-version = "0.0.4"
-dependencies = [
- "axum",
- "telvax_hir",
- "telvax_modules",
- "telvax_runtime",
- "serde_json",
- "sha2",
- "tokio",
- "ureq",
-]
-
-[[package]]
-name = "telvax_codegen"
-version = "0.0.4"
-dependencies = [
- "inkwell",
- "libc",
- "melior",
- "mlir-sys",
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_mlir",
- "telvax_parser",
- "telvax_runtime",
-]
-
-[[package]]
-name = "telvax_diagnostics"
-version = "0.0.4"
-dependencies = [
- "ariadne",
-]
-
-[[package]]
-name = "telvax_fmt"
-version = "0.0.4"
-dependencies = [
- "telvax_lexer",
-]
-
-[[package]]
-name = "telvax_hir"
-version = "0.0.4"
-dependencies = [
- "telvax_ast",
- "telvax_diagnostics",
- "telvax_parser",
-]
-
-[[package]]
-name = "telvax_lexer"
-version = "0.0.4"
-dependencies = [
- "logos",
-]
-
-[[package]]
-name = "telvax_lint"
-version = "0.0.4"
-dependencies = [
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_parser",
-]
-
-[[package]]
-name = "telvax_lsp"
-version = "0.0.4"
-dependencies = [
- "lsp-server",
- "lsp-types",
- "telvax_diagnostics",
- "telvax_fmt",
- "telvax_hir",
- "telvax_modules",
- "telvax_parser",
- "telvax_pkg",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "telvax_mlir"
-version = "0.0.4"
-dependencies = [
- "melior",
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_parser",
- "telvax_runtime",
-]
-
-[[package]]
-name = "telvax_modules"
-version = "0.0.4"
-dependencies = [
- "telvax_ast",
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_parser",
- "telvax_runtime",
- "serde",
-]
-
-[[package]]
-name = "telvax_parser"
-version = "0.0.4"
-dependencies = [
- "chumsky",
- "telvax_ast",
- "telvax_diagnostics",
- "telvax_lexer",
-]
-
-[[package]]
-name = "telvax_pkg"
-version = "0.0.4"
-dependencies = [
- "flate2",
- "telvax_ast",
- "telvax_hir",
- "telvax_modules",
- "telvax_runtime",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "toml",
- "ureq",
-]
-
-[[package]]
-name = "telvax_runtime"
-version = "0.0.4"
-dependencies = [
- "arrow",
- "bytemuck",
- "datafusion",
- "telvax_hir",
- "telvax_parser",
- "parquet",
- "pollster",
- "postgres",
- "serde_json",
- "stacker",
- "tokio",
- "ureq",
- "wgpu",
-]
-
-[[package]]
-name = "telvax_server"
-version = "0.0.4"
-dependencies = [
- "axum",
- "http-body-util",
- "telvax_hir",
- "telvax_parser",
- "serde_json",
- "tokio",
- "tower",
-]
-
-[[package]]
-name = "telvax_wasm"
-version = "0.0.4"
-dependencies = [
- "telvax_diagnostics",
- "telvax_hir",
- "telvax_lsp",
- "telvax_parser",
- "telvax_runtime",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3837,6 +3609,234 @@ dependencies = [
  "cc",
  "paste",
  "thiserror",
+]
+
+[[package]]
+name = "telvax_accel"
+version = "0.0.4"
+dependencies = [
+ "inkwell",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+]
+
+[[package]]
+name = "telvax_ast"
+version = "0.0.4"
+
+[[package]]
+name = "telvax_bench"
+version = "0.0.4"
+dependencies = [
+ "serde_json",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_cli"
+version = "0.0.4"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "telvax_accel",
+ "telvax_cluster",
+ "telvax_codegen",
+ "telvax_diagnostics",
+ "telvax_fmt",
+ "telvax_hir",
+ "telvax_lint",
+ "telvax_lsp",
+ "telvax_mlir",
+ "telvax_modules",
+ "telvax_parser",
+ "telvax_pkg",
+ "telvax_runtime",
+ "telvax_server",
+ "tokio",
+]
+
+[[package]]
+name = "telvax_cluster"
+version = "0.0.4"
+dependencies = [
+ "axum",
+ "serde_json",
+ "sha2",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_runtime",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "telvax_codegen"
+version = "0.0.4"
+dependencies = [
+ "inkwell",
+ "libc",
+ "melior",
+ "mlir-sys",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_mlir",
+ "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_diagnostics"
+version = "0.0.4"
+dependencies = [
+ "ariadne",
+]
+
+[[package]]
+name = "telvax_fmt"
+version = "0.0.4"
+dependencies = [
+ "telvax_lexer",
+]
+
+[[package]]
+name = "telvax_hir"
+version = "0.0.4"
+dependencies = [
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_parser",
+]
+
+[[package]]
+name = "telvax_lexer"
+version = "0.0.4"
+dependencies = [
+ "logos",
+]
+
+[[package]]
+name = "telvax_lint"
+version = "0.0.4"
+dependencies = [
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+]
+
+[[package]]
+name = "telvax_lsp"
+version = "0.0.4"
+dependencies = [
+ "lsp-server",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "telvax_diagnostics",
+ "telvax_fmt",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_parser",
+ "telvax_pkg",
+]
+
+[[package]]
+name = "telvax_mlir"
+version = "0.0.4"
+dependencies = [
+ "melior",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_modules"
+version = "0.0.4"
+dependencies = [
+ "serde",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_parser"
+version = "0.0.4"
+dependencies = [
+ "chumsky",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_lexer",
+]
+
+[[package]]
+name = "telvax_pkg"
+version = "0.0.4"
+dependencies = [
+ "flate2",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "telvax_ast",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_runtime",
+ "toml",
+ "ureq",
+]
+
+[[package]]
+name = "telvax_runtime"
+version = "0.0.4"
+dependencies = [
+ "arrow",
+ "bytemuck",
+ "datafusion",
+ "parquet",
+ "pollster",
+ "postgres",
+ "serde_json",
+ "stacker",
+ "telvax_hir",
+ "telvax_parser",
+ "tokio",
+ "ureq",
+ "wgpu",
+]
+
+[[package]]
+name = "telvax_server"
+version = "0.0.4"
+dependencies = [
+ "axum",
+ "http-body-util",
+ "serde_json",
+ "telvax_hir",
+ "telvax_parser",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "telvax_wasm"
+version = "0.0.4"
+dependencies = [
+ "serde_json",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_lsp",
+ "telvax_parser",
+ "telvax_runtime",
+ "wasm-bindgen",
 ]
 
 [[package]]

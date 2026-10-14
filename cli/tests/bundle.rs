@@ -54,7 +54,19 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// The listener can accept a connection a moment before the server answers requests, so a failed
+/// exchange is retried for a few seconds. The endpoints under test have no side effects.
 fn post(port: u16, path: &str, body: &str) -> Option<(u16, String)> {
+    for _ in 0..50 {
+        if let Some(reply) = post_once(port, path, body) {
+            return Some(reply);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    None
+}
+
+fn post_once(port: u16, path: &str, body: &str) -> Option<(u16, String)> {
     let mut s = TcpStream::connect(("127.0.0.1", port)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     write!(
