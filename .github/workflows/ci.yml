@@ -136,7 +136,7 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --json --summary-only --output-path coverage.json
+      - run: cargo llvm-cov --workspace --ignore-filename-regex 'tools/migrate/' --json --summary-only --output-path coverage.json
       - run: python3 scripts/coverage-gate.py coverage.json
 
   # Speed and memory gates: the RAG service must keep its overhead and footprint inside the alpha

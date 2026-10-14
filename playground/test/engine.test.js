@@ -91,7 +91,7 @@ test("output is capped", () => {
 test("hover and completion work in the engine", () => {
   const src = "type Point:\n    x: Float\n    y: Float\n\nfn f(p: Point) -> Float:\n    p.x\n";
   assert.match(telvax.hover(src, 5, 6), /Float/);
-  assert.match(telvax.hover(src, 4, 4), /fn f\(p: Point\) -> Float/);
+  assert.match(telvax.hover(src, 4, 3), /fn f\(p: Point\) -> Float/);
   const items = call(telvax.complete, src, 5, 7);
   assert.ok(Array.isArray(items));
   const std = call(telvax.complete, "fn f():\n    std.te", 1, 10);
