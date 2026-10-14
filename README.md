@@ -40,6 +40,15 @@ novar --version
 The script downloads a release binary or, if there is none for your system, builds from source
 (needs [Rust](https://rustup.rs)). To build by hand: `cargo install --locked --path cli`.
 
+On Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.ps1 | iex
+```
+
+Windows builds are new and have only been compiled and tested by CI, not by hand. The native
+backend (`--features llvm`) is not available on Windows yet.
+
 ## Quick start
 
 ```sh
