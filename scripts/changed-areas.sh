@@ -1,6 +1,6 @@
 #!/bin/sh
 # Prints which parts of the repository a push or pull request touches, as GITHUB_OUTPUT lines:
-#   core=true|false     anything that is not documentation, the extension or the Python package
+#   core=true|false     anything that is not documentation, release plumbing, the extension or the Python package
 #   python=true|false   core, or the Python package
 #   vscode=true|false   core, or the VS Code extension
 # CI uses it to skip pipelines a change cannot affect: a documentation-only change runs none of them.
@@ -24,7 +24,12 @@ if [ "$files" = __unknown__ ] || [ -z "$files" ]; then
 else
   for f in $files; do
     case "$f" in
-      docs/* | rfcs/* | spec/* | *.md | LICENSE* | .github/FUNDING.yml | .github/CODEOWNERS | .gitattributes) ;;
+      docs/* | rfcs/* | spec/* | *.md | LICENSE* | .gitattributes) ;;
+      # Repository settings and workflows that no test pipeline exercises: the release and
+      # auto-merge workflows only run on main, and the secret scan runs on its own.
+      .github/FUNDING.yml | .github/CODEOWNERS | .github/dependabot.yml) ;;
+      .github/workflows/release.yml | .github/workflows/dependabot-auto-merge.yml | .github/workflows/secrets.yml) ;;
+      scripts/set-version.sh | scripts/next-version.sh) ;;
       python/*) python=true ;;
       editors/vscode/*) vscode=true ;;
       *) core=true ;;

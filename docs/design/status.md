@@ -45,7 +45,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 | `@endpoint` -> routing table, validation, JSON | done (`telvax_server`); validation derives from the types, including tensor shapes (tested) |
 | Embedded Axum server | done, but the handlers run in the **interpreter**; native binaries do not serve HTTP |
 | `telvax build --serve` | done: one binary containing the program (all modules, no source tree needed at run time) (tested) |
-| Dockerfile | generated (multi-stage, distroless runtime) and its content tested. A CI job builds it and calls the container, but that job has **not run yet** and Docker is not available on the development machine |
+| Dockerfile | generated (multi-stage, distroless runtime) and its content tested. A CI job (`docker`) builds it and calls the container; it passes on `main`. Docker is not available on the development machine |
 | Real services | Ollama, OpenAI-compatible chat, PostgreSQL+pgvector: HTTP clients tested against local stand-in servers; pgvector tested against a real PostgreSQL 17; Ollama exercised against a real local Ollama (`nomic-embed-text`). The OpenAI client was only tested against a stand-in server (no API key) |
 
 ## 5. Alpha 0.1.0 targets (`benchmarks/`)
@@ -80,5 +80,5 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `telvax build`).
 * Enums and `match` run in the interpreter only; the native backend reports them as unsupported.
 * `telvax fmt` keeps the line breaks you wrote (it fixes indentation, spacing and blank lines); it does not re-wrap long lines. `telvax lint` only finds unused variables and unused private functions (names that start with `_`).
-* Windows builds come from CI and have not been exercised on a real Windows machine; the native backend is not built there. Each published release is now installed and run on Windows, Linux and macOS by the `verify` job of the release workflow (it first runs with the 0.0.4 release).
+* `cargo test --workspace` runs on a Windows runner in CI and passes; it has not been tried on a physical Windows machine, and the native backend is not built there. Each published release is installed and run on Windows, Linux and macOS by the `verify` job of the release workflow.
 * PTX and StableHLO output have not been executed on NVIDIA or TPU hardware.
