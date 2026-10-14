@@ -3613,7 +3613,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_accel"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "inkwell",
  "telvax_diagnostics",
@@ -3623,11 +3623,11 @@ dependencies = [
 
 [[package]]
 name = "telvax_ast"
-version = "0.0.4"
+version = "0.0.5"
 
 [[package]]
 name = "telvax_bench"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "serde_json",
  "telvax_hir",
@@ -3637,7 +3637,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_cli"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "axum",
  "serde",
@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_cluster"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "axum",
  "serde_json",
@@ -3675,7 +3675,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_codegen"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "inkwell",
  "libc",
@@ -3690,21 +3690,21 @@ dependencies = [
 
 [[package]]
 name = "telvax_diagnostics"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "ariadne",
 ]
 
 [[package]]
 name = "telvax_fmt"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "telvax_lexer",
 ]
 
 [[package]]
 name = "telvax_hir"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "telvax_ast",
  "telvax_diagnostics",
@@ -3713,14 +3713,14 @@ dependencies = [
 
 [[package]]
 name = "telvax_lexer"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "telvax_lint"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "telvax_diagnostics",
  "telvax_hir",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_lsp"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "lsp-server",
  "lsp-types",
@@ -3745,7 +3745,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_mlir"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "melior",
  "telvax_diagnostics",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_modules"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "serde",
  "telvax_ast",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_parser"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "chumsky",
  "telvax_ast",
@@ -3778,7 +3778,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_pkg"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "flate2",
  "semver",
@@ -3796,7 +3796,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_runtime"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "arrow",
  "bytemuck",
@@ -3815,7 +3815,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_server"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "axum",
  "http-body-util",
@@ -3828,7 +3828,7 @@ dependencies = [
 
 [[package]]
 name = "telvax_wasm"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "serde_json",
  "telvax_diagnostics",

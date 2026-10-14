@@ -20,10 +20,10 @@ inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-pr
 libc = { version = "0.2", optional = true }
 melior = { version = "0.27", optional = true }
 mlir-sys = { version = "220", optional = true }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics", optional = true }
-telvax_hir = { version = "0.0.4", path = "../semantic", optional = true }
-telvax_mlir = { version = "0.0.4", path = "../ir", optional = true }
+telvax_diagnostics = { path = "../diagnostics", optional = true }
+telvax_hir = { path = "../semantic", optional = true }
+telvax_mlir = { path = "../ir", optional = true }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../parser" }
-telvax_runtime = { version = "0.0.4", path = "../../runtime" }
+telvax_parser = { path = "../parser" }
+telvax_runtime = { path = "../../runtime" }

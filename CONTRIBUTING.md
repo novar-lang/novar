@@ -77,8 +77,12 @@ See the table in the README. A quick map for the language itself: `compiler/lexe
 
 ## Releases
 
-Raising `version` in the root `Cargo.toml` (and the matching `CHANGELOG.md` section) on `main`
-makes CI tag the commit and publish a pre-release with binaries.
+Every pull request merged into `main` is released: CI tags the merge commit with the next patch
+version after the latest tag and publishes a pre-release with binaries, so no file has to be edited.
+The release notes are the `CHANGELOG.md` section for that version, if you wrote one, followed by
+the list of merged pull requests. To pick a version yourself, raise `version` in the root
+`Cargo.toml` above the latest tag. Put `[skip release]` in the pull request title to merge without
+releasing.
 
 ## Security
 

@@ -12,11 +12,11 @@ publish = false
 workspace = true
 
 [dependencies]
-telvax_ast = { version = "0.0.4", path = "../ast" }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-telvax_parser = { version = "0.0.4", path = "../parser" }
+telvax_ast = { path = "../ast" }
+telvax_diagnostics = { path = "../diagnostics" }
+telvax_parser = { path = "../parser" }
 serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
-telvax_hir = { version = "0.0.4", path = "../semantic" }
-telvax_runtime = { version = "0.0.4", path = "../../runtime", default-features = false }
+telvax_hir = { path = "../semantic" }
+telvax_runtime = { path = "../../runtime", default-features = false }

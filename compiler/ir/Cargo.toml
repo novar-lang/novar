@@ -17,9 +17,9 @@ llvm = ["dep:melior", "dep:telvax_hir"]
 
 [dependencies]
 melior = { version = "0.27", optional = true }
-telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-telvax_hir = { version = "0.0.4", path = "../semantic", optional = true }
+telvax_diagnostics = { path = "../diagnostics" }
+telvax_hir = { path = "../semantic", optional = true }
 
 [dev-dependencies]
-telvax_parser = { version = "0.0.4", path = "../parser" }
-telvax_runtime = { version = "0.0.4", path = "../../runtime" }
+telvax_parser = { path = "../parser" }
+telvax_runtime = { path = "../../runtime" }
