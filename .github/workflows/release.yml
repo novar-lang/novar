@@ -124,3 +124,82 @@ jobs:
           files: dist/*
           body_path: notes.md
           prerelease: true
+
+  # Installs the release that was just published with the install scripts, on every system we ship
+  # for, and runs the binaries: a smoke test of what users will actually download.
+  verify:
+    needs: [plan, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, variant: full }
+          - { os: ubuntu-latest, variant: lite }
+          - { os: ubuntu-24.04-arm, variant: full }
+          - { os: macos-latest, variant: full }
+          - { os: macos-latest, variant: lite }
+          - { os: macos-15-intel, variant: full }
+          - { os: windows-latest, variant: full }
+          - { os: windows-latest, variant: lite }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
+      - name: Install with the script
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          export NOVAR_HOME="$RUNNER_TEMP/novar-home"
+          [ "${{ matrix.variant }}" = lite ] && export NOVAR_LITE=1
+          if [ "${{ runner.os }}" = Windows ]; then
+            NOVAR_VERSION="$version" powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+          else
+            sh scripts/install.sh "$version"
+          fi
+          echo "$NOVAR_HOME/bin" >> "$GITHUB_PATH"
+      - name: Version
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          out="$(novar --version)"
+          echo "$out"
+          [ "$out" = "novar ${TAG#v}" ]
+          nvpm --help | head -n 3
+      - name: Check, run and format
+        run: |
+          novar check examples/rag-service.nv
+          novar run examples/basics/primes.nv main
+          novar fmt --check examples/basics/primes.nv
+          novar lint examples/basics/primes.nv
+      - name: Serve the RAG example
+        run: |
+          novar serve examples/rag-service.nv --port 18080 > serve.log 2>&1 &
+          pid=$!
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS -XPOST localhost:18080/v1/rag/query -H 'content-type: application/json' \
+                 -d '{"query":"hello","top_k":3}' > reply.json 2>/dev/null; then ok=yes; break; fi
+            sleep 1
+          done
+          kill $pid || true
+          cat reply.json || true
+          [ -n "$ok" ] || { cat serve.log; exit 1; }
+          grep -q '"answer"' reply.json
+      - name: Tables work in the full build and report a clear error in the lite one
+        run: |
+          cat > tables.nv <<'NV'
+          struct Row { id: i64, score: f32 }
+          fn count(t: Table<Row>) -> u64 { t.len() }
+          fn load() -> u64 { let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]); t.len() }
+          NV
+          if [ "${{ matrix.variant }}" = full ]; then
+            [ "$(novar run tables.nv load)" = 1 ]
+          else
+            ! novar run tables.nv load 2> err.txt
+            grep -q "not available in this build" err.txt
+          fi
