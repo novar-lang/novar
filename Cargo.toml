@@ -26,7 +26,7 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ntsation/novar"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

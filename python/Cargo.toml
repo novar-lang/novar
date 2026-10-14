@@ -5,7 +5,7 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ntsation/novar"
-rust-version = "1.85"
+rust-version = "1.88"
 publish = false
 
 # Built with maturin, on its own: the extension-module link flags do not suit `cargo test`
