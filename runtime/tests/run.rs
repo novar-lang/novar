@@ -1,6 +1,6 @@
-use telvax_runtime::{Interp, Value, embed_text};
 use serde_json::json;
 use std::sync::Arc;
+use telvax_runtime::{Interp, Value, embed_text};
 
 fn load(src: &str) -> Interp {
     let (ast, perrs) = telvax_parser::parse(src);

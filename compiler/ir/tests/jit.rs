@@ -849,7 +849,9 @@ fn break_and_continue_match_the_interpreter() {
         let want = interp
             .call(
                 f,
-                args.iter().map(|a| telvax_runtime::Value::Int(*a)).collect(),
+                args.iter()
+                    .map(|a| telvax_runtime::Value::Int(*a))
+                    .collect(),
             )
             .unwrap();
         let telvax_runtime::Value::Int(want) = want else {

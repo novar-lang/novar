@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use semver::{Version, VersionReq};
 use telvax_pkg::manifest::{Dependency, MANIFEST, validate_name};
 use telvax_pkg::registry::{self, DirRegistry, Registry};
 use telvax_pkg::{Manifest, Project};
-use semver::{Version, VersionReq};
 
 const USAGE: &str = "\
 tvpm: the Telvax package manager

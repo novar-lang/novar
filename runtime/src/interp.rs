@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 
+use serde_json::Value as Json;
 use telvax_hir::Ty;
 use telvax_hir::hir::{self, BinOp, ExprKind, Lit, LocalId, UnOp};
-use serde_json::Value as Json;
 
 use crate::std_impl;
 

@@ -15,10 +15,10 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use telvax_modules::Image;
-use telvax_runtime::Interp;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use telvax_modules::Image;
+use telvax_runtime::Interp;
 
 impl std::fmt::Debug for Worker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

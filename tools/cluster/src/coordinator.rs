@@ -10,9 +10,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use serde_json::{Value, json};
 use telvax_modules::Image;
 use telvax_runtime::Executor;
-use serde_json::{Value, json};
 
 /// How many times one item may be tried on workers that fail before the map gives up.
 const MAX_ATTEMPTS: u32 = 4;

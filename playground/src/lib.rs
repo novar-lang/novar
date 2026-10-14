@@ -7,9 +7,9 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
+use serde_json::{Value as Json, json};
 use telvax_lsp::analysis::Snapshot;
 use telvax_runtime::Interp;
-use serde_json::{Value as Json, json};
 use wasm_bindgen::prelude::*;
 
 /// How many evaluation steps a run may take before it is stopped.

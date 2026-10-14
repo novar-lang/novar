@@ -3,11 +3,11 @@
 #[cfg(feature = "llvm")]
 mod imp {
     use crate::{CliError, check, failed};
+    use std::path::Path;
     use telvax_codegen::{
         OptLevel, build_executable_with, build_object_with, llvm_ir_with, optimize_ir,
     };
     use telvax_mlir::JitValue;
-    use std::path::Path;
 
     fn report(err: telvax_codegen::BuildError, file: &str) -> CliError {
         if let telvax_codegen::BuildError::Diagnostics(diags) = &err {

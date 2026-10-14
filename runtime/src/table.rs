@@ -14,8 +14,8 @@ use arrow::array::{
 use arrow::compute::{cast, concat_batches, filter_record_batch};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use telvax_hir::{Prim, Ty};
 use serde_json::Value as Json;
+use telvax_hir::{Prim, Ty};
 
 use crate::interp::{Interp, RuntimeError};
 use crate::value::{StructVal, TableVal, TensorVal, Value};

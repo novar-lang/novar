@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use serde_json::json;
 use telvax_cluster::{ClusterExecutor, spawn};
 use telvax_modules::Image;
 use telvax_runtime::{Executor, Interp, Value};
-use serde_json::json;
 
 const PROGRAM: &str = r#"
     struct Job { id: i64, text: String }

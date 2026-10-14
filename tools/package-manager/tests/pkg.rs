@@ -3,10 +3,10 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use semver::Version;
 use telvax_pkg::manifest::Manifest;
 use telvax_pkg::registry::{self, DirRegistry, Registry};
 use telvax_pkg::{Lock, Project};
-use semver::Version;
 
 /// `TVPM_HOME` is process-wide; tests that install packages take turns.
 static HOME: Mutex<()> = Mutex::new(());

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use telvax_runtime::{Interp, TensorVal, Value};
 use serde_json::json;
+use telvax_runtime::{Interp, TensorVal, Value};
 
 fn load(src: &str) -> Interp {
     let (ast, perrs) = telvax_parser::parse(src);
