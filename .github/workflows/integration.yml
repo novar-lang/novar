@@ -89,3 +89,30 @@ jobs:
         env:
           NOVAR_TEST_PG_URL: postgresql://postgres:novar@localhost:5432/vectors
         run: cargo test -p novar_runtime --test live pgvector -- --nocapture
+
+  # Builds the Dockerfile that `novar build --serve` writes and calls the container. The image
+  # compiles Novar from the default branch, so this checks the template, not the pull request.
+  docker:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -q -p novar_cli
+      - name: Generate the Dockerfile
+        run: |
+          mkdir app
+          cp examples/rag-service.nv app/
+          target/debug/novar build --serve app/rag-service.nv -o app/service --dockerfile
+      - run: docker build -t novar-rag app
+      - name: Call the container
+        run: |
+          docker run -d --name rag -p 8080:8080 novar-rag
+          for i in $(seq 1 30); do
+            curl -fsS -XPOST localhost:8080/v1/rag/query -H 'content-type: application/json' \
+              -d '{"query":"hello","top_k":3}' && exit 0
+            sleep 1
+          done
+          docker logs rag
+          exit 1
