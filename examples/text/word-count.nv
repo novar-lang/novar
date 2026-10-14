@@ -1,0 +1,27 @@
+// Counts words in a text with a Map, then lists the most frequent ones.
+// Run from the repository root: novar run examples/text/word-count.nv main
+
+fn count_words(text: String) -> Map<String, i64> {
+    let counts: Map<String, i64> = std::map::new();
+    for word in text.to_lowercase().split(" ") {
+        if word.is_empty() { continue; }
+        let seen = counts.get(word).unwrap_or(0);
+        counts.insert(word, seen + 1);
+    }
+    counts
+}
+
+fn main() {
+    let text = "the quick brown fox jumps over the lazy dog the end";
+    let counts = count_words(text);
+    println(f"distinct words: {counts.len()}");
+    let the = counts.get("the").unwrap_or(0);
+    println(f"the: {the}");
+
+    let mut best = "";
+    let mut best_n = 0;
+    for (word, n) in counts.entries() {
+        if n > best_n { best = word; best_n = n; }
+    }
+    println(f"most frequent: {best} ({best_n})");
+}

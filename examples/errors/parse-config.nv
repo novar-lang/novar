@@ -1,0 +1,29 @@
+// Parses "key=value" lines with Result, Option, `?`, `if let` and tuples.
+// Run from the repository root: novar run examples/errors/parse-config.nv main
+
+fn split_pair(line: String) -> Result<(String, String), String> {
+    let parts = line.split("=");
+    if parts.len() != 2 { return Err(f"bad line: {line}"); }
+    Ok((parts[0].trim(), parts[1].trim()))
+}
+
+fn port_of(line: String) -> Result<i64, String> {
+    let (key, value) = split_pair(line)?;
+    if key != "port" { return Err(f"expected port, found {key}"); }
+    match value.to_int() {
+        Some(n) => Ok(n),
+        None => Err(f"not a number: {value}"),
+    }
+}
+
+fn main() {
+    for line in ["port = 8080", "host = local", "port = abc", "oops"] {
+        match port_of(line) {
+            Ok(p) => println(f"ok: {p}"),
+            Err(e) => println(f"error: {e}"),
+        }
+    }
+    if let Some(first) = "a b c".split(" ").first() {
+        println(f"first word: {first}");
+    }
+}

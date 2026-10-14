@@ -1,0 +1,26 @@
+// A small HTTP service that needs no external model: it validates the JSON body, scores the
+// text against two word lists and answers with JSON. Bad input becomes an HTTP 400.
+// Run: novar serve examples/service/sentiment.nv
+// Try: curl -XPOST localhost:8080/v1/sentiment -H 'content-type: application/json' -d '{"text":"great and good"}'
+
+import std::http::Status;
+
+struct Input { text: String }
+struct Output { label: String, score: i64 }
+
+fn score_of(text: String) -> i64 {
+    let mut score = 0;
+    for word in text.to_lowercase().split(" ") {
+        if ["good", "great", "love"].contains(word) { score += 1; }
+        if ["bad", "awful", "hate"].contains(word) { score -= 1; }
+    }
+    score
+}
+
+@endpoint(path = "/v1/sentiment", method = "POST")
+pub fn sentiment(input: Input) -> Result<Output, Status> {
+    if input.text.is_empty() { return Err(Status::BadRequest("empty text")); }
+    let score = score_of(input.text);
+    let label = if score > 0 { "positive" } else if score < 0 { "negative" } else { "neutral" };
+    Ok(Output { label: label, score: score })
+}
