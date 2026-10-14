@@ -46,10 +46,16 @@ fn f32s(shape: &[usize], data: &[f32]) -> Value {
     Value::Tensor(Arc::new(TensorVal::from_f32(shape.to_vec(), data.to_vec())))
 }
 
+/// A fresh path for every call. Tests run in parallel, and one that rewrote a shared file while
+/// another was reading it made a SQL test see an empty table now and then.
 fn scratch(name: &str) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!("novar-arrow-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    dir.join(name).to_string_lossy().into_owned()
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    dir.join(format!("{n}-{name}"))
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[test]
