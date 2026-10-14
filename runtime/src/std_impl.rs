@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::interp::{Interp, RuntimeError};
-use crate::value::{Db, Native, Query, StructVal, TensorVal, Value};
+use crate::value::{Db, MapKey, MapVal, Native, Query, StructVal, TensorVal, Value};
 use novar_hir::Ty;
 use novar_hir::stdlib::EMBEDDING_DIM;
 
@@ -140,6 +140,7 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
                 want_vec(&args[0])?.iter().take(n).cloned().collect(),
             ))
         }
+        "std::map::new" => Ok(Value::map(Vec::new())),
         "std::iter::count" => Ok(Value::Int(want_vec(&args[0])?.len() as i64)),
         "std::collect" => Ok(args[0].clone()),
         "std::io::print" => interp.write_out(&want_str(&args[0])?).map(|()| Value::Unit),
@@ -206,6 +207,20 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
             "replace" => Ok(Value::str(
                 s.replace(&*want_str(arg(&args, 0)?)?, &want_str(arg(&args, 1)?)?),
             )),
+            "find" => {
+                let needle = want_str(arg(&args, 0)?)?;
+                Ok(Value::option(
+                    s.find(&*needle).map(|i| Value::Int(i as i64)),
+                ))
+            }
+            "to_int" => Ok(Value::option(s.trim().parse::<i64>().ok().map(Value::Int))),
+            "to_float" => Ok(Value::option(
+                s.trim().parse::<f64>().ok().map(Value::Float),
+            )),
+            "chars" => Ok(Value::vec(
+                s.chars().map(|c| Value::str(c.to_string())).collect(),
+            )),
+            "lines" => Ok(Value::vec(s.lines().map(Value::str).collect())),
             "split" => {
                 let sep = want_str(arg(&args, 0)?)?;
                 if sep.is_empty() {
@@ -231,8 +246,37 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
                 let needle = arg(&args, 0)?;
                 Ok(Value::Bool(v.snapshot().iter().any(|x| x.equals(needle))))
             }
+            "first" => Ok(Value::option(v.get(0))),
+            "last" => Ok(Value::option(v.len().checked_sub(1).and_then(|i| v.get(i)))),
+            "pop" => Ok(Value::option(v.pop())),
+            "get" => match arg(&args, 0)? {
+                Value::Int(i) => Ok(Value::option(
+                    usize::try_from(*i).ok().and_then(|i| v.get(i)),
+                )),
+                other => err(format!(
+                    "`get` needs an integer index, found {}",
+                    other.type_name()
+                )),
+            },
+            "sort" => v.sort().map(|()| Value::Unit).map_err(RuntimeError::new),
+            "reverse" => {
+                v.reverse();
+                Ok(Value::Unit)
+            }
             _ => err(format!("Vec has no method `{name}`")),
         },
+        Value::Enum(e) if e.name == "Option" => match name {
+            "is_some" => Ok(Value::Bool(e.variant == "Some")),
+            "is_none" => Ok(Value::Bool(e.variant == "None")),
+            "unwrap" => e
+                .fields
+                .first()
+                .cloned()
+                .ok_or_else(|| RuntimeError::new("called `unwrap` on `None`")),
+            "unwrap_or" => Ok(e.fields.first().cloned().unwrap_or(arg(&args, 0)?.clone())),
+            _ => err(format!("Option has no method `{name}`")),
+        },
+        Value::Map(m) => map_method(m, name, &args),
         Value::Native(Native::Embedder { model, endpoint }) if name == "embed" => {
             let text = want_str(&args[0])?;
             match endpoint {
@@ -275,6 +319,28 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
         }
         Value::Native(Native::Db(db)) => db_method(db, name, args),
         other => err(format!("{} has no method `{name}`", other.type_name())),
+    }
+}
+
+fn map_method(m: &Arc<MapVal>, name: &str, args: &[Value]) -> Res {
+    let key = |i: usize| MapKey::from_value(arg(args, i)?).map_err(RuntimeError::new);
+    match name {
+        "insert" => {
+            m.insert(key(0)?, arg(args, 1)?.clone());
+            Ok(Value::Unit)
+        }
+        "get" => Ok(Value::option(m.get(&key(0)?))),
+        "remove" => Ok(Value::option(m.remove(&key(0)?))),
+        "contains_key" => Ok(Value::Bool(m.contains(&key(0)?))),
+        "len" => Ok(Value::Int(m.len() as i64)),
+        "is_empty" => Ok(Value::Bool(m.is_empty())),
+        "keys" => Ok(Value::vec(
+            m.entries().iter().map(|(k, _)| k.to_value()).collect(),
+        )),
+        "values" => Ok(Value::vec(
+            m.entries().into_iter().map(|(_, v)| v).collect(),
+        )),
+        _ => err(format!("Map has no method `{name}`")),
     }
 }
 

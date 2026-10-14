@@ -704,3 +704,124 @@ fn string_and_vec_methods() {
         Value::Bool(true)
     ));
 }
+
+#[test]
+fn option_values_and_matching() {
+    let src = "
+        fn parse(s: String) -> Option<i64> { s.to_int() }
+        fn describe(s: String) -> String {
+            match parse(s) { Some(n) => f\"number {n}\", None => \"not a number\" }
+        }
+        fn pick(flag: bool) -> Option<String> { if flag { Some(\"yes\") } else { None } }
+        fn first_or(v: Vec<i64>, d: i64) -> i64 { v.first().unwrap_or(d) }
+        fn last_plus(v: Vec<i64>) -> i64 { match v.last() { Some(x) => x + 1, None => 0 } }
+        fn counts(v: Vec<i64>) -> bool { v.get(1).is_some() && v.get(9).is_none() }
+        fn drain() -> i64 { let v = [1, 2, 3]; let mut total = 0; while v.len() > 0 { match v.pop() { Some(x) => { total += x; } None => { break; } } } total }
+        fn where_is(s: String) -> Option<u64> { s.find(\"lo\") }
+        fn sorted() -> Vec<i64> { let v = [3, 1, 2]; v.sort(); v }
+        fn reversed() -> Vec<String> { let v = \"c b a\".split(\" \"); v.sort(); v.reverse(); v }
+    ";
+    assert_eq!(
+        text(run(src, "describe", vec![Value::str("42")])),
+        "number 42"
+    );
+    assert_eq!(
+        text(run(src, "describe", vec![Value::str("x1")])),
+        "not a number"
+    );
+    assert_eq!(
+        run(src, "pick", vec![Value::Bool(true)]).to_json(),
+        json!("yes")
+    );
+    assert_eq!(
+        run(src, "pick", vec![Value::Bool(false)]).to_json(),
+        json!(null)
+    );
+    assert_eq!(
+        run(src, "pick", vec![Value::Bool(true)]).to_string(),
+        "Some(yes)"
+    );
+    let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
+    assert_eq!(int(run(src, "first_or", vec![ints(&[]), Value::Int(7)])), 7);
+    assert_eq!(
+        int(run(src, "first_or", vec![ints(&[5, 6]), Value::Int(7)])),
+        5
+    );
+    assert_eq!(int(run(src, "last_plus", vec![ints(&[5, 6])])), 7);
+    assert!(matches!(
+        run(src, "counts", vec![ints(&[1, 2])]),
+        Value::Bool(true)
+    ));
+    assert_eq!(int(run(src, "drain", vec![])), 6);
+    assert_eq!(
+        run(src, "where_is", vec![Value::str("hello")]).to_json(),
+        json!(3)
+    );
+    assert_eq!(run(src, "sorted", vec![]).to_json(), json!([1, 2, 3]));
+    assert_eq!(
+        run(src, "reversed", vec![]).to_json(),
+        json!(["c", "b", "a"])
+    );
+    let interp = load(src);
+    assert_eq!(
+        interp.call_json("pick", &[json!(true)]).unwrap(),
+        json!("yes")
+    );
+    assert_eq!(interp.call_json("parse", &[json!("9")]).unwrap(), json!(9));
+}
+
+#[test]
+fn maps() {
+    let src = "
+        fn word_counts(text: String) -> Map<String, i64> {
+            let counts: Map<String, i64> = std::map::new();
+            for w in text.split(\" \") {
+                let n = counts.get(w).unwrap_or(0);
+                counts.insert(w, n + 1);
+            }
+            counts
+        }
+        fn lookup(text: String, w: String) -> i64 {
+            match word_counts(text).get(w) { Some(n) => n, None => 0 - 1 }
+        }
+        fn size(text: String) -> u64 { word_counts(text).len() }
+        fn keys_of(text: String) -> Vec<String> { word_counts(text).keys() }
+        fn ids() -> Map<i64, String> {
+            let m: Map<i64, String> = std::map::new();
+            m.insert(2, \"two\");
+            m.insert(1, \"one\");
+            m.remove(2);
+            m
+        }
+        fn has(k: i64, m: Map<i64, String>) -> bool { m.contains_key(k) }
+    ";
+    let t = Value::str("a b a c a b");
+    assert_eq!(int(run(src, "lookup", vec![t.clone(), Value::str("a")])), 3);
+    assert_eq!(
+        int(run(src, "lookup", vec![t.clone(), Value::str("z")])),
+        -1
+    );
+    assert_eq!(int(run(src, "size", vec![t.clone()])), 3);
+    assert_eq!(
+        run(src, "keys_of", vec![t.clone()]).to_json(),
+        json!(["a", "b", "c"])
+    );
+    assert_eq!(
+        run(src, "word_counts", vec![t]).to_json(),
+        json!({"a": 3, "b": 2, "c": 1})
+    );
+    assert_eq!(run(src, "ids", vec![]).to_json(), json!({"1": "one"}));
+    let interp = load(src);
+    assert_eq!(
+        interp
+            .call_json("has", &[json!(5), json!({"5": "five"})])
+            .unwrap(),
+        json!(true)
+    );
+    assert_eq!(
+        interp
+            .call_json("has", &[json!(6), json!({"5": "five"})])
+            .unwrap(),
+        json!(false)
+    );
+}

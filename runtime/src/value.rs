@@ -23,6 +23,92 @@ pub struct EnumVal {
     pub fields: Vec<Value>,
 }
 
+/// A map key: strings, integers and booleans (what the checker allows), ordered so that
+/// iteration and JSON output are deterministic.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapKey {
+    Bool(bool),
+    Int(i64),
+    Str(Arc<str>),
+}
+
+impl MapKey {
+    pub fn from_value(v: &Value) -> Result<MapKey, String> {
+        match v {
+            Value::Bool(b) => Ok(MapKey::Bool(*b)),
+            Value::Int(i) => Ok(MapKey::Int(*i)),
+            Value::Str(s) => Ok(MapKey::Str(s.clone())),
+            other => Err(format!(
+                "a map key must be a String, an integer or a bool, found {}",
+                other.type_name()
+            )),
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self {
+            MapKey::Bool(b) => Value::Bool(*b),
+            MapKey::Int(i) => Value::Int(*i),
+            MapKey::Str(s) => Value::Str(s.clone()),
+        }
+    }
+
+    /// JSON objects only have string keys.
+    pub fn json_key(&self) -> String {
+        match self {
+            MapKey::Bool(b) => b.to_string(),
+            MapKey::Int(i) => i.to_string(),
+            MapKey::Str(s) => s.to_string(),
+        }
+    }
+}
+
+/// A `Map<K, V>`: a reference value like `Vec`, so copies share the same entries.
+#[derive(Debug, Default)]
+pub struct MapVal(RwLock<std::collections::BTreeMap<MapKey, Value>>);
+
+impl MapVal {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, std::collections::BTreeMap<MapKey, Value>> {
+        self.0.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, std::collections::BTreeMap<MapKey, Value>> {
+        self.0.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn insert(&self, k: MapKey, v: Value) {
+        self.write().insert(k, v);
+    }
+
+    pub fn get(&self, k: &MapKey) -> Option<Value> {
+        self.read().get(k).cloned()
+    }
+
+    pub fn remove(&self, k: &MapKey) -> Option<Value> {
+        self.write().remove(k)
+    }
+
+    pub fn contains(&self, k: &MapKey) -> bool {
+        self.read().contains_key(k)
+    }
+
+    pub fn len(&self) -> usize {
+        self.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.read().is_empty()
+    }
+
+    /// A copy of the entries in key order.
+    pub fn entries(&self) -> Vec<(MapKey, Value)> {
+        self.read()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
+
 /// Shared, mutable element storage of a `Vec`.
 #[derive(Debug, Default)]
 pub struct VecVal(RwLock<Vec<Value>>);
@@ -46,6 +132,40 @@ impl VecVal {
 
     pub fn get(&self, i: usize) -> Option<Value> {
         self.read().get(i).cloned()
+    }
+
+    pub fn pop(&self) -> Option<Value> {
+        self.0.write().unwrap_or_else(|e| e.into_inner()).pop()
+    }
+
+    pub fn reverse(&self) {
+        self.0.write().unwrap_or_else(|e| e.into_inner()).reverse();
+    }
+
+    /// Sorts numbers or strings in place (numbers compare as numbers, `NaN` last).
+    pub fn sort(&self) -> Result<(), String> {
+        let mut items = self.0.write().unwrap_or_else(|e| e.into_inner());
+        let ordering = |a: &Value, b: &Value| match (a, b) {
+            (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
+            (Value::Float(x), Value::Float(y)) => Ok(x.total_cmp(y)),
+            (Value::Int(x), Value::Float(y)) => Ok((*x as f64).total_cmp(y)),
+            (Value::Float(x), Value::Int(y)) => Ok(x.total_cmp(&(*y as f64))),
+            (Value::Str(x), Value::Str(y)) => Ok(x.cmp(y)),
+            (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
+            _ => Err(format!(
+                "cannot sort {} against {}: `sort` needs numbers, strings or bools",
+                a.type_name(),
+                b.type_name()
+            )),
+        };
+        let mut failure = None;
+        items.sort_by(|a, b| {
+            ordering(a, b).unwrap_or_else(|e| {
+                failure.get_or_insert(e);
+                std::cmp::Ordering::Equal
+            })
+        });
+        failure.map_or(Ok(()), Err)
     }
 
     /// Appends to the shared storage, so every copy of this `Vec` sees the new element.
@@ -102,6 +222,7 @@ pub enum Value {
     Vec(Arc<VecVal>),
     Struct(Arc<StructVal>),
     Enum(Arc<EnumVal>),
+    Map(Arc<MapVal>),
     Tensor(Arc<TensorVal>),
     Table(Arc<TableVal>),
     Ok(Box<Value>),
@@ -111,6 +232,33 @@ pub enum Value {
     /// A reference to a top-level function, by name (callable, and shippable to other machines).
     Func(Arc<str>),
     Native(Native),
+}
+
+impl Value {
+    pub fn some(v: Value) -> Value {
+        Value::option(Some(v))
+    }
+
+    pub fn none() -> Value {
+        Value::option(None)
+    }
+
+    /// `Option<T>` is an enum named `Option` with the variants `Some` and `None`.
+    pub fn option(v: Option<Value>) -> Value {
+        Value::Enum(Arc::new(EnumVal {
+            name: "Option".into(),
+            variant: if v.is_some() { "Some" } else { "None" }.into(),
+            fields: v.into_iter().collect(),
+        }))
+    }
+
+    pub fn map(entries: Vec<(MapKey, Value)>) -> Value {
+        let m = MapVal::default();
+        for (k, v) in entries {
+            m.insert(k, v);
+        }
+        Value::Map(Arc::new(m))
+    }
 }
 
 /// Objects provided by the runtime's standard library.
@@ -198,7 +346,9 @@ impl Value {
             Value::Str(_) => "String",
             Value::Vec(_) => "Vec",
             Value::Struct(_) => "struct",
+            Value::Enum(e) if e.name == "Option" => "Option",
             Value::Enum(_) => "enum",
+            Value::Map(_) => "Map",
             Value::Tensor(_) => "Tensor",
             Value::Table(_) => "Table",
             Value::Ok(_) | Value::Err(_) => "Result",
@@ -234,6 +384,13 @@ impl Value {
                     && a.variant == b.variant
                     && a.fields.iter().zip(&b.fields).all(|(x, y)| x.equals(y))
             }
+            (Value::Map(a), Value::Map(b)) => {
+                let (a, b) = (a.entries(), b.entries());
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(&b)
+                        .all(|((k1, v1), (k2, v2))| k1 == k2 && v1.equals(v2))
+            }
             (Value::Tensor(a), Value::Tensor(b)) => a == b,
             (Value::Table(a), Value::Table(b)) => a.schema == b.schema && a.batch == b.batch,
             (Value::Ok(a), Value::Ok(b)) | (Value::Err(a), Value::Err(b)) => a.equals(b),
@@ -257,6 +414,17 @@ impl Value {
                 }
                 Json::Object(m)
             }
+            // `Option<T>` is `null` for `None` and the bare value for `Some`.
+            Value::Enum(e) if e.name == "Option" => match e.fields.first() {
+                Some(v) => v.to_json(),
+                None => Json::Null,
+            },
+            Value::Map(m) => Json::Object(
+                m.entries()
+                    .into_iter()
+                    .map(|(k, v)| (k.json_key(), v.to_json()))
+                    .collect(),
+            ),
             Value::Enum(e) => match e.fields.as_slice() {
                 [] => Json::String(e.variant.clone()),
                 [one] => serde_json::json!({ e.variant.clone(): one.to_json() }),
@@ -328,6 +496,20 @@ impl fmt::Display for Value {
                     write!(f, "{k}: {v}")?;
                 }
                 f.write_str(" }")
+            }
+            Value::Enum(e) if e.name == "Option" => match e.fields.first() {
+                Some(v) => write!(f, "Some({v})"),
+                None => f.write_str("None"),
+            },
+            Value::Map(m) => {
+                f.write_str("{")?;
+                for (i, (k, v)) in m.entries().iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}: {v}", k.to_value())?;
+                }
+                f.write_str("}")
             }
             Value::Enum(e) => {
                 write!(f, "{}::{}", e.name, e.variant)?;
@@ -439,6 +621,35 @@ pub fn from_json(
                 name: name.clone(),
                 fields: out,
             })))
+        }
+        Ty::Option(inner) => {
+            if json.is_null() {
+                Ok(Value::none())
+            } else {
+                from_json(inner, json, structs, enums).map(Value::some)
+            }
+        }
+        Ty::Map(key_ty, value_ty) => {
+            let obj = json.as_object().ok_or_else(|| bad("an object"))?;
+            let mut entries = Vec::with_capacity(obj.len());
+            for (k, v) in obj {
+                let key = match &**key_ty {
+                    Ty::Prim(Prim::Str) => MapKey::Str(k.as_str().into()),
+                    Ty::Prim(Prim::Bool) => {
+                        MapKey::Bool(k.parse().map_err(|_| format!("`{k}` is not a bool key"))?)
+                    }
+                    Ty::Prim(_) => MapKey::Int(
+                        k.parse()
+                            .map_err(|_| format!("`{k}` is not an integer key"))?,
+                    ),
+                    _ => MapKey::Str(k.as_str().into()),
+                };
+                entries.push((
+                    key,
+                    from_json(value_ty, v, structs, enums).map_err(|e| format!("{k}: {e}"))?,
+                ));
+            }
+            Ok(Value::map(entries))
         }
         Ty::Enum(name) => {
             let variants = enums
