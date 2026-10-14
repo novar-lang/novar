@@ -708,9 +708,11 @@ fn json_parse_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     match expected {
         Ty::Result(_, e) if e.accepts(&s()) => Ok(expected.clone()),
         Ty::Unknown => Ok(Ty::Unknown),
-        _ => Err("cannot infer the type of `std.json.parse`; annotate the result, e.g. \
+        _ => Err(
+            "cannot infer the type of `std.json.parse`; annotate the result, e.g. \
                   `let q: Result[Query, Text] = std.json.parse(body)`"
-            .to_string()),
+                .to_string(),
+        ),
     }
 }
 
