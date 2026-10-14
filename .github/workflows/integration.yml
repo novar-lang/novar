@@ -26,6 +26,7 @@ jobs:
       core: ${{ steps.areas.outputs.core }}
       python: ${{ steps.areas.outputs.python }}
       vscode: ${{ steps.areas.outputs.vscode }}
+      docker: ${{ steps.areas.outputs.docker }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -114,7 +115,7 @@ jobs:
   # compiles Telvax from the branch under test (the default branch on pushes).
   docker:
     needs: changes
-    if: needs.changes.outputs.core == 'true'
+    if: needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

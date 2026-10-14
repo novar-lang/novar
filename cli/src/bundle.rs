@@ -88,11 +88,15 @@ ARG TELVAX_REF=main
 RUN apt-get update && apt-get install -y --no-install-recommends git pkg-config libssl-dev ca-certificates \\
     && rm -rf /var/lib/apt/lists/*
 RUN rustup toolchain install nightly --profile minimal && rustup default nightly
-RUN git clone --depth 1 --branch ${{TELVAX_REF}} ${{TELVAX_REPO}} /telvax \\
-    && cargo build --release --manifest-path /telvax/Cargo.toml -p telvax_cli
+RUN git clone --depth 1 --branch ${{TELVAX_REF}} ${{TELVAX_REPO}} /telvax
+# The caches make a rebuild take seconds instead of minutes; the binary is copied out of them.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \\
+    --mount=type=cache,target=/telvax/target \\
+    cargo build --release --manifest-path /telvax/Cargo.toml -p telvax_cli \\
+    && cp /telvax/target/release/telvax /usr/local/bin/telvax
 WORKDIR /app
 COPY {program} .
-RUN mkdir -p /out && /telvax/target/release/telvax build --serve {program} -o /out/service
+RUN mkdir -p /out && telvax build --serve {program} -o /out/service
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /out/service /service
