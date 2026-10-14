@@ -90,8 +90,8 @@ pub struct Completion {
 }
 
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "struct", "pub", "if", "else", "for", "in", "while", "return", "import",
-    "true", "false",
+    "fn", "let", "mut", "struct", "pub", "if", "else", "for", "in", "while", "return", "break",
+    "continue", "import", "true", "false",
 ];
 const PRIMS: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "String",
@@ -771,6 +771,7 @@ impl Collector {
                     self.expr(v);
                 }
             }
+            ExprKind::Break | ExprKind::Continue => {}
             ExprKind::FString(parts) => {
                 for p in parts {
                     if let hir::FPart::Expr(x) = p {

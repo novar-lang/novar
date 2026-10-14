@@ -68,7 +68,7 @@
       "patterns": [
         {
           "name": "keyword.control.novar",
-          "match": "\\b(?:if|else|for|while|in|return)\\b"
+          "match": "\\b(?:if|else|for|while|in|return|break|continue)\\b"
         },
         {
           "name": "storage.modifier.novar",
