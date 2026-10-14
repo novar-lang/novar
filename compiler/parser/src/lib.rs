@@ -1163,7 +1163,29 @@ where
             span: rng(e.span()),
         });
 
-    let param = just(Token::Mut)
+    // `self` and `mut self` take the type of the `impl` they sit in.
+    let self_param = just(Token::Mut)
+        .or_not()
+        .then(select! { Token::Ident(s) if s == "self" => s.to_string() })
+        .map_with(|(m, name), e| {
+            let span = rng(e.span());
+            Param {
+                mutable: m.is_some(),
+                name: Ident {
+                    node: name,
+                    span: span.clone(),
+                },
+                ty: Type {
+                    path: vec![Ident {
+                        node: "Self".into(),
+                        span: span.clone(),
+                    }],
+                    args: Vec::new(),
+                    span,
+                },
+            }
+        });
+    let param = self_param.or(just(Token::Mut)
         .or_not()
         .then(ident())
         .then_ignore(just(Token::Colon))
@@ -1172,7 +1194,7 @@ where
             mutable: m.is_some(),
             name,
             ty,
-        });
+        }));
 
     let func = attr
         .repeated()
@@ -1201,12 +1223,36 @@ where
             })
         });
 
+    let impl_ = just(Token::Impl)
+        .ignore_then(ident())
+        .then(
+            func.clone()
+                .repeated()
+                .collect::<Vec<_>>()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+        )
+        .map_with(|(ty, items), e| {
+            let fns = items
+                .into_iter()
+                .filter_map(|i| match i {
+                    Item::Fn(f) => Some(f),
+                    _ => None,
+                })
+                .collect();
+            Item::Impl(Impl {
+                ty,
+                fns,
+                span: rng(e.span()),
+            })
+        });
+
     let global_let = let_stmt(expr).map(Item::Let);
 
     let item_start = one_of([
         Token::Import,
         Token::Struct,
         Token::Enum,
+        Token::Impl,
         Token::Fn,
         Token::Pub,
         Token::At,
@@ -1214,7 +1260,7 @@ where
     ])
     .ignored();
 
-    choice((import, struct_, enum_, func, global_let))
+    choice((import, struct_, enum_, impl_, func, global_let))
         .recover_with(skip_then_retry_until(any().ignored(), item_start))
         .repeated()
         .collect::<Vec<_>>()

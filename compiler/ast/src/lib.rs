@@ -26,6 +26,7 @@ pub enum Item {
     Let(Let),
     Struct(Struct),
     Enum(Enum),
+    Impl(Impl),
     Fn(Fn),
 }
 
@@ -59,6 +60,15 @@ pub struct Struct {
 pub struct Field {
     pub name: Ident,
     pub ty: Type,
+}
+
+/// `impl Point { fn norm(self) -> f64 { .. } }`: methods and associated functions of a type. A
+/// function whose first parameter is `self` is a method; the others are called as `Point::new(..)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Impl {
+    pub ty: Ident,
+    pub fns: Vec<Fn>,
+    pub span: Span,
 }
 
 /// `enum Shape { Circle(f64), Rect(f64, f64), Empty }`

@@ -32,6 +32,8 @@ pub enum Token<'src> {
     Pub,
     #[token("match")]
     Match,
+    #[token("impl")]
+    Impl,
     #[token("return")]
     Return,
     #[token("break")]
@@ -159,6 +161,7 @@ impl std::fmt::Display for Token<'_> {
             Enum => "enum",
             Pub => "pub",
             Match => "match",
+            Impl => "impl",
             Return => "return",
             Break => "break",
             Continue => "continue",
