@@ -12,6 +12,8 @@ use novar_runtime::{Interp, Value};
 const USAGE: &str = "\
 usage:
   novar check <file.nv>
+  novar lint <file.nv> [--deny-warnings]                    unused variables, `mut` and functions
+  novar fmt [--check] <file.nv>...                          format in place (`-` reads stdin)
   novar run <file.nv> <function> [args...] [--quantize int8] [--device gpu]
   novar lsp                                                language server over stdio
   novar worker [--listen host:port] [--token T]            run calls for a coordinator
@@ -49,6 +51,8 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         .collect::<Vec<_>>()
         .as_slice()
     {
+        ["fmt", rest @ ..] => fmt(rest),
+        ["lint", file, rest @ ..] => lint(file, rest),
         ["--version" | "-V" | "version"] => {
             println!("novar {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -286,4 +290,75 @@ fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
         .or_else(|e| failed(e.to_string()))?;
     println!("{value}");
     Ok(())
+}
+
+/// `novar fmt [--check] <file>...`: rewrites files in place, or only reports with `--check`.
+fn fmt(args: &[&str]) -> Result<(), CliError> {
+    let check = args.contains(&"--check");
+    let files: Vec<&str> = args.iter().copied().filter(|a| *a != "--check").collect();
+    if files.is_empty() {
+        return Err(CliError::Usage);
+    }
+    let mut unformatted = 0;
+    for file in files {
+        if file == "-" {
+            let mut src = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut src)
+                .or_else(|e| failed(format!("cannot read stdin: {e}")))?;
+            print!("{}", novar_fmt::format(&src).or_else(failed)?);
+            continue;
+        }
+        let src = std::fs::read_to_string(file)
+            .or_else(|e| failed(format!("cannot read `{file}`: {e}")))?;
+        let formatted = novar_fmt::format(&src).or_else(|e| failed(format!("`{file}`: {e}")))?;
+        if formatted == src {
+            continue;
+        }
+        if check {
+            println!("would reformat {file}");
+            unformatted += 1;
+        } else {
+            std::fs::write(file, &formatted)
+                .or_else(|e| failed(format!("cannot write `{file}`: {e}")))?;
+            println!("formatted {file}");
+        }
+    }
+    if unformatted > 0 {
+        return failed(format!("{unformatted} file(s) need formatting"));
+    }
+    Ok(())
+}
+
+/// `novar lint <file> [--deny-warnings]`: type-checks, then reports unused code.
+fn lint(file: &str, flags: &[&str]) -> Result<(), CliError> {
+    let deny = match flags {
+        [] => false,
+        ["--deny-warnings"] => true,
+        _ => return Err(CliError::Usage),
+    };
+    let path = Path::new(file);
+    let deps = match novar_pkg::Project::discover(path) {
+        Ok(Some(project)) => project.dependency_packages().or_else(failed)?,
+        Ok(None) => Vec::new(),
+        Err(e) => return failed(e),
+    };
+    let loaded = novar_modules::load(path, &deps).or_else(failed)?;
+    let (hir, _) = lower_loaded(&loaded)?;
+    let warnings = novar_lint::lint(&hir);
+    eprint!(
+        "{}",
+        loaded
+            .map
+            .render(&warnings, std::io::stderr().is_terminal())
+    );
+    if warnings.is_empty() {
+        eprintln!("`{file}`: no warnings");
+        return Ok(());
+    }
+    eprintln!("`{file}`: {} warning(s)", warnings.len());
+    if deny {
+        Err(CliError::Failed(String::new()))
+    } else {
+        Ok(())
+    }
 }

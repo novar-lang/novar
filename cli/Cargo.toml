@@ -16,6 +16,8 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+novar_lint = { version = "0.0.1", path = "../tools/linter" }
+novar_fmt = { version = "0.0.1", path = "../tools/formatter" }
 novar_accel = { version = "0.0.1", path = "../compiler/accel" }
 novar_codegen = { version = "0.0.1", path = "../compiler/codegen", optional = true }
 novar_mlir = { version = "0.0.1", path = "../compiler/ir", optional = true }
