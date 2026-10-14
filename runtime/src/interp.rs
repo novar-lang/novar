@@ -751,8 +751,22 @@ impl Interp {
                             s.name
                         )))
                     }),
+                Value::Tuple(items) => name
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| items.get(i).cloned())
+                    .ok_or_else(|| {
+                        Ctrl::Fail(RuntimeError::new(format!("tuple has no part `{name}`")))
+                    }),
                 other => fail(format!("{} has no field `{name}`", other.type_name())),
             },
+            ExprKind::Tuple(items) => {
+                let mut values = Vec::with_capacity(items.len());
+                for item in items {
+                    values.push(self.eval(item, ctx)?);
+                }
+                Ok(Value::Tuple(Arc::new(values)))
+            }
             ExprKind::Call { callee, args } => self.call_expr(callee, args, &e.ty, ctx),
             ExprKind::Unary { op, expr } => match (op, self.eval(expr, ctx)?) {
                 (UnOp::Neg, Value::Int(i)) => i.checked_neg().map(Value::Int).ok_or_else(overflow),
@@ -835,6 +849,18 @@ impl Interp {
                 }
                 fail("no `match` arm matched")
             }
+            ExprKind::Try(inner) => match self.eval(inner, ctx)? {
+                Value::Ok(v) => Ok(*v),
+                Value::Err(e) => Err(Ctrl::Return(Value::Err(e))),
+                Value::Enum(e) if e.name == "Option" => match e.fields.first() {
+                    Some(v) => Ok(v.clone()),
+                    None => Err(Ctrl::Return(Value::none())),
+                },
+                other => fail(format!(
+                    "`?` needs a Result or an Option, found {}",
+                    other.type_name()
+                )),
+            },
             ExprKind::Break => Err(Ctrl::Break),
             ExprKind::Continue => Err(Ctrl::Continue),
         }
@@ -1037,6 +1063,13 @@ fn match_pattern(pat: &hir::Pat, value: &Value, env: &mut Env) -> bool {
         (hir::Pat::Bind(local), v) => {
             env.insert(local.id, v.clone());
             true
+        }
+        (hir::Pat::Tuple(parts), Value::Tuple(items)) => {
+            parts.len() == items.len()
+                && parts
+                    .iter()
+                    .zip(items.iter())
+                    .all(|(p, v)| match_pattern(p, v, env))
         }
         (hir::Pat::Lit(l), v) => match (l, v) {
             (Lit::Int(a), Value::Int(b)) => i128::from(*b) == i128::from(*a),
