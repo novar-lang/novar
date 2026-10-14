@@ -180,6 +180,24 @@ fn first_over(limit: i32) -> i32:
 variant is its name (`"Empty"`), one with values is `{"Circle": 2.0}` or `{"Rect": [2.0, 3.0]}`.
 Enums run in the interpreter; the native backend does not compile them yet.
 
+## Tests
+
+A function called `test_...` without arguments is a test. `assert(cond)` and `assert_eq(a, b)` stop
+it with a message when they fail:
+
+```telvax
+fn double(x: Int) -> Int:
+    x * 2
+
+fn test_double():
+    assert_eq(double(2), 4)
+```
+
+```sh
+telvax test file.tvx           # run them all, exit 1 if one fails
+telvax test file.tvx double    # only the tests whose name contains `double`
+```
+
 ## Formatting and linting
 
 ```sh

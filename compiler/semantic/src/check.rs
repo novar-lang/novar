@@ -136,6 +136,8 @@ fn prelude(name: &str) -> Option<Vec<String>> {
     let path: &[&str] = match name {
         // `print` ends the line, as in Python. `std.io.print` writes without one.
         "print" => &["std", "io", "println"],
+        "assert" => &["std", "test", "assert"],
+        "assert_eq" => &["std", "test", "assert_eq"],
         "read_csv" => &["std", "table", "read_csv"],
         "read_parquet" => &["std", "table", "read_parquet"],
         _ => return None,

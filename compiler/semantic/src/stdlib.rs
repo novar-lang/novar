@@ -692,6 +692,24 @@ fn read_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     expect_table(expected, "a table reader")
 }
 
+fn test_assert(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &Ty::bool())?;
+    Ok(Ty::Unit)
+}
+
+fn test_assert_eq(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    if args[0].accepts(&args[1]) || args[1].accepts(&args[0]) {
+        Ok(Ty::Unit)
+    } else {
+        Err(format!(
+            "cannot compare `{}` with `{}`: they are different types",
+            args[0], args[1]
+        ))
+    }
+}
+
 fn env_get(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     want(args, 0, &s())?;
@@ -930,6 +948,8 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         sig_expected(read_check, read_result),
     ),
     ("std::table::sql", sig_expected(sql_check, sql_result)),
+    ("std::test::assert", sig(test_assert)),
+    ("std::test::assert_eq", sig(test_assert_eq)),
     ("std::env::get", sig(env_get)),
     ("std::fs::read", sig(fs_read)),
     ("std::fs::write", sig(fs_write)),

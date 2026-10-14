@@ -77,6 +77,20 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
         return crate::table::call(interp, path, &args, result);
     }
     match path {
+        "std::test::assert" => match &args[0] {
+            Value::Bool(true) => Ok(Value::Unit),
+            _ => err("assertion failed"),
+        },
+        "std::test::assert_eq" => {
+            if args[0].equals(&args[1]) {
+                Ok(Value::Unit)
+            } else {
+                err(format!(
+                    "assertion failed: left is `{}`, right is `{}`",
+                    args[0], args[1]
+                ))
+            }
+        }
         "std::env::get" => Ok(match std::env::var(&*want_str(&args[0])?) {
             Ok(v) => Value::some(Value::str(v)),
             Err(_) => Value::none(),
