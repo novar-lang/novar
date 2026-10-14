@@ -16,22 +16,22 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-novar_accel = { version = "0.1.0", path = "../compiler/accel" }
-novar_codegen = { version = "0.1.0", path = "../compiler/codegen", optional = true }
-novar_mlir = { version = "0.1.0", path = "../compiler/ir", optional = true }
+novar_accel = { version = "0.0.1", path = "../compiler/accel" }
+novar_codegen = { version = "0.0.1", path = "../compiler/codegen", optional = true }
+novar_mlir = { version = "0.0.1", path = "../compiler/ir", optional = true }
 axum = "0.8.9"
-novar_diagnostics = { version = "0.1.0", path = "../compiler/diagnostics" }
-novar_hir = { version = "0.1.0", path = "../compiler/semantic" }
-novar_parser = { version = "0.1.0", path = "../compiler/parser" }
-novar_runtime = { version = "0.1.0", path = "../runtime" }
-novar_server = { version = "0.1.0", path = "../server" }
+novar_diagnostics = { version = "0.0.1", path = "../compiler/diagnostics" }
+novar_hir = { version = "0.0.1", path = "../compiler/semantic" }
+novar_parser = { version = "0.0.1", path = "../compiler/parser" }
+novar_runtime = { version = "0.0.1", path = "../runtime" }
+novar_server = { version = "0.0.1", path = "../server" }
 serde_json = "1.0.154"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "macros", "signal"] }
-novar_lsp = { version = "0.1.0", path = "../tools/lsp" }
-novar_pkg = { version = "0.1.0", path = "../tools/package-manager" }
-novar_modules = { version = "0.1.0", path = "../compiler/modules" }
+novar_lsp = { version = "0.0.1", path = "../tools/lsp" }
+novar_pkg = { version = "0.0.1", path = "../tools/package-manager" }
+novar_modules = { version = "0.0.1", path = "../compiler/modules" }
 serde = { version = "1.0.229", features = ["derive"] }
-novar_cluster = { version = "0.1.0", path = "../tools/cluster" }
+novar_cluster = { version = "0.0.1", path = "../tools/cluster" }
 
 [features]
 # Run tensor operations on the GPU (`--device gpu`) through wgpu.
@@ -40,5 +40,5 @@ gpu = ["novar_runtime/gpu"]
 llvm = ["novar_accel/llvm", "dep:novar_codegen", "dep:novar_mlir", "novar_codegen/llvm", "novar_mlir/llvm"]
 
 [dev-dependencies]
-novar_pkg = { version = "0.1.0", path = "../tools/package-manager" }
+novar_pkg = { version = "0.0.1", path = "../tools/package-manager" }
 serde_json = "1.0.154"

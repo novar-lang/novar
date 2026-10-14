@@ -17,8 +17,8 @@ llvm = ["dep:inkwell"]
 
 [dependencies]
 inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-prefer-dynamic", "target-nvptx"], optional = true }
-novar_diagnostics = { version = "0.1.0", path = "../diagnostics" }
-novar_hir = { version = "0.1.0", path = "../semantic" }
+novar_diagnostics = { version = "0.0.1", path = "../diagnostics" }
+novar_hir = { version = "0.0.1", path = "../semantic" }
 
 [dev-dependencies]
-novar_parser = { version = "0.1.0", path = "../parser" }
+novar_parser = { version = "0.0.1", path = "../parser" }
