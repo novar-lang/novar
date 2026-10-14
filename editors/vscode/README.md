@@ -11,8 +11,15 @@ Language support for [Novar](https://github.com/ntsation/novar), powered by the 
 
 ## Setup
 
-Install the `novar` executable (`cargo install --path cli` from the repository) so that `novar lsp` is on your `PATH`,
-or point the `novar.server.path` setting at it.
+Install the `novar` executable so that `novar lsp` is on your `PATH`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.sh | sh        # Linux, macOS
+irm https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.ps1 | iex             # Windows (PowerShell)
+```
+
+or point the `novar.server.path` setting at the executable. Each GitHub release also carries the
+`.vsix`, which installs with `code --install-extension novar-<version>.vsix`.
 
 | Setting | Default | |
 |---|---|---|
