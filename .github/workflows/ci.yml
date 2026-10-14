@@ -17,7 +17,24 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.areas.outputs.core }}
+      python: ${{ steps.areas.outputs.python }}
+      vscode: ${{ steps.areas.outputs.vscode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: areas
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: scripts/changed-areas.sh >> "$GITHUB_OUTPUT"
+
   check:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,6 +49,8 @@ jobs:
         run: cargo run -q -p telvax_cli -- fmt --check examples/rag-service.tvx examples/basics/primes.tvx examples/basics/sieve.tvx examples/hello-world/hello.tvx examples/dataframe/sales.tvx
 
   deny:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +58,8 @@ jobs:
 
   # Native backend (MLIR + LLVM 22) and the PTX generator: tests and lints with the `llvm` feature.
   llvm:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -56,6 +77,8 @@ jobs:
   # The GPU backend compiles everywhere; running its tests needs a GPU adapter, which hosted
   # runners do not have, so this job only builds and lints it.
   gpu:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,6 +91,8 @@ jobs:
 
   # Windows runs the same tests as Linux.
   windows:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -77,6 +102,8 @@ jobs:
 
   # The ~10 MB build without Arrow / DataFusion must keep compiling and passing its tests.
   lite:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -87,6 +114,8 @@ jobs:
   # The same tests as Linux and Windows, on macOS (Apple silicon). The runners have no GPU, so
   # the GPU tests do not run here either.
   macos:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -97,6 +126,8 @@ jobs:
   # Line coverage of the Rust workspace. The number goes to the job summary, and the job fails when
   # it drops below the floor in scripts/coverage-floor.txt.
   coverage:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -111,6 +142,8 @@ jobs:
   # Speed and memory gates: the RAG service must keep its overhead and footprint inside the alpha
   # targets (p99 under 15 ms, RSS under 30 MB) and the interpreter must not get much slower.
   benchmark:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
