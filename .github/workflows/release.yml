@@ -1,23 +1,67 @@
 name: Release
 
-# Pushing a tag such as v0.0.1 builds the binaries and attaches them to a GitHub release.
+# A push to main that raises `version` in the root Cargo.toml tags the commit `v<version>` and
+# publishes a release with binaries. Pushing a `v*` tag by hand (or running the workflow) does the
+# same for that tag.
 on:
   push:
+    branches: [main]
+    paths: [Cargo.toml]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      publish: ${{ steps.tag.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: tag
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
+          [ -n "$version" ] || { echo "no workspace version found" >&2; exit 1; }
+          tag="v$version"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            tag="${GITHUB_REF_NAME}"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists, nothing to release"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "Novar $version"
+            git push origin "$tag"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
     strategy:
       matrix:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p novar_cli -p novar_pkg
@@ -33,15 +77,25 @@ jobs:
           path: novar-${{ matrix.target }}.tar.gz*
 
   publish:
-    needs: build
+    needs: [plan, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.tag }}
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Release notes from the changelog
+        run: |
+          version="${{ needs.plan.outputs.tag }}"
+          version="${version#v}"
+          awk -v v="$version" '$0 ~ "^## "v"( |$)" {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $version" > notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.plan.outputs.tag }}
           files: dist/*
+          body_path: notes.md
           prerelease: true
-          generate_release_notes: true

@@ -9,6 +9,8 @@ prefix="${NOVAR_HOME:-$HOME/.novar}"
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) target="aarch64-apple-darwin" ;;
+  Darwin-x86_64) target="x86_64-apple-darwin" ;;
+  Linux-aarch64 | Linux-arm64) target="aarch64-unknown-linux-gnu" ;;
   Linux-x86_64) target="x86_64-unknown-linux-gnu" ;;
   *) target="" ;;
 esac
