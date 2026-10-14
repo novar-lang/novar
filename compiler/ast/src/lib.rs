@@ -93,6 +93,8 @@ pub enum PatKind {
     /// A lowercase name that binds the matched value.
     Bind(String),
     Lit(Lit),
+    /// `(a, b)`
+    Tuple(Vec<Pattern>),
     /// `Shape::Circle(r)`, `Shape::Empty`, `Ok(v)`, `Err(e)`
     Variant {
         path: Vec<Ident>,
@@ -210,6 +212,10 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Break,
     Continue,
+    /// `expr?`: the value of an `Ok` / `Some`, or return the `Err` / `None` from the function.
+    Try(Box<Expr>),
+    /// `(a, b, c)`: two or more values.
+    Tuple(Vec<Expr>),
     Match {
         scrutinee: Box<Expr>,
         arms: Vec<Arm>,
