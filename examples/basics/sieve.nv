@@ -4,8 +4,8 @@
 fn main() -> i32 {
     // Vec has no constructor for "n copies" yet, so start from a literal.
     let mut is_prime = [true, true, true, true, true, true, true, true, true, true,
-                        true, true, true, true, true, true, true, true, true, true,
-                        true, true, true, true, true, true, true, true, true, true];
+        true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true];
     let n = is_prime.len();
     is_prime[0] = false;
     is_prime[1] = false;
