@@ -1129,3 +1129,43 @@ fn impl_blocks_are_checked() {
         "defined twice",
     );
 }
+
+#[test]
+fn traits_are_checked() {
+    let base = "trait Shape { fn area(self) -> f64; fn name(self) -> String { \"shape\" } }
+        struct Sq { s: f64 }";
+    assert_clean(&format!(
+        "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ self.s }} }}
+         fn total(v: Vec<Shape>) -> f64 {{ v.map(|x| x.area()).sum() }}
+         fn make() -> Vec<Shape> {{ [Sq {{ s: 1.0 }}] }}"
+    ));
+    assert_err(
+        &format!("{base} impl Shape for Sq {{ fn name(self) -> String {{ \"sq\" }} }}"),
+        "is missing the method `area`",
+    );
+    assert_err(
+        &format!("{base} impl Shape for Sq {{ fn area(self) -> i64 {{ 1 }} }}"),
+        "has the signature",
+    );
+    assert_err(
+        &format!(
+            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} fn extra(self) {{}} }}"
+        ),
+        "is not a method of the trait `Shape`",
+    );
+    assert_err(
+        "struct S {} impl Missing for S { fn f(self) {} }",
+        "cannot find the trait `Missing`",
+    );
+    assert_err(
+        &format!("{base} struct Other {{ x: i64 }} fn f() -> Shape {{ Other {{ x: 1 }} }}"),
+        "mismatched types",
+    );
+    assert_err(
+        &format!(
+            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} }} fn f(s: Shape) -> f64 {{ s.volume() }}"
+        ),
+        "has no method `volume`",
+    );
+    assert_err("fn f() -> i32 ;", "needs a body");
+}

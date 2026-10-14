@@ -27,6 +27,13 @@ pub(crate) struct Checker {
     anon_structs: Vec<hir::StructDef>,
     /// While checking the functions of an `impl`, the type it is for (what `Self` means).
     impl_ty: Option<String>,
+    /// Declared traits: the names of their methods and whether each is required (no body).
+    traits: HashMap<String, Vec<(String, bool)>>,
+    /// `impl Trait for Type` pairs.
+    impls: HashSet<(String, String)>,
+    impl_spans: Vec<(String, String, Span)>,
+    /// For a method defined in `impl Trait for Type`, the trait it belongs to.
+    impl_of_fn: HashMap<String, String>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
@@ -226,6 +233,23 @@ impl Checker {
                 }
             }
         }
+        for item in &program.items {
+            if let ast::Item::Trait(t) = item {
+                if !declared.insert(t.name.node.clone()) {
+                    self.err(
+                        t.name.span.clone(),
+                        format!("`{}` is defined twice", t.name.node),
+                    );
+                } else {
+                    let methods = t
+                        .fns
+                        .iter()
+                        .map(|f| (f.name.node.clone(), f.required))
+                        .collect();
+                    self.traits.insert(t.name.node.clone(), methods);
+                }
+            }
+        }
         let mut done = HashSet::new();
         for item in &program.items {
             if let ast::Item::Struct(s) = item {
@@ -292,6 +316,15 @@ impl Checker {
         for item in &program.items {
             match item {
                 ast::Item::Fn(f) => fns.push((f.clone(), None)),
+                ast::Item::Trait(t) => {
+                    for f in &t.fns {
+                        let mut f = f.clone();
+                        f.name.node = format!("{}::{}", t.name.node, f.name.node);
+                        self.methods
+                            .insert(f.name.node.clone(), t.name.node.clone());
+                        fns.push((f, Some(t.name.node.clone())));
+                    }
+                }
                 ast::Item::Impl(imp) => {
                     let ty = imp.ty.node.clone();
                     if !self.struct_fields.contains_key(&ty) && !self.enums.contains_key(&ty) {
@@ -301,9 +334,25 @@ impl Checker {
                         );
                         continue;
                     }
+                    if let Some(tr) = &imp.trait_name {
+                        if self.traits.contains_key(&tr.node) {
+                            self.impls.insert((tr.node.clone(), ty.clone()));
+                            self.impl_spans
+                                .push((tr.node.clone(), ty.clone(), imp.span.clone()));
+                        } else {
+                            self.err(
+                                tr.span.clone(),
+                                format!("cannot find the trait `{}`", tr.node),
+                            );
+                            continue;
+                        }
+                    }
                     for f in &imp.fns {
                         let mut f = f.clone();
                         f.name.node = format!("{ty}::{}", f.name.node);
+                        if let Some(tr) = &imp.trait_name {
+                            self.impl_of_fn.insert(f.name.node.clone(), tr.node.clone());
+                        }
                         self.methods.insert(f.name.node.clone(), ty.clone());
                         fns.push((f, Some(ty.clone())));
                     }
@@ -322,12 +371,22 @@ impl Checker {
                 );
                 continue;
             }
+            let in_trait = impl_ty
+                .as_ref()
+                .is_some_and(|t| self.traits.contains_key(t));
+            if f.required && !in_trait {
+                self.err(
+                    f.name.span.clone(),
+                    format!("function `{}` needs a body", f.name.node),
+                );
+            }
             self.impl_ty = impl_ty.clone();
             let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
             let ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
             self.impl_ty = None;
             self.fn_sigs.insert(f.name.node.clone(), (params, ret));
         }
+        self.check_trait_impls(&fns);
 
         // Globals, in source order.
         for item in &program.items {
@@ -365,6 +424,9 @@ impl Checker {
 
         let mut lowered = HashSet::new();
         for (f, impl_ty) in &fns {
+            if f.required {
+                continue;
+            }
             if lowered.insert(f.name.node.clone()) {
                 self.impl_ty = impl_ty.clone();
                 out.fns.push(self.lower_fn(f));
@@ -454,6 +516,7 @@ impl Checker {
                 }
             },
             "Self" => match self.impl_ty.clone() {
+                Some(t) if self.traits.contains_key(&t) => Ty::Trait(t),
                 Some(t) if self.enums.contains_key(&t) => Ty::Enum(t),
                 Some(t) => Ty::Struct(t),
                 None => {
@@ -515,6 +578,10 @@ impl Checker {
             _ if self.enums.contains_key(name) => {
                 no_args(self);
                 Ty::Enum(name.to_string())
+            }
+            _ if self.traits.contains_key(name) => {
+                no_args(self);
+                Ty::Trait(name.to_string())
             }
             _ if self.imports.contains_key(name) => Ty::Named(name.to_string()),
             _ => {
@@ -739,6 +806,10 @@ impl Checker {
             }
             (Ty::Vec(x), Ty::Vec(y)) => self.unify(x, y),
             (Ty::Option(x), Ty::Option(y)) => self.unify(x, y),
+            // A value of a type that implements the trait can be used where the trait is expected.
+            (Ty::Trait(t), Ty::Struct(s) | Ty::Enum(s)) => {
+                self.impls.contains(&(t.clone(), s.clone()))
+            }
             (Ty::Tuple(xs), Ty::Tuple(ys)) if xs.len() == ys.len() => {
                 let mut ok = true;
                 for (x, y) in xs.iter().zip(ys) {
@@ -810,6 +881,7 @@ impl Checker {
             K::Break | K::Continue => {}
             K::Try(inner) => self.finalize_expr(inner),
             K::Tuple(items) => items.iter_mut().for_each(|i| self.finalize_expr(i)),
+            K::DynCall { args, .. } => args.iter_mut().for_each(|a| self.finalize_expr(a)),
             K::EnumCtor { args, .. } => {
                 for a in args {
                     self.finalize_expr(a);
@@ -1715,7 +1787,170 @@ impl Checker {
             _ => return None,
         };
         let full = format!("{type_name}::{name}");
-        self.methods.contains_key(&full).then_some(full)
+        if self.methods.contains_key(&full) {
+            return Some(full);
+        }
+        // A default method of a trait the type implements.
+        let mut candidates: Vec<&String> = self
+            .impls
+            .iter()
+            .filter(|(_, t)| *t == type_name)
+            .map(|(tr, _)| tr)
+            .collect();
+        candidates.sort();
+        candidates.into_iter().find_map(|tr| {
+            let declares = self.traits[tr]
+                .iter()
+                .any(|(m, required)| m == name && !required);
+            declares.then(|| format!("{tr}::{name}"))
+        })
+    }
+
+    /// For a value whose type is a trait: the trait, when it declares a method called `name`.
+    fn trait_method(&self, ty: &Ty, name: &str) -> Option<String> {
+        match self.resolve(ty) {
+            Ty::Trait(t)
+                if self
+                    .traits
+                    .get(&t)
+                    .is_some_and(|ms| ms.iter().any(|(m, _)| m == name)) =>
+            {
+                Some(t)
+            }
+            _ => None,
+        }
+    }
+
+    /// `receiver.method(args)` where the receiver's type is a trait: chosen when the program runs.
+    fn dyn_call(
+        &mut self,
+        trait_name: &str,
+        method: &str,
+        receiver: hir::Expr,
+        args: &[ast::Expr],
+        span: &Span,
+    ) -> hir::Expr {
+        let full = format!("{trait_name}::{method}");
+        let (params, ret) = self.fn_sigs[&full].clone();
+        if params.len() != args.len() + 1 {
+            self.err(
+                span.clone(),
+                format!(
+                    "expected {} argument(s), found {}",
+                    params.len().saturating_sub(1),
+                    args.len()
+                ),
+            );
+        }
+        let mut checked = vec![receiver];
+        for (i, a) in args.iter().enumerate() {
+            let want = params.get(i + 1);
+            let a = self.expr(a, want);
+            checked.push(match want {
+                Some(w) => self.coerce(a, w),
+                None => a,
+            });
+        }
+        Self::mk(
+            hir::ExprKind::DynCall {
+                trait_name: trait_name.to_string(),
+                method: method.to_string(),
+                args: checked,
+            },
+            ret,
+            span,
+        )
+    }
+
+    /// `ty` with the trait's `Self` replaced by the implementing type.
+    fn with_self(ty: &Ty, trait_name: &str, concrete: &Ty) -> Ty {
+        let go = |t: &Ty| Self::with_self(t, trait_name, concrete);
+        match ty {
+            Ty::Trait(n) if n == trait_name => concrete.clone(),
+            Ty::Vec(t) => Ty::Vec(Box::new(go(t))),
+            Ty::Option(t) => Ty::Option(Box::new(go(t))),
+            Ty::Result(a, b) => Ty::Result(Box::new(go(a)), Box::new(go(b))),
+            Ty::Map(k, v) => Ty::Map(Box::new(go(k)), Box::new(go(v))),
+            Ty::Tuple(items) => Ty::Tuple(items.iter().map(go).collect()),
+            Ty::Fn(p, r) => Ty::Fn(p.iter().map(go).collect(), Box::new(go(r))),
+            other => other.clone(),
+        }
+    }
+
+    /// Every `impl Trait for Type` must define the required methods with the trait's signatures
+    /// and may only add methods that the trait declares.
+    fn check_trait_impls(&mut self, fns: &[(ast::Fn, Option<String>)]) {
+        let impls = self.impl_spans.clone();
+        for (trait_name, ty, span) in impls {
+            let declared = self.traits[&trait_name].clone();
+            let concrete = if self.enums.contains_key(&ty) {
+                Ty::Enum(ty.clone())
+            } else {
+                Ty::Struct(ty.clone())
+            };
+            for (method, required) in &declared {
+                let (trait_key, impl_key) =
+                    (format!("{trait_name}::{method}"), format!("{ty}::{method}"));
+                match (
+                    self.fn_sigs.get(&impl_key).cloned(),
+                    self.fn_sigs.get(&trait_key).cloned(),
+                ) {
+                    (None, _) if *required => self.err(
+                        span.clone(),
+                        format!("`impl {trait_name} for {ty}` is missing the method `{method}`"),
+                    ),
+                    (Some((got_params, got_ret)), Some((want_params, want_ret))) => {
+                        let want_params: Vec<Ty> = want_params
+                            .iter()
+                            .map(|p| Self::with_self(p, &trait_name, &concrete))
+                            .collect();
+                        let want_ret = Self::with_self(&want_ret, &trait_name, &concrete);
+                        let same = got_params.len() == want_params.len()
+                            && got_params
+                                .iter()
+                                .zip(&want_params)
+                                .all(|(g, w)| g.accepts(w) && w.accepts(g))
+                            && got_ret.accepts(&want_ret)
+                            && want_ret.accepts(&got_ret);
+                        if !same {
+                            let shown = |ps: &[Ty], r: &Ty| {
+                                let ps: Vec<String> = ps.iter().map(Ty::to_string).collect();
+                                format!("({}) -> {r}", ps.join(", "))
+                            };
+                            let at = fns
+                                .iter()
+                                .find(|(f, _)| f.name.node == impl_key)
+                                .map_or(span.clone(), |(f, _)| f.name.span.clone());
+                            self.err(
+                                at,
+                                format!(
+                                    "`{ty}::{method}` has the signature {} but `{trait_name}` declares {}",
+                                    shown(&got_params, &got_ret),
+                                    shown(&want_params, &want_ret)
+                                ),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for (f, impl_ty) in fns {
+                if impl_ty.as_deref() == Some(ty.as_str())
+                    && let Some(m) = f.name.node.strip_prefix(&format!("{ty}::"))
+                    && !declared.iter().any(|(d, _)| d == m)
+                    && self.impls.contains(&(trait_name.clone(), ty.clone()))
+                    && self
+                        .impl_of_fn
+                        .get(&f.name.node)
+                        .is_some_and(|t| *t == trait_name)
+                {
+                    self.err(
+                        f.name.span.clone(),
+                        format!("`{m}` is not a method of the trait `{trait_name}`"),
+                    );
+                }
+            }
+        }
     }
 
     /// Checks `receiver.method(args)` against the signature of `full` (receiver first).
@@ -1728,7 +1963,10 @@ impl Checker {
     ) -> hir::Expr {
         let (params, ret) = self.fn_sigs[full].clone();
         let takes_self = params.first().is_some_and(|p| {
-            matches!((p, self.methods.get(full)), (Ty::Struct(n) | Ty::Enum(n), Some(t)) if n == t)
+            matches!(
+                (p, self.methods.get(full)),
+                (Ty::Struct(n) | Ty::Enum(n) | Ty::Trait(n), Some(t)) if n == t
+            )
         });
         let name = full.rsplit("::").next().unwrap_or(full).to_string();
         if !takes_self {
@@ -2282,6 +2520,17 @@ impl Checker {
 
     fn field_ty(&mut self, base: &hir::Expr, name: &ast::Ident) -> Ty {
         let n = name.node.as_str();
+        // Methods declared by a trait are called, not read.
+        if self.trait_method(&base.ty, n).is_some() {
+            return Ty::Unknown;
+        }
+        if let Ty::Trait(t) = self.resolve(&base.ty) {
+            self.err(
+                name.span.clone(),
+                format!("the trait `{t}` has no method `{n}`"),
+            );
+            return Ty::Unknown;
+        }
         // Methods of the user's own types are called, not read.
         if self.method_of(&base.ty, n).is_some() {
             return Ty::Unknown;
@@ -2510,6 +2759,13 @@ impl Checker {
         }
 
         let callee = self.expr(callee, None);
+        // A method called on a trait-typed value is dispatched on the actual type at run time.
+        if let hir::ExprKind::Field { base, name } = &callee.kind
+            && let Some(trait_name) = self.trait_method(&base.ty, name)
+        {
+            let receiver = (**base).clone();
+            return self.dyn_call(&trait_name, name, receiver, args, span);
+        }
         // `p.norm()` where `norm` is a method of `p`'s type: `Point::norm(p)`.
         if let hir::ExprKind::Field { base, name } = &callee.kind
             && let Some(full) = self.method_of(&base.ty, name)

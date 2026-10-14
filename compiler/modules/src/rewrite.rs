@@ -59,8 +59,17 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
+            Item::Trait(t) => {
+                self.rename(&mut t.name);
+                for f in &mut t.fns {
+                    self.function_named(f, false);
+                }
+            }
             Item::Impl(imp) => {
                 self.rename(&mut imp.ty);
+                if let Some(tr) = &mut imp.trait_name {
+                    self.rename(tr);
+                }
                 // The methods keep their names: they are reached through the type.
                 for f in &mut imp.fns {
                     self.function_named(f, false);

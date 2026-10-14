@@ -150,6 +150,13 @@ pub enum ExprKind {
     Try(Box<Expr>),
     /// `(a, b)`
     Tuple(Vec<Expr>),
+    /// A method called on a value whose type is a trait: the implementation is chosen at run time
+    /// from the type of `args[0]`, the receiver.
+    DynCall {
+        trait_name: String,
+        method: String,
+        args: Vec<Expr>,
+    },
     /// `Shape::Circle(1.0)`, `Shape::Empty`
     EnumCtor {
         enum_name: String,
