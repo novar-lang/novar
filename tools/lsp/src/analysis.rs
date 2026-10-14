@@ -855,7 +855,7 @@ impl Collector {
                 args.iter().for_each(|a| self.expr(a));
             }
             ExprKind::Field { base, .. } => self.expr(base),
-            ExprKind::Unary { expr, .. } => self.expr(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs);
                 self.expr(rhs);
@@ -923,7 +923,9 @@ impl Collector {
                 self.expr(index);
             }
             ExprKind::Array(items) => items.iter().for_each(|i| self.expr(i)),
-            ExprKind::EnumCtor { args, .. } => args.iter().for_each(|a| self.expr(a)),
+            ExprKind::EnumCtor { args, .. } | ExprKind::Tuple(args) => {
+                args.iter().for_each(|a| self.expr(a));
+            }
             ExprKind::Match { scrutinee, arms } => {
                 self.expr(scrutinee);
                 for arm in arms {
@@ -937,7 +939,9 @@ impl Collector {
     fn pattern(&mut self, p: &hir::Pat) {
         match p {
             hir::Pat::Bind(l) => self.local(l),
-            hir::Pat::Variant { args, .. } => args.iter().for_each(|a| self.pattern(a)),
+            hir::Pat::Variant { args, .. } | hir::Pat::Tuple(args) => {
+                args.iter().for_each(|a| self.pattern(a));
+            }
             hir::Pat::Wild | hir::Pat::Lit(_) => {}
         }
     }
