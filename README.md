@@ -40,9 +40,9 @@ novar --version
 The script downloads a release binary or, if there is none for your system, builds from source
 (needs [Rust](https://rustup.rs)). To build by hand: `cargo install --locked --path cli`.
 
-Two builds are published for each system: the full `novar` (about 50 MB: tables, SQL, CSV and
-Parquet) and `novar-lite` (about 10 MB: everything except tables and SQL, which report a clear
-error). `NOVAR_LITE=1` makes the install script pick the lite one.
+Two builds are published for each system: the full `novar` (about 50 MB, with SQL and Parquet)
+and `novar-lite` (about 10 MB). The lite build has everything else, in-memory tables and CSV
+included; `std::table::sql` and Parquet report a clear error there. `NOVAR_LITE=1` makes the install script pick the lite one.
 
 On Windows (PowerShell):
 
