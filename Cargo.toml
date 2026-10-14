@@ -16,6 +16,8 @@ members = [
     "cli",
     "benchmarks",
     "tools/lsp",
+    "tools/formatter",
+    "tools/linter",
     "tools/cluster",
     "tools/package-manager",
     "playground",

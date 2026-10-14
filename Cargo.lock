@@ -2657,7 +2657,9 @@ dependencies = [
  "novar_cluster",
  "novar_codegen",
  "novar_diagnostics",
+ "novar_fmt",
  "novar_hir",
+ "novar_lint",
  "novar_lsp",
  "novar_mlir",
  "novar_modules",
@@ -2707,6 +2709,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "novar_fmt"
+version = "0.0.1"
+dependencies = [
+ "novar_lexer",
+]
+
+[[package]]
 name = "novar_hir"
 version = "0.0.1"
 dependencies = [
@@ -2720,6 +2729,15 @@ name = "novar_lexer"
 version = "0.0.1"
 dependencies = [
  "logos",
+]
+
+[[package]]
+name = "novar_lint"
+version = "0.0.1"
+dependencies = [
+ "novar_diagnostics",
+ "novar_hir",
+ "novar_parser",
 ]
 
 [[package]]
