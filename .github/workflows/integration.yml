@@ -20,7 +20,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.areas.outputs.core }}
+      python: ${{ steps.areas.outputs.python }}
+      vscode: ${{ steps.areas.outputs.vscode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: areas
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: scripts/changed-areas.sh >> "$GITHUB_OUTPUT"
+
   python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,6 +54,8 @@ jobs:
         run: . .venv/bin/activate && cd python && python -m pytest tests -q
 
   playground:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -52,6 +71,8 @@ jobs:
       - run: node --test playground/test/*.test.js
 
   vscode:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -68,6 +89,8 @@ jobs:
         working-directory: editors/vscode
 
   pgvector:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -90,6 +113,8 @@ jobs:
   # Builds the Dockerfile that `telvax build --serve` writes and calls the container. The image
   # compiles Telvax from the branch under test (the default branch on pushes).
   docker:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -115,6 +140,8 @@ jobs:
 
   # Opens the playground page in a real Chromium and runs programs in it.
   playground-browser:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -142,6 +169,8 @@ jobs:
   # Installs the extension in a real VS Code (downloaded by @vscode/test-electron) and drives it
   # against the real language server.
   vscode-host:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
