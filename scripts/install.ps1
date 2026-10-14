@@ -1,10 +1,10 @@
 # Installs `novar` and `nvpm` on Windows from a GitHub release.
-# Usage:  irm https://raw.githubusercontent.com/ntsation/novar/main/scripts/install.ps1 | iex
+# Usage:  irm https://raw.githubusercontent.com/novar-lang/novar/main/scripts/install.ps1 | iex
 #         $env:NOVAR_VERSION = "0.0.3"   # optional: install a specific version
 #         $env:NOVAR_LITE = "1"          # optional: ~10 MB build without SQL and Parquet
 $ErrorActionPreference = "Stop"
 
-$repo = "ntsation/novar"
+$repo = "novar-lang/novar"
 $prefix = if ($env:NOVAR_HOME) { $env:NOVAR_HOME } else { Join-Path $env:USERPROFILE ".novar" }
 $bin = Join-Path $prefix "bin"
 $target = "x86_64-pc-windows-msvc"
