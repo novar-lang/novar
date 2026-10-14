@@ -1,0 +1,25 @@
+// A two-layer network. The tensor shapes are part of the types: change a dimension below
+// and `novar check` rejects the program before anything runs.
+// Run from the repository root: novar run examples/ml/forward.nv main
+
+fn layer1(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
+    x.matmul(w).relu()
+}
+
+fn layer2(h: Tensor<f32, [2, 4]>, w: Tensor<f32, [4, 2]>) -> Tensor<f32, [2, 2]> {
+    h.matmul(w).softmax()
+}
+
+fn main() {
+    let x: Tensor<f32, [2, 3]> = std::tensor::from_vec([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let w1: Tensor<f32, [3, 4]> = std::tensor::from_vec([
+        0.1, 0.2, -0.1, 0.0,
+        0.3, -0.2, 0.1, 0.4,
+        -0.1, 0.1, 0.2, 0.1,
+    ]);
+    let w2: Tensor<f32, [4, 2]> = std::tensor::from_vec([0.5, -0.5, 0.2, 0.1, -0.3, 0.3, 0.1, 0.2]);
+    let probs = layer2(layer1(x, w1), w2);
+    let rows = probs.to_vec();
+    println(f"probabilities: {rows}");
+    println(f"index of the largest probability: {probs.argmax()}");
+}
