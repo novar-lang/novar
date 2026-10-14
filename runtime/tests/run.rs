@@ -1742,3 +1742,35 @@ fn empty() -> u64:
     assert_eq!(run(src, "sizes", vec![]).to_json(), json!(30));
     assert_eq!(run(src, "empty", vec![]).to_json(), json!(0));
 }
+
+#[test]
+fn json_parses_into_a_type_and_writes_back() {
+    let src = r#"
+type User:
+    name: Text
+    age: Int
+
+fn age_of(body: Text) -> Text:
+    let r: Result[User, Text] = std.json.parse(body)
+    match r:
+        case Ok(u):
+            f"{u.name}:{u.age}"
+        case Err(e):
+            e
+
+fn dump(n: Text, a: Int) -> Text:
+    std.json.stringify(User(name: n, age: a))
+"#;
+    let i = load(src);
+    let ask = |b: &str| text(i.call("age_of", vec![Value::str(b)]).unwrap());
+    assert_eq!(ask(r#"{"name":"Ana","age":30}"#), "Ana:30");
+    assert!(ask(r#"{"name":"Ana"}"#).contains("missing field `age`"));
+    assert!(ask("nope").contains("not valid JSON"));
+    assert_eq!(
+        text(
+            i.call("dump", vec![Value::str("Bo"), Value::Int(5)])
+                .unwrap()
+        ),
+        r#"{"age":5,"name":"Bo"}"#
+    );
+}

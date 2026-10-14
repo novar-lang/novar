@@ -77,6 +77,20 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
         return crate::table::call(interp, path, &args, result);
     }
     match path {
+        "std::json::stringify" => Ok(Value::str(args[0].to_json().to_string())),
+        "std::json::parse" => {
+            let Ty::Result(target, _) = result else {
+                return err("`std.json.parse` needs its result type");
+            };
+            let text = want_str(&args[0])?;
+            let parsed = serde_json::from_str::<serde_json::Value>(&text)
+                .map_err(|e| format!("not valid JSON: {e}"))
+                .and_then(|json| interp.value_from_json(target, &json));
+            Ok(match parsed {
+                Ok(v) => Value::Ok(Box::new(v)),
+                Err(e) => Value::Err(Box::new(Value::str(e))),
+            })
+        }
         "std::text::clean_whitespace" => Ok(Value::str(
             want_str(&args[0])?
                 .split_whitespace()
