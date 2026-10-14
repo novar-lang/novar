@@ -825,3 +825,26 @@ fn maps() {
         json!(false)
     );
 }
+
+#[test]
+fn closures_capture_variables() {
+    let src = "
+        fn shifted(v: Vec<i64>, k: i64) -> Vec<i64> { v |> std::iter::map(|x| x + k) |> std::collect() }
+        fn named(k: i64) -> i64 { let add = |a: i64| a + k; add(2) + add(3) }
+        fn counter() -> i64 { let mut n = 0; let bump = |d: i64| d + 1; n = bump(n); n = bump(n); n }
+        fn nested(k: i64) -> i64 { let outer = |a: i64| { let inner = |b: i64| a + b + k; inner(1) }; outer(10) }
+        fn filtered(v: Vec<i64>, min: i64) -> Vec<i64> { v |> std::iter::filter(|x| x >= min) |> std::collect() }
+    ";
+    let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
+    assert_eq!(
+        run(src, "shifted", vec![ints(&[1, 2]), Value::Int(10)]).to_json(),
+        json!([11, 12])
+    );
+    assert_eq!(int(run(src, "named", vec![Value::Int(5)])), 7 + 8);
+    assert_eq!(int(run(src, "counter", vec![])), 2);
+    assert_eq!(int(run(src, "nested", vec![Value::Int(100)])), 111);
+    assert_eq!(
+        run(src, "filtered", vec![ints(&[1, 5, 9]), Value::Int(5)]).to_json(),
+        json!([5, 9])
+    );
+}

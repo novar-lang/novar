@@ -963,3 +963,14 @@ fn option_and_map_mistakes_are_reported() {
         "need an `Option`",
     );
 }
+
+#[test]
+fn closures_cannot_assign_to_captured_variables() {
+    assert_err(
+        "fn f() -> i64 { let mut n = 0; let inc = |d: i64| { n += d; }; inc(1); n }",
+        "cannot assign to `n` from inside a closure",
+    );
+    // A closure's own variables and shared containers are fine.
+    assert_clean("fn f() -> i64 { let inc = |d: i64| { let mut t = 0; t += d; t }; inc(1) }");
+    assert_clean("fn f(mut v: Vec<i64>) -> i64 { let set = |x: i64| { v[0] = x; }; set(3); v[0] }");
+}

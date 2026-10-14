@@ -191,6 +191,8 @@ pub enum ExprKind {
     },
     Closure {
         params: Vec<Ident>,
+        /// The annotation of each parameter (`|x: i64| ..`), `None` when it is inferred.
+        types: Vec<Option<Type>>,
         body: Box<Expr>,
     },
     StructLit {

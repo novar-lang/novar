@@ -30,6 +30,9 @@ pub(crate) struct Checker {
     ret: Ty,
     /// How many loops enclose the expression being checked (reset inside closures).
     loop_depth: u32,
+    /// For each closure being checked, how many scopes existed before it: a variable found in a
+    /// scope below that floor was captured by value.
+    closure_floors: Vec<usize>,
     endpoints: HashSet<(HttpMethod, String)>,
     /// Bindings of literal type variables (`Ty::IntVar`/`Ty::FloatVar`), indexed by id.
     subst: Vec<Option<Ty>>,
@@ -1120,11 +1123,16 @@ impl Checker {
                 )
             }
             K::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, span),
-            K::Closure { params, body } => {
+            K::Closure {
+                params,
+                types,
+                body,
+            } => {
                 let want: Option<(&Vec<Ty>, &Ty)> = match expected {
                     Some(Ty::Fn(p, r)) if p.len() == params.len() => Some((p, r)),
                     _ => None,
                 };
+                self.closure_floors.push(self.scopes.len());
                 self.scopes.push(HashMap::new());
                 let saved = std::mem::take(&mut self.ret);
                 let saved_depth = std::mem::take(&mut self.loop_depth);
@@ -1132,7 +1140,10 @@ impl Checker {
                     .iter()
                     .enumerate()
                     .map(|(i, p)| {
-                        let ty = want.map_or(Ty::Unknown, |(ps, _)| ps[i].clone());
+                        let ty = match &types[i] {
+                            Some(annotation) => self.resolve_type(annotation),
+                            None => want.map_or(Ty::Unknown, |(ps, _)| ps[i].clone()),
+                        };
                         self.declare(p, ty)
                     })
                     .collect();
@@ -1140,6 +1151,7 @@ impl Checker {
                 self.ret = saved;
                 self.loop_depth = saved_depth;
                 self.scopes.pop();
+                self.closure_floors.pop();
                 let ty = Ty::Fn(
                     locals.iter().map(|l| l.ty.clone()).collect(),
                     Box::new(body.ty.clone()),
@@ -1247,6 +1259,27 @@ impl Checker {
                     self.err(target.span.clone(), msg);
                     return None;
                 };
+                let captured = self.closure_floors.last().is_some_and(|floor| {
+                    self.scopes
+                        .iter()
+                        .rposition(|s| s.contains_key(&name))
+                        .is_some_and(|i| i < *floor)
+                });
+                // `Vec` and `Map` are shared, so changing their elements from a closure is seen
+                // outside; any other captured value is a copy.
+                if captured && !matches!(self.resolve(&ty), Ty::Vec(_) | Ty::Map(..) | Ty::Unknown)
+                {
+                    self.diags.push(
+                        Diagnostic::error(
+                            target.span.clone(),
+                            format!("cannot assign to `{name}` from inside a closure"),
+                        )
+                        .with_note(
+                            "closures capture variables by value, so the change would be lost; \
+                             return the new value from the closure instead",
+                        ),
+                    );
+                }
                 if !mutable {
                     self.diags.push(
                         Diagnostic::error(

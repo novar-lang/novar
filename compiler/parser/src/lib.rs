@@ -386,16 +386,19 @@ where
         let closure_params = choice((
             just(Token::OrOr).to(Vec::new()),
             ident()
+                .then(just(Token::Colon).ignore_then(type_()).or_not())
                 .separated_by(just(Token::Comma))
                 .collect::<Vec<_>>()
                 .delimited_by(just(Token::Bar), just(Token::Bar)),
         ));
-        let closure = closure_params
-            .then(expr.clone())
-            .map(|(params, body)| ExprKind::Closure {
+        let closure = closure_params.then(expr.clone()).map(|(params, body)| {
+            let (params, types) = params.into_iter().unzip();
+            ExprKind::Closure {
                 params,
+                types,
                 body: Box::new(body),
-            });
+            }
+        });
 
         let return_ = just(Token::Return)
             .ignore_then(expr.clone().or_not())

@@ -168,7 +168,12 @@ impl<'a> Rewriter<'a> {
                 self.expr(lhs);
                 self.expr(rhs);
             }
-            ExprKind::Closure { params, body } => {
+            ExprKind::Closure {
+                params,
+                types,
+                body,
+            } => {
+                types.iter_mut().flatten().for_each(|t| self.ty(t));
                 self.scopes
                     .push(params.iter().map(|p| p.node.clone()).collect());
                 self.expr(body);
