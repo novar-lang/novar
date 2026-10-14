@@ -35,7 +35,7 @@
 
 ### Size
 * Two builds per system: the full `novar` (about 51 MB, down from 58 with full LTO) and a new
-  `novar-lite` (about 10 MB) without tables and SQL. `NOVAR_LITE=1` makes the install scripts
+  `novar-lite` (about 10 MB) without SQL and Parquet (tables in memory and CSV still work). `NOVAR_LITE=1` makes the install scripts
   pick it. Build it yourself with `--no-default-features --features live`.
 
 ### Language and errors
