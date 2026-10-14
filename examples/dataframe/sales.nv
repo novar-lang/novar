@@ -1,3 +1,6 @@
+// Reads a CSV into a typed table, then summarises it with column methods and SQL.
+// Run from the repository root: novar run examples/dataframe/sales.nv main
+
 struct Sale { id: i64, region: String, units: i64, price: f64 }
 
 fn main() {

@@ -224,7 +224,10 @@ fn layout(src: &str, tokens: &[(Token<'_>, std::ops::Range<usize>)]) -> String {
         }
 
         if at_line_start {
-            let extra = usize::from(matches!(p.kind, Kind::Pipe | Kind::Dot));
+            // Continuation lines are indented one more level: a line that starts with `|>` or
+            // `.`, and the line after one that ends with `=`.
+            let after_assign = prev.is_some_and(|q| q.kind == Kind::Op && q.text == "=");
+            let extra = usize::from(matches!(p.kind, Kind::Pipe | Kind::Dot) || after_assign);
             out.push_str(&INDENT.repeat(indent_now + extra));
             at_line_start = false;
         } else if let Some(prev) = prev
@@ -436,5 +439,15 @@ mod tests {
             out,
             "import std::http::{Request, Status};\nfn f() -> R {\n    while a {\n        if b {\n            c();\n        }\n    }\n    Ok(Response {\n        x: 1,\n        y: 2\n    })\n}\n"
         );
+    }
+
+    #[test]
+    fn a_value_on_the_line_after_an_equals_sign_is_indented() {
+        let src = "fn f() {\n    let long_name: Type =\n    call(1);\n}\n";
+        assert_eq!(
+            fmt(src),
+            "fn f() {\n    let long_name: Type =\n        call(1);\n}\n"
+        );
+        assert_eq!(fmt(&fmt(src)), fmt(src));
     }
 }

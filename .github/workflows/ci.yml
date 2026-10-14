@@ -29,7 +29,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
       - name: Examples are formatted
-        run: cargo run -q -p novar_cli -- fmt --check examples/rag-service.nv examples/basics/primes.nv examples/basics/sieve.nv examples/hello-world/hello.nv
+        run: cargo run -q -p novar_cli -- fmt --check examples/rag-service.nv examples/basics/primes.nv examples/basics/sieve.nv examples/hello-world/hello.nv examples/dataframe/sales.nv
 
   deny:
     runs-on: ubuntu-latest
