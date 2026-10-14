@@ -4,7 +4,7 @@
 #        NOVAR_LITE=1 scripts/install.sh   a ~10 MB build without SQL and Parquet
 set -eu
 
-repo="ntsation/novar"
+repo="novar-lang/novar"
 version="${1:-latest}"
 prefix="${NOVAR_HOME:-$HOME/.novar}"
 asset=novar
