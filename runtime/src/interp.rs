@@ -760,6 +760,39 @@ impl Interp {
                     }),
                 other => fail(format!("{} has no field `{name}`", other.type_name())),
             },
+            ExprKind::DynCall {
+                trait_name,
+                method,
+                args,
+            } => {
+                let mut values = Vec::with_capacity(args.len());
+                for a in args {
+                    values.push(self.eval(a, ctx)?);
+                }
+                let type_name = match values.first() {
+                    Some(Value::Struct(s)) => s.name.clone(),
+                    Some(Value::Enum(e)) => e.name.clone(),
+                    Some(other) => {
+                        return fail(format!(
+                            "{}.{method}(): a {} does not implement `{trait_name}`",
+                            other.type_name(),
+                            other.type_name()
+                        ));
+                    }
+                    None => return fail("a trait method needs a receiver"),
+                };
+                // The type's own method, else the default one the trait provides.
+                let f = self
+                    .fns
+                    .get(&format!("{type_name}::{method}"))
+                    .or_else(|| self.fns.get(&format!("{trait_name}::{method}")))
+                    .ok_or_else(|| {
+                        Ctrl::Fail(RuntimeError::new(format!(
+                            "`{type_name}` has no method `{method}` for the trait `{trait_name}`"
+                        )))
+                    })?;
+                self.call_fn(f, values, ctx.depth)
+            }
             ExprKind::Tuple(items) => {
                 let mut values = Vec::with_capacity(items.len());
                 for item in items {

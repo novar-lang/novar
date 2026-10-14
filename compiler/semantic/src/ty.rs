@@ -93,6 +93,10 @@ pub enum Ty {
     Struct(String),
     /// A user-declared enum.
     Enum(String),
+    /// A user-declared trait, used as a type: any value whose type implements it.
+    Trait(String),
+    /// A type parameter (`T`) while a generic signature is read to infer its arguments.
+    Param(String),
     /// Columnar table whose schema is the named struct (one column per field).
     Table(String),
     /// An imported type whose definition is not known to the checker.
@@ -143,6 +147,8 @@ impl Ty {
             (Prim(a), Prim(b)) => a == b,
             (Struct(a), Struct(b))
             | (Enum(a), Enum(b))
+            | (Trait(a), Trait(b))
+            | (Param(a), Param(b))
             | (Named(a), Named(b))
             | (Table(a), Table(b)) => a == b,
             (Vec(a), Vec(b)) => a.accepts(b),
@@ -193,7 +199,9 @@ impl fmt::Display for Ty {
         match self {
             Ty::Unit => f.write_str("()"),
             Ty::Prim(p) => f.write_str(p.name()),
-            Ty::Struct(n) | Ty::Enum(n) | Ty::Named(n) => f.write_str(n),
+            Ty::Struct(n) | Ty::Enum(n) | Ty::Trait(n) | Ty::Param(n) | Ty::Named(n) => {
+                f.write_str(n)
+            }
             Ty::Table(n) => write!(f, "Table<{n}>"),
             Ty::Vec(t) => write!(f, "Vec<{t}>"),
             Ty::Tensor { elem, shape } => {

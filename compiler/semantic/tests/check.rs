@@ -1095,3 +1095,109 @@ fn iterator_methods_are_typed() {
     );
     assert_err("fn f(v: Vec<i64>) -> bool { v.any(|x| x + 1) }", "bool");
 }
+
+#[test]
+fn impl_blocks_are_checked() {
+    let src = "struct P { x: i64 }
+        impl P { fn get(self) -> i64 { self.x } fn make(x: i64) -> P { P { x: x } } fn add(self, n: i64) -> P { Self { x: self.x + n } } }
+        fn f() -> i64 { P::make(1).add(2).get() }";
+    assert_clean(src);
+    let (hir, _) = check(src);
+    assert!(
+        hir.fns.iter().any(|f| f.name == "P::get"),
+        "methods are functions named Type::name"
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.y } }",
+        "no field `y`",
+    );
+    assert_err(
+        "impl Nothing { fn f() {} }",
+        "cannot find the struct or enum `Nothing`",
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn make() -> P { P { x: 1 } } } fn f(p: P) -> P { p.make() }",
+        "has no `self` parameter",
+    );
+    assert_err(
+        "struct P { x: i64 } impl P { fn get(self) -> i64 { self.x } } fn f(p: P) -> i64 { p.get(1) }",
+        "expected 0 argument",
+    );
+    assert_err("fn f() -> Self { 1 }", "only be used inside an `impl`");
+    assert_err(
+        "struct P { x: i64 } impl P { fn a(self) {} fn a(self) {} }",
+        "defined twice",
+    );
+}
+
+#[test]
+fn traits_are_checked() {
+    let base = "trait Shape { fn area(self) -> f64; fn name(self) -> String { \"shape\" } }
+        struct Sq { s: f64 }";
+    assert_clean(&format!(
+        "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ self.s }} }}
+         fn total(v: Vec<Shape>) -> f64 {{ v.map(|x| x.area()).sum() }}
+         fn make() -> Vec<Shape> {{ [Sq {{ s: 1.0 }}] }}"
+    ));
+    assert_err(
+        &format!("{base} impl Shape for Sq {{ fn name(self) -> String {{ \"sq\" }} }}"),
+        "is missing the method `area`",
+    );
+    assert_err(
+        &format!("{base} impl Shape for Sq {{ fn area(self) -> i64 {{ 1 }} }}"),
+        "has the signature",
+    );
+    assert_err(
+        &format!(
+            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} fn extra(self) {{}} }}"
+        ),
+        "is not a method of the trait `Shape`",
+    );
+    assert_err(
+        "struct S {} impl Missing for S { fn f(self) {} }",
+        "cannot find the trait `Missing`",
+    );
+    assert_err(
+        &format!("{base} struct Other {{ x: i64 }} fn f() -> Shape {{ Other {{ x: 1 }} }}"),
+        "mismatched types",
+    );
+    assert_err(
+        &format!(
+            "{base} impl Shape for Sq {{ fn area(self) -> f64 {{ 1.0 }} }} fn f(s: Shape) -> f64 {{ s.volume() }}"
+        ),
+        "has no method `volume`",
+    );
+    assert_err("fn f() -> i32 ;", "needs a body");
+}
+
+#[test]
+fn generics_are_checked_and_instantiated() {
+    let base = "trait Named { fn name(self) -> String; }
+        struct Dog { n: String }
+        impl Named for Dog { fn name(self) -> String { self.n } }
+        fn id<T>(x: T) -> T { x }
+        fn greet<T: Named>(x: T) -> String { x.name() }
+        struct Boxed<T> { v: T }
+        enum Maybe<T> { Nothing, Just(T) }";
+    assert_clean(&format!(
+        "{base} fn a() -> String {{ greet(Dog {{ n: \"r\" }}) }}
+         fn b() -> String {{ let m: Maybe<String> = Maybe::Just(id(\"x\")); match m {{ Maybe::Just(s) => s, Maybe::Nothing => \"\" }} }}
+         fn c() -> Boxed<String> {{ Boxed {{ v: \"s\" }} }}"
+    ));
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ greet(3) }}"),
+        "does not implement `Named`",
+    );
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ let f = id; 0 }}"),
+        "has to be called",
+    );
+    assert_err(
+        &format!("{base} fn a() -> i32 {{ let m = Maybe::Nothing; 0 }}"),
+        "cannot infer the type parameter `T`",
+    );
+    assert_err(
+        &format!("{base} fn a(b: Boxed<i32, i32>) -> i32 {{ 0 }}"),
+        "takes 1 type argument",
+    );
+}

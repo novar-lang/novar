@@ -26,6 +26,8 @@ pub enum Item {
     Let(Let),
     Struct(Struct),
     Enum(Enum),
+    Impl(Impl),
+    Trait(Trait),
     Fn(Fn),
 }
 
@@ -51,6 +53,7 @@ pub struct Let {
 pub struct Struct {
     pub is_pub: bool,
     pub name: Ident,
+    pub generics: Vec<GenericParam>,
     pub fields: Vec<Field>,
     pub span: Span,
 }
@@ -61,11 +64,36 @@ pub struct Field {
     pub ty: Type,
 }
 
+/// `impl Point { fn norm(self) -> f64 { .. } }`: methods and associated functions of a type. A
+/// function whose first parameter is `self` is a method; the others are called as `Point::new(..)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Impl {
+    pub generics: Vec<GenericParam>,
+    pub ty: Ident,
+    /// The type arguments written after the name: the `T` of `impl<T> Stack<T>`.
+    pub ty_args: Vec<Type>,
+    /// `impl Shape for Circle`: the trait being implemented.
+    pub trait_name: Option<Ident>,
+    pub fns: Vec<Fn>,
+    pub span: Span,
+}
+
+/// `trait Shape { fn area(self) -> f64; fn describe(self) -> String { .. } }`: an interface. A
+/// function without a body is required of every implementation; one with a body is a default.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trait {
+    pub is_pub: bool,
+    pub name: Ident,
+    pub fns: Vec<Fn>,
+    pub span: Span,
+}
+
 /// `enum Shape { Circle(f64), Rect(f64, f64), Empty }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub is_pub: bool,
     pub name: Ident,
+    pub generics: Vec<GenericParam>,
     pub variants: Vec<Variant>,
     pub span: Span,
 }
@@ -102,6 +130,13 @@ pub enum PatKind {
     },
 }
 
+/// A type parameter, `T` or `T: Shape + Other`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+    pub name: Ident,
+    pub bounds: Vec<Ident>,
+}
+
 /// `@endpoint(path = "/x", method = "POST")`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
@@ -115,9 +150,12 @@ pub struct Fn {
     pub attrs: Vec<Attribute>,
     pub is_pub: bool,
     pub name: Ident,
+    pub generics: Vec<GenericParam>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
+    /// Declared with `;` instead of a body (only allowed in a `trait`).
+    pub required: bool,
     pub span: Span,
 }
 
