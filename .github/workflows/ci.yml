@@ -83,3 +83,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p novar_cli --no-default-features --features live
+
+  # The same tests as Linux and Windows, on macOS (Apple silicon). The runners have no GPU, so
+  # the GPU tests do not run here either.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # Line coverage of the Rust workspace. The number goes to the job summary, and the job fails when
+  # it drops below the floor in scripts/coverage-floor.txt.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --workspace --json --summary-only --output-path coverage.json
+      - run: python3 scripts/coverage-gate.py coverage.json
+
+  # Speed and memory gates: the RAG service must keep its overhead and footprint inside the alpha
+  # targets (p99 under 15 ms, RSS under 30 MB) and the interpreter must not get much slower.
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p novar_cli --no-default-features --features live
+      - run: cargo build --release -p novar_bench
+      # Shared runners are noisy: one retry before calling it a regression.
+      - name: RAG overhead and memory
+        run: |
+          target/release/rag_latency target/release/novar --docs 2000 --check ||
+            target/release/rag_latency target/release/novar --docs 2000 --check
+      - name: Interpreter speed
+        run: benchmarks/speed.sh target/release/novar
