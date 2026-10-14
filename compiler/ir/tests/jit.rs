@@ -907,3 +907,23 @@ fn per_channel_quantization_is_refused_natively() {
         assert!(err[0].message.contains("interpreter only"), "{err:?}");
     }
 }
+
+#[test]
+fn impl_methods_compile_natively() {
+    let src = "
+        struct Point { x: i64, y: i64 }
+        impl Point {
+            fn new(x: i64, y: i64) -> Point { Point { x: x, y: y } }
+            fn norm2(self) -> i64 { self.x * self.x + self.y * self.y }
+            fn plus(self, other: Point) -> Self { Self::new(self.x + other.x, self.y + other.y) }
+        }
+        fn run(a: i64) -> i64 { Point::new(a, 4).plus(Point::new(0, 0)).norm2() }
+    ";
+    assert_eq!(jit(src, "run", &[JitValue::Int(3)]), JitValue::Int(25));
+    let h = hir(src);
+    let interp = novar_runtime::Interp::new(h).unwrap();
+    let want = interp
+        .call("run", vec![novar_runtime::Value::Int(3)])
+        .unwrap();
+    assert!(matches!(want, novar_runtime::Value::Int(25)));
+}

@@ -1040,3 +1040,33 @@ fn tuples_and_iterator_methods() {
         json!(["x", 3])
     );
 }
+
+#[test]
+fn impl_methods_and_associated_functions() {
+    let src = "
+        struct Point { x: f64, y: f64 }
+        impl Point {
+            fn new(x: f64, y: f64) -> Point { Point { x: x, y: y } }
+            fn origin() -> Self { Self { x: 0.0, y: 0.0 } }
+            fn norm2(self) -> f64 { self.x * self.x + self.y * self.y }
+            fn plus(self, other: Point) -> Point { Point::new(self.x + other.x, self.y + other.y) }
+            fn scaled(self, k: f64) -> Self { Self::new(self.x * k, self.y * k) }
+        }
+        enum Shape { Circle(f64), Square(f64) }
+        impl Shape {
+            fn area(self) -> f64 { match self { Shape::Circle(r) => r * r * 3.0, Shape::Square(s) => s * s } }
+            fn unit_square() -> Shape { Self::Square(1.0) }
+            fn describe(self) -> String { f\"area {self.area()}\" }
+        }
+        fn run() -> f64 {
+            let p = Point::new(3.0, 4.0);
+            let q = p.plus(Point::origin()).scaled(2.0);
+            q.norm2() + Shape::unit_square().area() + Shape::Circle(1.0).area()
+        }
+        fn text() -> String { Shape::Square(2.0).describe() }
+        fn chain() -> f64 { Point::new(1.0, 1.0).plus(Point::new(2.0, 3.0)).norm2() }
+    ";
+    assert_eq!(float(run(src, "run", vec![])), 100.0 + 1.0 + 3.0);
+    assert_eq!(text(run(src, "text", vec![])), "area 4");
+    assert_eq!(float(run(src, "chain", vec![])), 9.0 + 16.0);
+}
