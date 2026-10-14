@@ -28,3 +28,6 @@ playground/pkg-node/
 # Browser test output
 playground/e2e/test-results/
 playground/e2e/playwright-report/
+
+# Downloaded VS Code for the extension tests
+editors/vscode/.vscode-test/

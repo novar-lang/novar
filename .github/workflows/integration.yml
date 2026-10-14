@@ -142,3 +142,27 @@ jobs:
         with:
           name: playground-traces
           path: playground/e2e/test-results
+
+  # Installs the extension in a real VS Code (downloaded by @vscode/test-electron) and drives it
+  # against the real language server.
+  vscode-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      # The language server does not need tables or SQL, so the small build is enough.
+      - run: cargo build -p novar_cli --no-default-features --features live
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: npm run compile
+        working-directory: editors/vscode
+      - run: xvfb-run -a npm run test:vscode
+        working-directory: editors/vscode
+        env:
+          NOVAR_BIN: ${{ github.workspace }}/target/debug/novar
