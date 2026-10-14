@@ -692,6 +692,28 @@ fn read_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     expect_table(expected, "a table reader")
 }
 
+fn json_stringify(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(s())
+}
+
+fn json_parse(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Unknown)
+}
+
+/// `std.json.parse(text)` gives a `Result[T, Text]`; `T` is the type the context asks for.
+fn json_parse_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    match expected {
+        Ty::Result(_, e) if e.accepts(&s()) => Ok(expected.clone()),
+        Ty::Unknown => Ok(Ty::Unknown),
+        _ => Err("cannot infer the type of `std.json.parse`; annotate the result, e.g. \
+                  `let q: Result[Query, Text] = std.json.parse(body)`"
+            .to_string()),
+    }
+}
+
 fn sql_check(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 2)?;
     want_table(args, 0)?;
@@ -881,6 +903,11 @@ const FUNCTIONS: &[(&str, Sig)] = &[
         sig_expected(read_check, read_result),
     ),
     ("std::table::sql", sig_expected(sql_check, sql_result)),
+    ("std::json::stringify", sig(json_stringify)),
+    (
+        "std::json::parse",
+        sig_expected(json_parse, json_parse_result),
+    ),
     ("std::table::from_rows", sig(from_rows)),
     ("std::table::to_rows", sig(to_rows)),
     ("std::table::len", sig(table_len)),
