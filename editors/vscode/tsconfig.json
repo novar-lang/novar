@@ -6,7 +6,8 @@
     "rootDir": "src",
     "lib": ["ES2022"],
     "sourceMap": true,
-    "strict": true
+    "strict": true,
+    "types": ["node", "vscode"]
   },
   "include": ["src"]
 }

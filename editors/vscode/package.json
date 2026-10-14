@@ -5,18 +5,37 @@
   "version": "0.0.2",
   "publisher": "novar-lang",
   "license": "MIT OR Apache-2.0",
-  "repository": { "type": "git", "url": "https://github.com/ntsation/novar" },
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["novar", "tensor", "mlops", "pipeline"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ntsation/novar"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "novar",
+    "tensor",
+    "mlops",
+    "pipeline"
+  ],
   "main": "./out/extension.js",
-  "activationEvents": ["onLanguage:novar"],
+  "activationEvents": [
+    "onLanguage:novar"
+  ],
   "contributes": {
     "languages": [
       {
         "id": "novar",
-        "aliases": ["Novar", "novar"],
-        "extensions": [".nv"],
+        "aliases": [
+          "Novar",
+          "novar"
+        ],
+        "extensions": [
+          ".nv"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -37,20 +56,31 @@
         },
         "novar.server.args": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["lsp"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
           "markdownDescription": "Arguments that make the executable speak the language server protocol."
         },
         "novar.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Traces the communication between VS Code and the language server."
         }
       }
     },
     "commands": [
-      { "command": "novar.restartServer", "title": "Novar: Restart Language Server" }
+      {
+        "command": "novar.restartServer",
+        "title": "Novar: Restart Language Server"
+      }
     ],
     "configurationDefaults": {
       "[novar]": {
@@ -64,16 +94,16 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "node --test test/*.test.js",
-    "package": "vsce package --no-dependencies=false"
+    "package": "vsce package"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.0.0",
-    "typescript": "^5.4.0",
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.91.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.1.0"
   }
