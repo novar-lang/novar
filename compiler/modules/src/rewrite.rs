@@ -160,6 +160,7 @@ impl<'a> Rewriter<'a> {
                     self.expr(v);
                 }
             }
+            ExprKind::Break | ExprKind::Continue => {}
             ExprKind::FString(parts) => {
                 for p in parts {
                     if let FPart::Expr(x) = p {

@@ -32,6 +32,10 @@ pub enum Token<'src> {
     Pub,
     #[token("return")]
     Return,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     #[token("if")]
     If,
     #[token("else")]
@@ -151,6 +155,8 @@ impl std::fmt::Display for Token<'_> {
             Enum => "enum",
             Pub => "pub",
             Return => "return",
+            Break => "break",
+            Continue => "continue",
             If => "if",
             Else => "else",
             For => "for",

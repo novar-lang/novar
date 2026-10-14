@@ -315,6 +315,9 @@ where
             .ignore_then(expr.clone().or_not())
             .map(|v| ExprKind::Return(v.map(Box::new)));
 
+        let break_ = just(Token::Break).to(ExprKind::Break);
+        let continue_ = just(Token::Continue).to(ExprKind::Continue);
+
         let struct_lit = path()
             .filter(|p| {
                 p.last()
@@ -401,6 +404,8 @@ where
             boolean,
             closure,
             return_,
+            break_,
+            continue_,
             struct_lit,
             path().map(ExprKind::Path),
             paren,

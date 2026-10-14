@@ -133,6 +133,8 @@ pub enum ExprKind {
     },
     Block(Block),
     Return(Option<Box<Expr>>),
+    Break,
+    Continue,
     FString(Vec<FPart>),
     /// Assignment to a place rooted in a mutable local; evaluates to unit. The value is
     /// evaluated first, then the place's index expressions left to right.

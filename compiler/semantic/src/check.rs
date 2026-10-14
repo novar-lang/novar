@@ -22,6 +22,8 @@ pub(crate) struct Checker {
     scopes: Vec<HashMap<String, (LocalId, Ty, bool)>>,
     next_local: u32,
     ret: Ty,
+    /// How many loops enclose the expression being checked (reset inside closures).
+    loop_depth: u32,
     endpoints: HashSet<(HttpMethod, String)>,
     /// Bindings of literal type variables (`Ty::IntVar`/`Ty::FloatVar`), indexed by id.
     subst: Vec<Option<Ty>>,
@@ -476,6 +478,7 @@ impl Checker {
                     self.finalize_expr(v);
                 }
             }
+            K::Break | K::Continue => {}
             K::FString(parts) => {
                 for p in parts {
                     if let hir::FPart::Expr(x) = p {
@@ -787,7 +790,9 @@ impl Checker {
             K::While { cond, body } => {
                 let cond = self.expr(cond, Some(&Ty::bool()));
                 let cond = self.coerce(cond, &Ty::bool());
+                self.loop_depth += 1;
                 let (body, _) = self.block(body, None);
+                self.loop_depth -= 1;
                 Self::mk(
                     hir::ExprKind::While {
                         cond: Box::new(cond),
@@ -934,6 +939,7 @@ impl Checker {
                 };
                 self.scopes.push(HashMap::new());
                 let saved = std::mem::take(&mut self.ret);
+                let saved_depth = std::mem::take(&mut self.loop_depth);
                 let locals: Vec<_> = params
                     .iter()
                     .enumerate()
@@ -944,6 +950,7 @@ impl Checker {
                     .collect();
                 let body = self.expr(body, want.map(|(_, r)| r));
                 self.ret = saved;
+                self.loop_depth = saved_depth;
                 self.scopes.pop();
                 let ty = Ty::Fn(
                     locals.iter().map(|l| l.ty.clone()).collect(),
@@ -1003,6 +1010,17 @@ impl Checker {
             K::Block(b) => {
                 let (block, ty) = self.block(b, expected);
                 Self::mk(hir::ExprKind::Block(block), ty, span)
+            }
+            K::Break | K::Continue => {
+                let (word, kind) = if matches!(e.node, K::Break) {
+                    ("break", hir::ExprKind::Break)
+                } else {
+                    ("continue", hir::ExprKind::Continue)
+                };
+                if self.loop_depth == 0 {
+                    self.err(span.clone(), format!("`{word}` outside of a loop"));
+                }
+                Self::mk(kind, Ty::Never, span)
             }
             K::Return(value) => {
                 let ret = self.ret.clone();
@@ -1230,7 +1248,9 @@ impl Checker {
         };
         self.scopes.push(HashMap::new());
         let var = self.declare(var, var_ty);
+        self.loop_depth += 1;
         let (body, _) = self.block(body, None);
+        self.loop_depth -= 1;
         self.scopes.pop();
         Self::mk(hir::ExprKind::For { var, iter, body }, Ty::Unit, span)
     }

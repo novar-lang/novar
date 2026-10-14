@@ -164,6 +164,8 @@ pub enum ExprKind {
     },
     Block(Block),
     Return(Option<Box<Expr>>),
+    Break,
+    Continue,
     FString(Vec<FPart>),
     /// `target = value`; compound forms (`+=`, ...) are desugared by the parser.
     Assign {
