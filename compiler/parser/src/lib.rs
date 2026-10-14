@@ -1210,37 +1210,65 @@ where
                 .delimited_by(just(Token::LParen), just(Token::RParen)),
         )
         .then(just(Token::Arrow).ignore_then(type_()).or_not())
-        .then(block(expr.clone()))
+        .then(block(expr.clone()).map(Some).or(just(Token::Semi).to(None)))
         .map_with(|(((((attrs, is_pub), name), params), ret), body), e| {
+            let span = rng(e.span());
             Item::Fn(Fn {
                 attrs,
                 is_pub: is_pub.is_some(),
                 name,
                 params,
                 ret,
-                body,
-                span: rng(e.span()),
+                required: body.is_none(),
+                body: body.unwrap_or(Block {
+                    stmts: Vec::new(),
+                    tail: None,
+                    span: span.clone(),
+                }),
+                span,
             })
         });
 
-    let impl_ = just(Token::Impl)
-        .ignore_then(ident())
-        .then(
-            func.clone()
-                .repeated()
-                .collect::<Vec<_>>()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
-        )
-        .map_with(|(ty, items), e| {
-            let fns = items
+    let fns_block = func
+        .clone()
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .map(|items| {
+            items
                 .into_iter()
                 .filter_map(|i| match i {
                     Item::Fn(f) => Some(f),
                     _ => None,
                 })
-                .collect();
+                .collect::<Vec<_>>()
+        });
+    // `impl Type { .. }` or `impl Trait for Type { .. }`.
+    let impl_ = just(Token::Impl)
+        .ignore_then(ident())
+        .then(just(Token::For).ignore_then(ident()).or_not())
+        .then(fns_block.clone())
+        .map_with(|((first, second), fns), e| {
+            let (ty, trait_name) = match second {
+                Some(ty) => (ty, Some(first)),
+                None => (first, None),
+            };
             Item::Impl(Impl {
                 ty,
+                trait_name,
+                fns,
+                span: rng(e.span()),
+            })
+        });
+    let trait_ = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Trait))
+        .then(ident())
+        .then(fns_block)
+        .map_with(|((is_pub, name), fns), e| {
+            Item::Trait(Trait {
+                is_pub: is_pub.is_some(),
+                name,
                 fns,
                 span: rng(e.span()),
             })
@@ -1253,6 +1281,7 @@ where
         Token::Struct,
         Token::Enum,
         Token::Impl,
+        Token::Trait,
         Token::Fn,
         Token::Pub,
         Token::At,
@@ -1260,7 +1289,7 @@ where
     ])
     .ignored();
 
-    choice((import, struct_, enum_, impl_, func, global_let))
+    choice((import, struct_, enum_, impl_, trait_, func, global_let))
         .recover_with(skip_then_retry_until(any().ignored(), item_start))
         .repeated()
         .collect::<Vec<_>>()

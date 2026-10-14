@@ -27,6 +27,7 @@ pub enum Item {
     Struct(Struct),
     Enum(Enum),
     Impl(Impl),
+    Trait(Trait),
     Fn(Fn),
 }
 
@@ -67,6 +68,18 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Impl {
     pub ty: Ident,
+    /// `impl Shape for Circle`: the trait being implemented.
+    pub trait_name: Option<Ident>,
+    pub fns: Vec<Fn>,
+    pub span: Span,
+}
+
+/// `trait Shape { fn area(self) -> f64; fn describe(self) -> String { .. } }`: an interface. A
+/// function without a body is required of every implementation; one with a body is a default.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trait {
+    pub is_pub: bool,
+    pub name: Ident,
     pub fns: Vec<Fn>,
     pub span: Span,
 }
@@ -128,6 +141,8 @@ pub struct Fn {
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
+    /// Declared with `;` instead of a body (only allowed in a `trait`).
+    pub required: bool,
     pub span: Span,
 }
 
