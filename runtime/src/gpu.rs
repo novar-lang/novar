@@ -165,7 +165,8 @@ fn bytes<T: bytemuck::NoUninit>(v: &[T]) -> &[u8] {
 impl Gpu {
     pub fn new() -> Result<Gpu, String> {
         pollster::block_on(async {
-            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let instance =
+                wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
             let adapter = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
@@ -305,12 +306,14 @@ impl Gpu {
             let _ = tx.send(r);
         });
         self.device
-            .poll(wgpu::PollType::Wait)
+            .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| format!("GPU poll failed: {e:?}"))?;
         rx.recv()
             .map_err(|e| e.to_string())?
             .map_err(|e| format!("cannot read the GPU result: {e}"))?;
-        let data = slice.get_mapped_range();
+        let data = slice
+            .get_mapped_range()
+            .map_err(|e| format!("cannot read the GPU result: {e}"))?;
         let out: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&data)[..len].to_vec();
         drop(data);
         readback.unmap();
