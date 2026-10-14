@@ -26,6 +26,13 @@ fn int(v: Value) -> i64 {
     }
 }
 
+fn float(v: Value) -> f64 {
+    match v {
+        Value::Float(x) => x,
+        other => panic!("expected float, got {other:?}"),
+    }
+}
+
 fn text(v: Value) -> String {
     match v {
         Value::Str(s) => s.to_string(),
@@ -582,4 +589,70 @@ fn break_and_continue_in_every_kind_of_loop() {
     assert_eq!(int(run(src, "while_loop", vec![])), 37);
     assert_eq!(int(run(src, "nested", vec![])), 15);
     assert_eq!(int(run(src, "return_inside", vec![Value::Int(10)])), 300);
+}
+
+#[test]
+fn enums_and_match() {
+    let src = "
+        enum Shape { Circle(f64), Rect(f64, f64), Empty }
+        fn area(s: Shape) -> f64 {
+            match s { Shape::Circle(r) => r * r * 3.0, Shape::Rect(w, h) => w * h, Shape::Empty => 0.0 }
+        }
+        fn total() -> f64 { area(Shape::Circle(2.0)) + area(Shape::Rect(2.0, 3.5)) + area(Shape::Empty) }
+        fn describe(n: i64) -> String { match n { 0 => \"zero\", 1 => \"one\", _ => \"many\" } }
+        fn safe_div(a: i64, b: i64) -> Result<i64, String> {
+            if b == 0 { return Err(\"divide by zero\"); }
+            Ok(a / b)
+        }
+        fn show(a: i64, b: i64) -> String {
+            match safe_div(a, b) { Ok(v) => f\"ok {v}\", Err(e) => f\"error: {e}\" }
+        }
+        fn same(a: Shape, b: Shape) -> bool { a == b }
+        fn pick(flag: bool) -> Shape { if flag { Shape::Rect(1.0, 2.0) } else { Shape::Empty } }
+        enum Op { Add(i64), Neg, Twice(Shape) }
+        fn nested(o: Op) -> f64 {
+            match o { Op::Add(n) => 1.0, Op::Neg => 2.0, Op::Twice(Shape::Circle(r)) => r, Op::Twice(_) => 9.0 }
+        }
+    ";
+    assert_eq!(float(run(src, "total", vec![])), 12.0 + 7.0);
+    assert_eq!(text(run(src, "describe", vec![Value::Int(1)])), "one");
+    assert_eq!(text(run(src, "describe", vec![Value::Int(42)])), "many");
+    assert_eq!(
+        text(run(src, "show", vec![Value::Int(9), Value::Int(3)])),
+        "ok 3"
+    );
+    assert_eq!(
+        text(run(src, "show", vec![Value::Int(9), Value::Int(0)])),
+        "error: divide by zero"
+    );
+    let interp = load(src);
+    let a = interp.call("pick", vec![Value::Bool(true)]).unwrap();
+    let b = interp.call("pick", vec![Value::Bool(true)]).unwrap();
+    let c = interp.call("pick", vec![Value::Bool(false)]).unwrap();
+    assert!(matches!(
+        interp.call("same", vec![a.clone(), b]),
+        Ok(Value::Bool(true))
+    ));
+    assert!(matches!(
+        interp.call("same", vec![a.clone(), c]),
+        Ok(Value::Bool(false))
+    ));
+    assert_eq!(a.to_json(), json!({ "Rect": [1.0, 2.0] }));
+    assert_eq!(a.to_string(), "Shape::Rect(1, 2)");
+    // JSON in, JSON out (this is how endpoints and workers talk).
+    let area = interp
+        .call_json("area", &[json!({ "Circle": 3.0 })])
+        .unwrap();
+    assert_eq!(area, json!(27.0));
+    assert_eq!(
+        interp.call_json("area", &[json!("Empty")]).unwrap(),
+        json!(0.0)
+    );
+    assert!(interp.call_json("area", &[json!("Triangle")]).is_err());
+    assert_eq!(
+        interp
+            .call_json("nested", &[json!({ "Twice": { "Circle": 4.0 } })])
+            .unwrap(),
+        json!(4.0)
+    );
 }

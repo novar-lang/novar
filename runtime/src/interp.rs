@@ -89,6 +89,7 @@ fn fail<T>(msg: impl Into<String>) -> Result<T, Ctrl> {
 pub struct Interp {
     fns: HashMap<String, hir::FnDef>,
     structs: HashMap<String, Vec<(String, Ty)>>,
+    enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
     globals: RwLock<HashMap<String, Value>>,
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     out: Mutex<Box<dyn std::io::Write + Send>>,
@@ -126,6 +127,11 @@ impl Interp {
                 .structs
                 .iter()
                 .map(|s| (s.name.clone(), s.fields.clone()))
+                .collect(),
+            enums: program
+                .enums
+                .iter()
+                .map(|e| (e.name.clone(), e.variants.clone()))
                 .collect(),
             fns: program
                 .fns
@@ -208,7 +214,7 @@ impl Interp {
 
     /// Converts request-style JSON into a value of static type `ty`.
     pub fn value_from_json(&self, ty: &Ty, json: &Json) -> Result<Value, String> {
-        from_json(ty, json, &self.structs)
+        from_json(ty, json, &self.structs, &self.enums)
     }
 
     /// Runs `f32` matrix multiplications at the given precision (see [`Quantization`]).
@@ -405,9 +411,11 @@ impl Interp {
         let args = match f.params.first() {
             Some(p) => {
                 vec![
-                    from_json(&p.ty, payload, &self.structs).map_err(|e| EndpointError {
-                        status: 400,
-                        message: e,
+                    from_json(&p.ty, payload, &self.structs, &self.enums).map_err(|e| {
+                        EndpointError {
+                            status: 400,
+                            message: e,
+                        }
                     })?,
                 ]
             }
@@ -796,6 +804,30 @@ impl Interp {
                 };
                 Err(Ctrl::Return(v))
             }
+            ExprKind::EnumCtor {
+                enum_name,
+                variant,
+                args,
+            } => {
+                let mut fields = Vec::with_capacity(args.len());
+                for a in args {
+                    fields.push(self.eval(a, ctx)?);
+                }
+                Ok(Value::Enum(Arc::new(crate::value::EnumVal {
+                    name: enum_name.clone(),
+                    variant: variant.clone(),
+                    fields,
+                })))
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let value = self.eval(scrutinee, ctx)?;
+                for arm in arms {
+                    if match_pattern(&arm.pat, &value, &mut ctx.env) {
+                        return self.eval(&arm.body, ctx);
+                    }
+                }
+                fail("no `match` arm matched")
+            }
             ExprKind::Break => Err(Ctrl::Break),
             ExprKind::Continue => Err(Ctrl::Continue),
         }
@@ -984,4 +1016,57 @@ fn float_op(op: BinOp, a: f64, b: f64) -> Eval {
         GtEq => Value::Bool(a >= b),
         _ => return fail("invalid float operation"),
     })
+}
+
+/// Matches `value` against `pat`, binding names in `env`. Bindings made before a later part of
+/// the pattern fails are left behind; the arm that follows rebinds what it uses.
+fn match_pattern(pat: &hir::Pat, value: &Value, env: &mut Env) -> bool {
+    match (pat, value) {
+        (hir::Pat::Wild, _) => true,
+        (hir::Pat::Bind(local), v) => {
+            env.insert(local.id, v.clone());
+            true
+        }
+        (hir::Pat::Lit(l), v) => match (l, v) {
+            (Lit::Int(a), Value::Int(b)) => i128::from(*b) == i128::from(*a),
+            (Lit::Float(a), Value::Float(b)) => a == b,
+            (Lit::Int(a), Value::Float(b)) => *a as f64 == *b,
+            (Lit::Str(a), Value::Str(b)) => a.as_str() == &**b,
+            (Lit::Bool(a), Value::Bool(b)) => a == b,
+            _ => false,
+        },
+        (
+            hir::Pat::Variant {
+                enum_name: None,
+                variant,
+                args,
+            },
+            Value::Ok(v),
+        ) if variant == "Ok" => args.first().is_some_and(|p| match_pattern(p, v, env)),
+        (
+            hir::Pat::Variant {
+                enum_name: None,
+                variant,
+                args,
+            },
+            Value::Err(v),
+        ) if variant == "Err" => args.first().is_some_and(|p| match_pattern(p, v, env)),
+        (
+            hir::Pat::Variant {
+                enum_name: Some(en),
+                variant,
+                args,
+            },
+            Value::Enum(e),
+        ) => {
+            e.name == *en
+                && e.variant == *variant
+                && args.len() == e.fields.len()
+                && args
+                    .iter()
+                    .zip(&e.fields)
+                    .all(|(p, v)| match_pattern(p, v, env))
+        }
+        _ => false,
+    }
 }

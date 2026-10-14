@@ -16,6 +16,13 @@ pub struct StructVal {
     pub fields: Vec<(String, Value)>,
 }
 
+#[derive(Debug, Clone)]
+pub struct EnumVal {
+    pub name: String,
+    pub variant: String,
+    pub fields: Vec<Value>,
+}
+
 /// Shared, mutable element storage of a `Vec`.
 #[derive(Debug, Default)]
 pub struct VecVal(RwLock<Vec<Value>>);
@@ -89,6 +96,7 @@ pub enum Value {
     /// Vectors are reference values: copies of a `Vec` share the same elements.
     Vec(Arc<VecVal>),
     Struct(Arc<StructVal>),
+    Enum(Arc<EnumVal>),
     Tensor(Arc<TensorVal>),
     Table(Arc<TableVal>),
     Ok(Box<Value>),
@@ -185,6 +193,7 @@ impl Value {
             Value::Str(_) => "String",
             Value::Vec(_) => "Vec",
             Value::Struct(_) => "struct",
+            Value::Enum(_) => "enum",
             Value::Tensor(_) => "Tensor",
             Value::Table(_) => "Table",
             Value::Ok(_) | Value::Err(_) => "Result",
@@ -215,6 +224,11 @@ impl Value {
                         .zip(&b.fields)
                         .all(|((n1, v1), (n2, v2))| n1 == n2 && v1.equals(v2))
             }
+            (Value::Enum(a), Value::Enum(b)) => {
+                a.name == b.name
+                    && a.variant == b.variant
+                    && a.fields.iter().zip(&b.fields).all(|(x, y)| x.equals(y))
+            }
             (Value::Tensor(a), Value::Tensor(b)) => a == b,
             (Value::Table(a), Value::Table(b)) => a.schema == b.schema && a.batch == b.batch,
             (Value::Ok(a), Value::Ok(b)) | (Value::Err(a), Value::Err(b)) => a.equals(b),
@@ -238,6 +252,13 @@ impl Value {
                 }
                 Json::Object(m)
             }
+            Value::Enum(e) => match e.fields.as_slice() {
+                [] => Json::String(e.variant.clone()),
+                [one] => serde_json::json!({ e.variant.clone(): one.to_json() }),
+                many => serde_json::json!({
+                    e.variant.clone(): many.iter().map(Value::to_json).collect::<Vec<_>>()
+                }),
+            },
             Value::Tensor(t) => {
                 let single = matches!(t.dtype(), arrow::datatypes::DataType::Float32);
                 tensor_json(&t.shape, &t.to_f64_vec(), single)
@@ -303,6 +324,20 @@ impl fmt::Display for Value {
                 }
                 f.write_str(" }")
             }
+            Value::Enum(e) => {
+                write!(f, "{}::{}", e.name, e.variant)?;
+                if !e.fields.is_empty() {
+                    f.write_str("(")?;
+                    for (i, v) in e.fields.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
+                        write!(f, "{v}")?;
+                    }
+                    f.write_str(")")?;
+                }
+                Ok(())
+            }
             Value::Tensor(t) => write!(f, "Tensor{:?}", t.shape),
             Value::Table(t) => write!(f, "Table[{} rows]", t.rows()),
             Value::Ok(v) => write!(f, "Ok({v})"),
@@ -320,6 +355,7 @@ pub fn from_json(
     ty: &Ty,
     json: &Json,
     structs: &HashMap<String, Vec<(String, Ty)>>,
+    enums: &HashMap<String, Vec<(String, Vec<Ty>)>>,
 ) -> Result<Value, String> {
     let bad = |what: &str| format!("expected {what}, found {json}");
     match ty {
@@ -337,7 +373,7 @@ pub fn from_json(
             let items = json.as_array().ok_or_else(|| bad("an array"))?;
             items
                 .iter()
-                .map(|j| from_json(inner, j, structs))
+                .map(|j| from_json(inner, j, structs, enums))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::vec)
         }
@@ -368,7 +404,7 @@ pub fn from_json(
             let items = json.as_array().ok_or_else(|| bad("an array of rows"))?;
             let rows = items
                 .iter()
-                .map(|j| from_json(&Ty::Struct(name.clone()), j, structs))
+                .map(|j| from_json(&Ty::Struct(name.clone()), j, structs, enums))
                 .collect::<Result<Vec<_>, _>>()?;
             crate::table::rows_to_batch(fields, &rows)
                 .map(|batch| {
@@ -391,12 +427,49 @@ pub fn from_json(
                     .ok_or_else(|| format!("missing field `{fname}`"))?;
                 out.push((
                     fname.clone(),
-                    from_json(fty, v, structs).map_err(|e| format!("{fname}: {e}"))?,
+                    from_json(fty, v, structs, enums).map_err(|e| format!("{fname}: {e}"))?,
                 ));
             }
             Ok(Value::Struct(Arc::new(StructVal {
                 name: name.clone(),
                 fields: out,
+            })))
+        }
+        Ty::Enum(name) => {
+            let variants = enums
+                .get(name)
+                .ok_or_else(|| format!("unknown enum `{name}`"))?;
+            // A unit variant is its name; one with values is `{"Variant": value}` (one value) or
+            // `{"Variant": [values..]}` (several).
+            let (variant, payload) = match json {
+                Json::String(s) => (s.as_str(), None),
+                Json::Object(o) if o.len() == 1 => {
+                    let (k, v) = o.iter().next().expect("one entry");
+                    (k.as_str(), Some(v))
+                }
+                _ => return Err(bad("a variant name or a single-key object")),
+            };
+            let (_, tys) = variants
+                .iter()
+                .find(|(n, _)| n == variant)
+                .ok_or_else(|| format!("`{name}` has no variant `{variant}`"))?;
+            let values: Vec<&Json> = match (tys.len(), payload) {
+                (0, None) => Vec::new(),
+                (1, Some(v)) => vec![v],
+                (n, Some(Json::Array(items))) if items.len() == n && n > 1 => {
+                    items.iter().collect()
+                }
+                _ => return Err(format!("`{name}::{variant}` needs {} value(s)", tys.len())),
+            };
+            let fields = tys
+                .iter()
+                .zip(values)
+                .map(|(t, j)| from_json(t, j, structs, enums))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::Enum(Arc::new(EnumVal {
+                name: name.clone(),
+                variant: variant.to_string(),
+                fields,
             })))
         }
         _ => Ok(generic_from_json(json)),

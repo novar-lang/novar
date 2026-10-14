@@ -12,4 +12,4 @@ mod value;
 
 pub use interp::{Device, EndpointError, Executor, Interp, RuntimeError};
 pub use std_impl::embed_text;
-pub use value::{Db, Native, Query, StructVal, TableVal, TensorVal, Value, VecVal};
+pub use value::{Db, EnumVal, Native, Query, StructVal, TableVal, TensorVal, Value, VecVal};
