@@ -918,3 +918,48 @@ fn a_missing_semicolon_is_reported_after_the_previous_token() {
     // The span is the last character of `5`, not the token that follows.
     assert_eq!(&src[first.span.clone()], "5");
 }
+
+// ---- Option and Map ----------------------------------------------------------------------------
+
+#[test]
+fn option_and_map_are_typed() {
+    assert_clean("fn f(o: Option<i32>) -> i32 { match o { Some(n) => n, None => 0 } }");
+    assert_clean("fn f() -> Option<i32> { Some(3) } fn g() -> Option<String> { None }");
+    assert_clean("fn f(v: Vec<i64>) -> i64 { v.first().unwrap_or(0) }");
+    assert_clean(
+        "fn f() -> Map<String, i64> { let m: Map<String, i64> = std::map::new(); m.insert(\"a\", 1); m }",
+    );
+    assert_clean(
+        "fn f(m: Map<i64, String>, k: i64) -> String { match m.get(k) { Some(s) => s, None => \"\" } }",
+    );
+}
+
+#[test]
+fn option_and_map_mistakes_are_reported() {
+    assert_err(
+        "fn f(o: Option<i32>) -> i32 { match o { Some(n) => n } }",
+        "missing `None`",
+    );
+    assert_err(
+        "fn f(o: Option<i32>) -> i32 { match o { None => 0 } }",
+        "missing `Some`",
+    );
+    assert_err("fn f() -> Option<i32> { Some(\"x\") }", "mismatched types");
+    assert_err("fn f(m: Map<f64, i64>) -> u64 { m.len() }", "keys must be");
+    assert_err(
+        "fn f(m: Map<String, i64>) -> i64 { m.insert(1, 2); 0 }",
+        "mismatched types",
+    );
+    assert_err(
+        "fn f(o: Option<i32>) -> i32 { o.unwarp() }",
+        "no method `unwarp`",
+    );
+    assert_err(
+        "fn f() -> Map<String, i64> { std::map::new(1) }",
+        "expected 0 argument",
+    );
+    assert_err(
+        "fn f(n: i32) -> i32 { match n { Some(x) => x, _ => 0 } }",
+        "need an `Option`",
+    );
+}

@@ -103,6 +103,10 @@ pub enum Ty {
         shape: Vec<Dim>,
     },
     Result(Box<Ty>, Box<Ty>),
+    /// `Option<T>`: `Some(value)` or `None`.
+    Option(Box<Ty>),
+    /// `Map<K, V>`: keys are strings, integers or booleans.
+    Map(Box<Ty>, Box<Ty>),
     Fn(Vec<Ty>, Box<Ty>),
     /// Type of expressions that never produce a value (`return`).
     Never,
@@ -158,6 +162,8 @@ impl Ty {
                     })
             }
             (Result(a, b), Result(c, d)) => a.accepts(c) && b.accepts(d),
+            (Option(a), Option(b)) => a.accepts(b),
+            (Map(k1, v1), Map(k2, v2)) => k1.accepts(k2) && v1.accepts(v2),
             (Fn(p1, r1), Fn(p2, r2)) => {
                 p1.len() == p2.len()
                     && p1.iter().zip(p2).all(|(a, b)| a.accepts(b))
@@ -190,6 +196,8 @@ impl fmt::Display for Ty {
                 write!(f, "Tensor<{elem}, [{}]>", dims.join(", "))
             }
             Ty::Result(a, b) => write!(f, "Result<{a}, {b}>"),
+            Ty::Option(t) => write!(f, "Option<{t}>"),
+            Ty::Map(k, v) => write!(f, "Map<{k}, {v}>"),
             Ty::Fn(params, ret) => {
                 let ps: Vec<_> = params.iter().map(|p| p.to_string()).collect();
                 write!(f, "fn({}) -> {ret}", ps.join(", "))

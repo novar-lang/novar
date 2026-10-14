@@ -345,6 +345,39 @@ impl Checker {
                     Ty::Vec(Box::new(Ty::Unknown))
                 }
             },
+            "Option" => match type_args.as_slice() {
+                [inner] if t.args.len() == 1 => Ty::Option(Box::new(self.resolve_type(inner))),
+                _ => {
+                    self.err(
+                        t.span.clone(),
+                        "`Option` takes one type argument: `Option<T>`",
+                    );
+                    Ty::Unknown
+                }
+            },
+            "Map" => {
+                match type_args.as_slice() {
+                    [k, v] if t.args.len() == 2 => {
+                        let key = self.resolve_type(k);
+                        if !matches!(&key, Ty::Prim(p) if p.is_int() || matches!(p, Prim::Str | Prim::Bool))
+                            && !matches!(key, Ty::Unknown)
+                        {
+                            self.err(
+                            k.span.clone(),
+                            format!("`Map` keys must be a String, an integer or a bool, found `{key}`"),
+                        );
+                        }
+                        Ty::Map(Box::new(key), Box::new(self.resolve_type(v)))
+                    }
+                    _ => {
+                        self.err(
+                            t.span.clone(),
+                            "`Map` takes two type arguments: `Map<K, V>`",
+                        );
+                        Ty::Unknown
+                    }
+                }
+            }
             "Result" => match type_args.as_slice() {
                 [ok, er] if t.args.len() == 2 => Ty::Result(
                     Box::new(self.resolve_type(ok)),
@@ -474,6 +507,8 @@ impl Checker {
             },
             Ty::Vec(t) => Ty::Vec(Box::new(self.resolve(t))),
             Ty::Result(a, b) => Ty::Result(Box::new(self.resolve(a)), Box::new(self.resolve(b))),
+            Ty::Option(t) => Ty::Option(Box::new(self.resolve(t))),
+            Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Fn(ps, r) => Ty::Fn(
                 ps.iter().map(|p| self.resolve(p)).collect(),
                 Box::new(self.resolve(r)),
@@ -506,6 +541,11 @@ impl Checker {
                 Ty::Prim(Prim::F64)
             }
             Ty::Vec(t) => Ty::Vec(Box::new(self.finalize_ty(&t))),
+            Ty::Option(t) => Ty::Option(Box::new(self.finalize_ty(&t))),
+            Ty::Map(k, v) => Ty::Map(
+                Box::new(self.finalize_ty(&k)),
+                Box::new(self.finalize_ty(&v)),
+            ),
             Ty::Result(a, b) => Ty::Result(
                 Box::new(self.finalize_ty(&a)),
                 Box::new(self.finalize_ty(&b)),
@@ -537,6 +577,11 @@ impl Checker {
                 true
             }
             (Ty::Vec(x), Ty::Vec(y)) => self.unify(x, y),
+            (Ty::Option(x), Ty::Option(y)) => self.unify(x, y),
+            (Ty::Map(k1, v1), Ty::Map(k2, v2)) => {
+                let ok = self.unify(k1, k2);
+                self.unify(v1, v2) && ok
+            }
             (Ty::Result(a1, b1), Ty::Result(a2, b2)) => {
                 let ok = self.unify(a1, a2);
                 self.unify(b1, b2) && ok
@@ -1010,6 +1055,21 @@ impl Checker {
                     ast::Lit::Bool(_) => Ty::bool(),
                 };
                 Self::mk(hir::ExprKind::Lit(l.clone()), ty, span)
+            }
+            K::Path(p) if self.is_option_ctor(p, "None") => {
+                let inner = match expected {
+                    Some(Ty::Option(t)) => (**t).clone(),
+                    _ => Ty::Unknown,
+                };
+                Self::mk(
+                    hir::ExprKind::EnumCtor {
+                        enum_name: "Option".into(),
+                        variant: "None".into(),
+                        args: vec![],
+                    },
+                    Ty::Option(Box::new(inner)),
+                    span,
+                )
             }
             K::Path(p) => self.path(p, span),
             K::FString(parts) => {
@@ -1494,6 +1554,19 @@ impl Checker {
         let ty = self.resolve(ty);
         match &p.node {
             P::Wild => hir::Pat::Wild,
+            P::Bind(name) if name == "None" => {
+                if !matches!(ty, Ty::Option(_) | Ty::Unknown) {
+                    self.err(
+                        p.span.clone(),
+                        format!("`None` patterns need an `Option`, found `{ty}`"),
+                    );
+                }
+                hir::Pat::Variant {
+                    enum_name: Some("Option".into()),
+                    variant: "None".into(),
+                    args: vec![],
+                }
+            }
             P::Bind(name) => {
                 let id = ast::Ident {
                     node: name.clone(),
@@ -1532,6 +1605,24 @@ impl Checker {
             hir::Pat::Wild
         };
         let (enum_name, variant, field_tys) = match path {
+            [one] if one.node == "Some" => {
+                let payload = match ty {
+                    Ty::Option(t) => Some((**t).clone()),
+                    Ty::Unknown => Some(Ty::Unknown),
+                    _ => None,
+                };
+                let Some(payload) = payload else {
+                    return bad(
+                        self,
+                        format!("`Some` patterns need an `Option`, found `{ty}`"),
+                    );
+                };
+                (
+                    Some("Option".to_string()),
+                    "Some".to_string(),
+                    vec![payload],
+                )
+            }
             [one] if matches!(one.node.as_str(), "Ok" | "Err") => {
                 let payload = match ty {
                     Ty::Result(o, e) => Some(if one.node == "Ok" {
@@ -1610,23 +1701,44 @@ impl Checker {
         if self.exhaustive(&rows, std::slice::from_ref(sty)) {
             return;
         }
-        let missing = match sty {
-            Ty::Enum(name) => {
-                let variants = self.enums.get(name).cloned().unwrap_or_default();
-                let names: Vec<_> = variants
+        let missing = match self.constructors_of(sty) {
+            Some(ctors) => {
+                let names: Vec<String> = ctors
                     .iter()
-                    .filter(|(v, fields)| {
-                        let sub = self.specialize(&rows, Some(name), v, fields.len());
-                        let mut tys = fields.clone();
-                        !self.exhaustive(&sub, &tys.split_off(0))
+                    .filter(|(en, v, fields)| {
+                        let sub = self.specialize(&rows, en.as_deref(), v, fields.len());
+                        !self.exhaustive(&sub, fields)
                     })
-                    .map(|(v, _)| format!("`{name}::{v}`"))
+                    .map(|(en, v, _)| match en.as_deref() {
+                        Some("Option") | None => format!("`{v}`"),
+                        Some(name) => format!("`{name}::{v}`"),
+                    })
                     .collect();
                 format!(": missing {}", names.join(", "))
             }
-            _ => ": add a `_` arm".to_string(),
+            None => ": add a `_` arm".to_string(),
         };
         self.err(span.clone(), format!("non-exhaustive `match`{missing}"));
+    }
+
+    /// The constructors a value of `ty` can have, when `match` has to cover each of them.
+    fn constructors_of(&self, ty: &Ty) -> Option<Vec<Constructor>> {
+        match self.resolve(ty) {
+            Ty::Enum(name) => self.enums.get(&name).map(|vs| {
+                vs.iter()
+                    .map(|(v, f)| (Some(name.clone()), v.clone(), f.clone()))
+                    .collect()
+            }),
+            Ty::Result(o, e) => Some(vec![
+                (None, "Ok".to_string(), vec![*o]),
+                (None, "Err".to_string(), vec![*e]),
+            ]),
+            Ty::Option(t) => Some(vec![
+                (Some("Option".to_string()), "Some".to_string(), vec![*t]),
+                (Some("Option".to_string()), "None".to_string(), vec![]),
+            ]),
+            _ => None,
+        }
     }
 
     /// Rows whose first column can match `variant`, with that column replaced by its fields.
@@ -1667,18 +1779,7 @@ impl Checker {
         let Some((first, rest_tys)) = tys.split_first() else {
             return !rows.is_empty();
         };
-        let constructors: Option<Vec<Constructor>> = match self.resolve(first) {
-            Ty::Enum(name) => self.enums.get(&name).map(|vs| {
-                vs.iter()
-                    .map(|(v, f)| (Some(name.clone()), v.clone(), f.clone()))
-                    .collect()
-            }),
-            Ty::Result(o, e) => Some(vec![
-                (None, "Ok".to_string(), vec![*o]),
-                (None, "Err".to_string(), vec![*e]),
-            ]),
-            _ => None,
-        };
+        let constructors = self.constructors_of(first);
         if let Some(ctors) = constructors {
             return ctors.iter().all(|(en, v, fields)| {
                 let sub = self.specialize(rows, en.as_deref(), v, fields.len());
@@ -1828,6 +1929,13 @@ impl Checker {
                 }
                 "replace" => Ty::Fn(vec![Ty::str(), Ty::str()], Box::new(Ty::str())),
                 "split" => Ty::Fn(vec![Ty::str()], Box::new(Ty::Vec(Box::new(Ty::str())))),
+                "find" => Ty::Fn(
+                    vec![Ty::str()],
+                    Box::new(Ty::Option(Box::new(Ty::Prim(Prim::U64)))),
+                ),
+                "to_int" => Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Prim(Prim::I64))))),
+                "to_float" => Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Prim(Prim::F64))))),
+                "chars" | "lines" => Ty::Fn(vec![], Box::new(Ty::Vec(Box::new(Ty::str())))),
                 _ => self.no_method(
                     name,
                     "String",
@@ -1842,6 +1950,11 @@ impl Checker {
                         "ends_with",
                         "replace",
                         "split",
+                        "find",
+                        "to_int",
+                        "to_float",
+                        "chars",
+                        "lines",
                     ],
                 ),
             },
@@ -1850,9 +1963,57 @@ impl Checker {
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 "push" => Ty::Fn(vec![(**elem).clone()], Box::new(Ty::Unit)),
                 "contains" => Ty::Fn(vec![(**elem).clone()], Box::new(Ty::bool())),
+                "first" | "last" | "pop" => Ty::Fn(vec![], Box::new(Ty::Option(elem.clone()))),
+                "get" => {
+                    let index = self.fresh(false);
+                    Ty::Fn(vec![index], Box::new(Ty::Option(elem.clone())))
+                }
+                "sort" | "reverse" => Ty::Fn(vec![], Box::new(Ty::Unit)),
                 _ => {
                     let shown = base.ty.to_string();
-                    self.no_method(name, &shown, &["is_empty", "len", "push", "contains"])
+                    self.no_method(
+                        name,
+                        &shown,
+                        &[
+                            "is_empty", "len", "push", "contains", "first", "last", "pop", "get",
+                            "sort", "reverse",
+                        ],
+                    )
+                }
+            },
+            Ty::Option(inner) => match n {
+                "is_some" | "is_none" => Ty::Fn(vec![], Box::new(Ty::bool())),
+                "unwrap" => Ty::Fn(vec![], inner.clone()),
+                "unwrap_or" => Ty::Fn(vec![(**inner).clone()], inner.clone()),
+                _ => {
+                    let shown = base.ty.to_string();
+                    self.no_method(name, &shown, &["is_some", "is_none", "unwrap", "unwrap_or"])
+                }
+            },
+            Ty::Map(k, v) => match n {
+                "insert" => Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Unit)),
+                "get" | "remove" => Ty::Fn(vec![(**k).clone()], Box::new(Ty::Option(v.clone()))),
+                "contains_key" => Ty::Fn(vec![(**k).clone()], Box::new(Ty::bool())),
+                "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
+                "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
+                "keys" => Ty::Fn(vec![], Box::new(Ty::Vec(k.clone()))),
+                "values" => Ty::Fn(vec![], Box::new(Ty::Vec(v.clone()))),
+                _ => {
+                    let shown = base.ty.to_string();
+                    self.no_method(
+                        name,
+                        &shown,
+                        &[
+                            "insert",
+                            "get",
+                            "remove",
+                            "contains_key",
+                            "len",
+                            "is_empty",
+                            "keys",
+                            "values",
+                        ],
+                    )
                 }
             },
             Ty::Table(s) => match n {
@@ -1896,6 +2057,16 @@ impl Checker {
             && self.enums.contains_key(&p[0].node)
         {
             return self.enum_ctor(&p[0].node, &p[1], args, span);
+        }
+        if let ast::ExprKind::Path(p) = &callee.node
+            && self.is_option_ctor(p, "Some")
+        {
+            if args.len() != 1 {
+                self.err(span.clone(), "`Some` takes exactly one argument");
+            }
+            if let Some(arg) = args.first() {
+                return self.some_ctor(arg, expected, span);
+            }
         }
         // `Ok(x)` / `Err(x)` build a `Result`, typed from context when available.
         if let ast::ExprKind::Path(p) = &callee.node
@@ -2050,6 +2221,40 @@ impl Checker {
             hir::ExprKind::Call {
                 callee: Box::new(callee),
                 args: checked,
+            },
+            ty,
+            span,
+        )
+    }
+
+    /// Whether `p` is the bare name `ctor` (`Some` / `None`) and nothing in scope shadows it.
+    fn is_option_ctor(&self, p: &[ast::Ident], ctor: &str) -> bool {
+        p.len() == 1
+            && p[0].node == ctor
+            && self.lookup_local(ctor).is_none()
+            && !self.fn_sigs.contains_key(ctor)
+            && !self.globals.contains_key(ctor)
+    }
+
+    /// `Some(value)`, typed from the expected `Option<T>` when there is one.
+    fn some_ctor(&mut self, arg: &ast::Expr, expected: Option<&Ty>, span: &Span) -> hir::Expr {
+        let want = match expected {
+            Some(Ty::Option(t)) => (**t).clone(),
+            _ => Ty::Unknown,
+        };
+        let arg = self.expr(arg, Some(&want));
+        let arg = self.coerce(arg, &want);
+        let ty = match expected {
+            Some(e @ Ty::Option(_)) if e.accepts(&Ty::Option(Box::new(arg.ty.clone()))) => {
+                e.clone()
+            }
+            _ => Ty::Option(Box::new(arg.ty.clone())),
+        };
+        Self::mk(
+            hir::ExprKind::EnumCtor {
+                enum_name: "Option".into(),
+                variant: "Some".into(),
+                args: vec![arg],
             },
             ty,
             span,

@@ -489,6 +489,16 @@ fn zeros_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     Ok(expected.clone())
 }
 
+fn map_new_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
+    match expected {
+        Ty::Map(..) | Ty::Unknown => Ok(expected.clone()),
+        other => Err(format!(
+            "`std::map::new` makes a `Map<K, V>` but the context expects `{other}`; \
+             write `let m: Map<String, i64> = std::map::new();`"
+        )),
+    }
+}
+
 fn from_vec_check(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     elem(args, 0)?;
@@ -667,6 +677,7 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
     ("std::collect", sig(collect)),
+    ("std::map::new", sig_expected(zeros_check, map_new_result)),
     (
         "std::tensor::zeros",
         sig_expected(zeros_check, zeros_result),
