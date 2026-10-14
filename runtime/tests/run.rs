@@ -1070,3 +1070,64 @@ fn impl_methods_and_associated_functions() {
     assert_eq!(text(run(src, "text", vec![])), "area 4");
     assert_eq!(float(run(src, "chain", vec![])), 9.0 + 16.0);
 }
+
+#[test]
+fn traits_with_dynamic_dispatch_and_dependency_injection() {
+    let src = "
+        trait Shape {
+            fn area(self) -> f64;
+            fn name(self) -> String;
+            fn describe(self) -> String { f\"{self.name()} with area {self.area()}\" }
+        }
+        struct Circle { r: f64 }
+        struct Square { s: f64 }
+        impl Shape for Circle {
+            fn area(self) -> f64 { self.r * self.r * 3.0 }
+            fn name(self) -> String { \"circle\" }
+        }
+        impl Shape for Square {
+            fn area(self) -> f64 { self.s * self.s }
+            fn name(self) -> String { \"square\" }
+            fn describe(self) -> String { \"a square!\" }
+        }
+        fn total(shapes: Vec<Shape>) -> f64 { shapes.map(|s| s.area()).sum() }
+        fn labels(shapes: Vec<Shape>) -> Vec<String> { shapes.map(|s| s.describe()) }
+        fn mixed() -> Vec<Shape> { [Circle { r: 1.0 }, Square { s: 2.0 }] }
+        fn direct() -> String { Circle { r: 2.0 }.describe() }
+
+        // An injected dependency: the service does not know which store it talks to.
+        trait Store { fn load(self, key: String) -> Option<String>; fn save(self, key: String, value: String); }
+        struct MemoryStore { data: Map<String, String> }
+        impl Store for MemoryStore {
+            fn load(self, key: String) -> Option<String> { self.data.get(key) }
+            fn save(self, key: String, value: String) { self.data.insert(key, value); }
+        }
+        struct Greeter { store: Store }
+        impl Greeter {
+            fn new(store: Store) -> Greeter { Greeter { store: store } }
+            fn greet(self, name: String) -> String {
+                match self.store.load(name) {
+                    Some(g) => g,
+                    None => { self.store.save(name, f\"hello, {name}\"); f\"first time, {name}\" }
+                }
+            }
+        }
+        fn visits() -> Vec<String> {
+            let g = Greeter::new(MemoryStore { data: std::map::new() });
+            [g.greet(\"ana\"), g.greet(\"ana\"), g.greet(\"bo\")]
+        }
+    ";
+    assert_eq!(
+        float(run(src, "total", vec![run(src, "mixed", vec![])])),
+        3.0 + 4.0
+    );
+    assert_eq!(
+        run(src, "labels", vec![run(src, "mixed", vec![])]).to_json(),
+        json!(["circle with area 3", "a square!"])
+    );
+    assert_eq!(text(run(src, "direct", vec![])), "circle with area 12");
+    assert_eq!(
+        run(src, "visits", vec![]).to_json(),
+        json!(["first time, ana", "hello, ana", "first time, bo"])
+    );
+}
