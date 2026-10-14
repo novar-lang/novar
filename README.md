@@ -131,4 +131,12 @@ cd editors/vscode && npm ci && npm test
 
 ## License
 
-Dual-licensed under MIT (`LICENSE-MIT`) or Apache 2.0 (`LICENSE-APACHE`).
+Dual-licensed under MIT (`LICENSE-MIT`) or Apache 2.0 (`LICENSE-APACHE`): you may use Telvax under
+either one, at your option.
+
+## Community
+
+Questions and ideas go to [Discussions](https://github.com/telvax/telvax/discussions); bugs and
+feature requests to [issues](https://github.com/telvax/telvax/issues). Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md) first, and report
+security problems privately as described in [SECURITY.md](SECURITY.md).

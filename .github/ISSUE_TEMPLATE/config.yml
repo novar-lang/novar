@@ -1,1 +1,8 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/telvax/telvax/discussions
+    about: Ask how to do something or discuss an idea before opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/telvax/telvax/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.

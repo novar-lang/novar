@@ -215,9 +215,8 @@ fn the_dockerfile_is_multi_stage_and_names_the_program() {
     let docker = std::fs::read_to_string(dir.join("Dockerfile")).unwrap();
     assert_eq!(docker.matches("\nFROM ").count(), 2, "{docker}");
     assert!(docker.contains("COPY app.tvx ."));
-    assert!(docker.contains(
-        "mkdir -p /out && /telvax/target/release/telvax build --serve app.tvx -o /out/service"
-    ));
+    assert!(docker.contains("mkdir -p /out && telvax build --serve app.tvx -o /out/service"));
+    assert!(docker.contains("--mount=type=cache,target=/telvax/target"));
     assert!(docker.contains("COPY --from=builder /out/service /service"));
     assert!(docker.contains("USER nonroot") && docker.contains("EXPOSE 8080"));
 }
