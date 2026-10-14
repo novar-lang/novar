@@ -141,6 +141,113 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             ))
         }
         "std::map::new" => Ok(Value::map(Vec::new())),
+        "std::iter::any" | "std::iter::all" | "std::iter::find" => {
+            let items = want_vec(&args[0])?;
+            let which = path.rsplit("::").next().unwrap_or("");
+            for v in items.iter() {
+                let hit = match interp.apply(&args[1], vec![v.clone()])? {
+                    Value::Bool(b) => b,
+                    other => {
+                        return err(format!("{which} predicate returned {}", other.type_name()));
+                    }
+                };
+                match (which, hit) {
+                    ("any", true) => return Ok(Value::Bool(true)),
+                    ("all", false) => return Ok(Value::Bool(false)),
+                    ("find", true) => return Ok(Value::some(v.clone())),
+                    _ => {}
+                }
+            }
+            Ok(match which {
+                "any" => Value::Bool(false),
+                "all" => Value::Bool(true),
+                _ => Value::none(),
+            })
+        }
+        "std::iter::for_each" => {
+            for v in want_vec(&args[0])?.iter() {
+                interp.apply(&args[1], vec![v.clone()])?;
+            }
+            Ok(Value::Unit)
+        }
+        "std::iter::fold" => {
+            let mut acc = args[1].clone();
+            for v in want_vec(&args[0])?.iter() {
+                acc = interp.apply(&args[2], vec![acc, v.clone()])?;
+            }
+            Ok(acc)
+        }
+        "std::iter::enumerate" => Ok(Value::vec(
+            want_vec(&args[0])?
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| Value::Tuple(Arc::new(vec![Value::Int(i as i64), v])))
+                .collect(),
+        )),
+        "std::iter::zip" => Ok(Value::vec(
+            want_vec(&args[0])?
+                .into_iter()
+                .zip(want_vec(&args[1])?)
+                .map(|(a, b)| Value::Tuple(Arc::new(vec![a, b])))
+                .collect(),
+        )),
+        "std::iter::sum" => {
+            let items = want_vec(&args[0])?;
+            if items.iter().any(|v| matches!(v, Value::Float(_))) {
+                let mut total = 0.0;
+                for v in items.iter() {
+                    match v {
+                        Value::Float(x) => total += x,
+                        Value::Int(i) => total += *i as f64,
+                        other => return err(format!("cannot sum {}", other.type_name())),
+                    }
+                }
+                Ok(Value::Float(total))
+            } else {
+                let mut total: i64 = 0;
+                for v in items.iter() {
+                    match v {
+                        Value::Int(i) => {
+                            total = total
+                                .checked_add(*i)
+                                .ok_or_else(|| RuntimeError::new("integer overflow in `sum`"))?;
+                        }
+                        other => return err(format!("cannot sum {}", other.type_name())),
+                    }
+                }
+                Ok(Value::Int(total))
+            }
+        }
+        "std::iter::min" | "std::iter::max" => {
+            let items = want_vec(&args[0])?;
+            let want_max = path.ends_with("max");
+            let mut best: Option<Value> = None;
+            for v in items {
+                best = Some(match best {
+                    None => v,
+                    Some(b) => {
+                        let less = crate::value::compare(&v, &b).map_err(RuntimeError::new)?
+                            == std::cmp::Ordering::Less;
+                        if less != want_max { v } else { b }
+                    }
+                });
+            }
+            Ok(Value::option(best))
+        }
+        "std::iter::skip" => {
+            let n = match &args[1] {
+                Value::Int(n) => usize::try_from(*n).unwrap_or(0),
+                other => {
+                    return err(format!(
+                        "`skip` needs an integer, found {}",
+                        other.type_name()
+                    ));
+                }
+            };
+            Ok(Value::vec(
+                want_vec(&args[0])?.into_iter().skip(n).collect(),
+            ))
+        }
         "std::iter::count" => Ok(Value::Int(want_vec(&args[0])?.len() as i64)),
         "std::collect" => Ok(args[0].clone()),
         "std::io::print" => interp.write_out(&want_str(&args[0])?).map(|()| Value::Unit),
@@ -339,6 +446,12 @@ fn map_method(m: &Arc<MapVal>, name: &str, args: &[Value]) -> Res {
         )),
         "values" => Ok(Value::vec(
             m.entries().into_iter().map(|(_, v)| v).collect(),
+        )),
+        "entries" => Ok(Value::vec(
+            m.entries()
+                .into_iter()
+                .map(|(k, v)| Value::Tuple(Arc::new(vec![k.to_value(), v])))
+                .collect(),
         )),
         _ => err(format!("Map has no method `{name}`")),
     }

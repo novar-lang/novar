@@ -1,5 +1,6 @@
 use novar_runtime::{Interp, Value, embed_text};
 use serde_json::json;
+use std::sync::Arc;
 
 fn load(src: &str) -> Interp {
     let (ast, perrs) = novar_parser::parse(src);
@@ -846,5 +847,196 @@ fn closures_capture_variables() {
     assert_eq!(
         run(src, "filtered", vec![ints(&[1, 5, 9]), Value::Int(5)]).to_json(),
         json!([5, 9])
+    );
+}
+
+#[test]
+fn question_mark_propagates_errors_and_none() {
+    let src = "
+        fn parse(s: String) -> Result<i64, String> {
+            match s.to_int() { Some(n) => Ok(n), None => Err(f\"not a number: {s}\") }
+        }
+        fn double(s: String) -> Result<i64, String> { let n = parse(s)?; Ok(n * 2) }
+        fn sum(a: String, b: String) -> Result<i64, String> { Ok(parse(a)? + parse(b)?) }
+        fn first_even(v: Vec<i64>) -> Option<i64> {
+            let first = v.first()?;
+            if first % 2 == 0 { Some(first) } else { None }
+        }
+        fn describe(s: String) -> String {
+            match double(s) { Ok(n) => f\"ok {n}\", Err(e) => f\"error: {e}\" }
+        }
+    ";
+    assert_eq!(text(run(src, "describe", vec![Value::str("21")])), "ok 42");
+    assert_eq!(
+        text(run(src, "describe", vec![Value::str("x")])),
+        "error: not a number: x"
+    );
+    let both = run(src, "sum", vec![Value::str("2"), Value::str("3")]);
+    assert_eq!(both.to_json(), json!(5));
+    let bad = run(src, "sum", vec![Value::str("2"), Value::str("z")]);
+    assert!(matches!(bad, Value::Err(_)), "{bad:?}");
+    let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
+    assert_eq!(
+        run(src, "first_even", vec![ints(&[4, 1])]).to_json(),
+        json!(4)
+    );
+    assert_eq!(
+        run(src, "first_even", vec![ints(&[3])]).to_json(),
+        json!(null)
+    );
+    assert_eq!(
+        run(src, "first_even", vec![ints(&[])]).to_json(),
+        json!(null)
+    );
+}
+
+#[test]
+fn if_let_and_while_let() {
+    let src = "
+        fn describe(v: Vec<i64>) -> String {
+            if let Some(x) = v.first() { f\"first {x}\" } else { \"empty\" }
+        }
+        fn chained(a: Option<i64>, b: Option<i64>) -> i64 {
+            if let Some(x) = a { x } else if let Some(y) = b { y * 10 } else { 0 }
+        }
+        fn drain(v: Vec<i64>) -> i64 {
+            let mut total = 0;
+            while let Some(x) = v.pop() { total += x; }
+            total
+        }
+        fn until_big(v: Vec<i64>) -> i64 {
+            let mut total = 0;
+            while let Some(x) = v.pop() {
+                if x > 100 { break; }
+                if x % 2 == 1 { continue; }
+                total += x;
+            }
+            total
+        }
+        fn set_only(r: Result<i64, String>) -> i64 {
+            let mut out = 0;
+            if let Ok(n) = r { out = n; }
+            out
+        }
+    ";
+    let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
+    assert_eq!(text(run(src, "describe", vec![ints(&[7, 8])])), "first 7");
+    assert_eq!(text(run(src, "describe", vec![ints(&[])])), "empty");
+    let some = |n| Value::some(Value::Int(n));
+    assert_eq!(int(run(src, "chained", vec![some(4), Value::none()])), 4);
+    assert_eq!(int(run(src, "chained", vec![Value::none(), some(4)])), 40);
+    assert_eq!(
+        int(run(src, "chained", vec![Value::none(), Value::none()])),
+        0
+    );
+    assert_eq!(int(run(src, "drain", vec![ints(&[1, 2, 3, 4])])), 10);
+    assert_eq!(
+        int(run(src, "until_big", vec![ints(&[2, 500, 4, 5, 6])])),
+        6 + 4
+    );
+    assert_eq!(
+        int(run(
+            src,
+            "set_only",
+            vec![Value::Ok(Box::new(Value::Int(9)))]
+        )),
+        9
+    );
+    assert_eq!(
+        int(run(
+            src,
+            "set_only",
+            vec![Value::Err(Box::new(Value::str("x")))]
+        )),
+        0
+    );
+}
+
+#[test]
+fn tuples_and_iterator_methods() {
+    let src = "
+        fn swap(p: (i64, String)) -> (String, i64) { (p.1, p.0) }
+        fn destructure(a: i64) -> i64 { let (x, y) = (a, a * 2); let (_, z, w) = (1, 2, 3); x + y + z + w }
+        fn labelled(v: Vec<String>) -> Vec<String> {
+            v.enumerate().map(|(i, s)| f\"{i}:{s}\")
+        }
+        fn pairs() -> Vec<(i64, String)> { [1, 2].zip([\"a\", \"b\"]) }
+        fn total_len(v: Vec<String>) -> u64 { v.map(|s| s.len()).fold(0, |acc, n| acc + n) }
+        fn evens(v: Vec<i64>) -> Vec<i64> { v.filter(|x| x % 2 == 0) }
+        fn stats(v: Vec<i64>) -> (i64, Option<i64>, Option<i64>) { (v.sum(), v.min(), v.max()) }
+        fn has_big(v: Vec<i64>) -> bool { v.any(|x| x > 10) && !v.all(|x| x > 10) }
+        fn first_big(v: Vec<i64>) -> Option<i64> { v.find(|x| x > 10) }
+        fn counts(text: String) -> Vec<String> {
+            let m: Map<String, i64> = std::map::new();
+            for w in text.split(\" \") { m.insert(w, m.get(w).unwrap_or(0) + 1); }
+            let mut out = [\"\"];
+            out.pop();
+            for (word, n) in m.entries() { out.push(f\"{word}={n}\"); }
+            out
+        }
+        fn joined(v: Vec<String>) -> String { v.join(\"+\") }
+        fn skipped(v: Vec<i64>) -> Vec<i64> { v.skip(2) }
+        fn tuple_match(p: (bool, i64)) -> String {
+            match p { (true, n) => f\"yes {n}\", (false, 0) => \"zero\", (false, n) => f\"no {n}\" }
+        }
+    ";
+    let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
+    let strs = |xs: &[&str]| Value::vec(xs.iter().map(|x| Value::str(*x)).collect());
+    let pair = Value::Tuple(Arc::new(vec![Value::Int(7), Value::str("seven")]));
+    assert_eq!(run(src, "swap", vec![pair]).to_json(), json!(["seven", 7]));
+    assert_eq!(
+        int(run(src, "destructure", vec![Value::Int(5)])),
+        5 + 10 + 2 + 3
+    );
+    assert_eq!(
+        run(src, "labelled", vec![strs(&["a", "b"])]).to_json(),
+        json!(["0:a", "1:b"])
+    );
+    assert_eq!(
+        run(src, "pairs", vec![]).to_json(),
+        json!([[1, "a"], [2, "b"]])
+    );
+    assert_eq!(int(run(src, "total_len", vec![strs(&["ab", "cde"])])), 5);
+    assert_eq!(
+        run(src, "evens", vec![ints(&[1, 2, 3, 4])]).to_json(),
+        json!([2, 4])
+    );
+    assert_eq!(
+        run(src, "stats", vec![ints(&[3, 9, 1])]).to_json(),
+        json!([13, 1, 9])
+    );
+    assert_eq!(
+        run(src, "stats", vec![ints(&[])]).to_json(),
+        json!([0, null, null])
+    );
+    assert!(matches!(
+        run(src, "has_big", vec![ints(&[1, 20])]),
+        Value::Bool(true)
+    ));
+    assert_eq!(
+        run(src, "first_big", vec![ints(&[1, 20, 30])]).to_json(),
+        json!(20)
+    );
+    assert_eq!(
+        run(src, "counts", vec![Value::str("b a b")]).to_json(),
+        json!(["a=1", "b=2"])
+    );
+    assert_eq!(
+        text(run(src, "joined", vec![strs(&["x", "y", "z"])])),
+        "x+y+z"
+    );
+    assert_eq!(
+        run(src, "skipped", vec![ints(&[1, 2, 3, 4])]).to_json(),
+        json!([3, 4])
+    );
+    let tup = |b, n| Value::Tuple(Arc::new(vec![Value::Bool(b), Value::Int(n)]));
+    assert_eq!(text(run(src, "tuple_match", vec![tup(true, 4)])), "yes 4");
+    assert_eq!(text(run(src, "tuple_match", vec![tup(false, 0)])), "zero");
+    assert_eq!(text(run(src, "tuple_match", vec![tup(false, 5)])), "no 5");
+    // Tuples are JSON arrays on the way in and out.
+    let interp = load(src);
+    assert_eq!(
+        interp.call_json("swap", &[json!([3, "x"])]).unwrap(),
+        json!(["x", 3])
     );
 }

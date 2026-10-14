@@ -188,6 +188,129 @@ fn take(args: &[Ty]) -> Result<Ty, String> {
     Ok(vec_of(t))
 }
 
+fn bool_fn_over_vec(args: &[Ty], what: &str) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let t = elem(args, 0)?;
+    match &args[1] {
+        Ty::Fn(p, _) if p.len() == 1 && !p[0].accepts(&t) => Err(format!(
+            "the predicate takes `{}` but the vector holds `{t}`: mismatched element type",
+            p[0]
+        )),
+        Ty::Fn(p, r) if p.len() == 1 && Ty::bool().accepts(r) => Ok(t),
+        Ty::Unknown => Ok(t),
+        other => Err(format!(
+            "argument 2 of `{what}` must be `fn(_) -> bool`, found `{other}`"
+        )),
+    }
+}
+
+fn any_all(args: &[Ty]) -> Result<Ty, String> {
+    bool_fn_over_vec(args, "any / all")?;
+    Ok(Ty::bool())
+}
+
+fn find(args: &[Ty]) -> Result<Ty, String> {
+    let t = bool_fn_over_vec(args, "find")?;
+    Ok(Ty::Option(Box::new(t)))
+}
+
+fn for_each_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    if i == 1 {
+        let t = elem(prev, 0).ok()?;
+        Some(Ty::Fn(vec![t], Box::new(Ty::Unknown)))
+    } else {
+        None
+    }
+}
+
+fn for_each(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    elem(args, 0)?;
+    Ok(Ty::Unit)
+}
+
+fn enumerate(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    let t = elem(args, 0)?;
+    Ok(vec_of(Ty::Tuple(vec![Ty::Prim(Prim::I64), t])))
+}
+
+fn zip(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (a, b) = (elem(args, 0)?, elem(args, 1)?);
+    Ok(vec_of(Ty::Tuple(vec![a, b])))
+}
+
+fn numeric_elem(args: &[Ty], what: &str) -> Result<Ty, String> {
+    arity(args, 1)?;
+    let t = elem(args, 0)?;
+    match &t {
+        Ty::Prim(p) if p.is_numeric() => Ok(t),
+        Ty::IntVar(_) | Ty::FloatVar(_) | Ty::Unknown => Ok(t),
+        other => Err(format!(
+            "`{what}` needs a vector of numbers, found a vector of `{other}`"
+        )),
+    }
+}
+
+fn sum(args: &[Ty]) -> Result<Ty, String> {
+    numeric_elem(args, "sum")
+}
+
+fn min_max(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    let t = elem(args, 0)?;
+    match &t {
+        Ty::Prim(p) if p.is_numeric() || *p == Prim::Str => Ok(Ty::Option(Box::new(t))),
+        Ty::IntVar(_) | Ty::FloatVar(_) | Ty::Unknown => Ok(Ty::Option(Box::new(t))),
+        other => Err(format!(
+            "`min` and `max` need numbers or strings, found `{other}`"
+        )),
+    }
+}
+
+fn fold_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    if i == 2 {
+        let t = elem(prev, 0).ok()?;
+        let acc = prev.get(1)?.clone();
+        Some(Ty::Fn(vec![acc.clone(), t], Box::new(acc)))
+    } else {
+        None
+    }
+}
+
+fn fold(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 3)?;
+    let t = elem(args, 0)?;
+    let acc = args[1].clone();
+    match &args[2] {
+        Ty::Fn(p, r) if p.len() == 2 => {
+            if !p[0].accepts(&acc) || !p[1].accepts(&t) {
+                return Err(format!(
+                    "the function takes (`{}`, `{}`) but fold passes (`{acc}`, `{t}`)",
+                    p[0], p[1]
+                ));
+            }
+            if !acc.accepts(r) {
+                return Err(format!(
+                    "the function returns `{r}` but the accumulator is `{acc}`"
+                ));
+            }
+            Ok(acc)
+        }
+        Ty::Unknown => Ok(acc),
+        other => Err(format!(
+            "argument 3 must be a function of two arguments, found `{other}`"
+        )),
+    }
+}
+
+fn skip(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_int(args, 1)?;
+    Ok(vec_of(elem(args, 0)?))
+}
+
 fn count(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     elem(args, 0)?;
@@ -674,6 +797,52 @@ const FUNCTIONS: &[(&str, Sig)] = &[
             from_expected: None,
         },
     ),
+    (
+        "std::iter::any",
+        Sig {
+            check: any_all,
+            hint: filter_hint,
+            from_expected: None,
+        },
+    ),
+    (
+        "std::iter::all",
+        Sig {
+            check: any_all,
+            hint: filter_hint,
+            from_expected: None,
+        },
+    ),
+    (
+        "std::iter::find",
+        Sig {
+            check: find,
+            hint: filter_hint,
+            from_expected: None,
+        },
+    ),
+    (
+        "std::iter::for_each",
+        Sig {
+            check: for_each,
+            hint: for_each_hint,
+            from_expected: None,
+        },
+    ),
+    (
+        "std::iter::fold",
+        Sig {
+            check: fold,
+            hint: fold_hint,
+            from_expected: None,
+        },
+    ),
+    ("std::iter::enumerate", sig(enumerate)),
+    ("std::iter::zip", sig(zip)),
+    ("std::iter::sum", sig(sum)),
+    ("std::iter::min", sig(min_max)),
+    ("std::iter::max", sig(min_max)),
+    ("std::iter::skip", sig(skip)),
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
     ("std::collect", sig(collect)),
