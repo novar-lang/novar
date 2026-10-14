@@ -77,6 +77,28 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
         return crate::table::call(interp, path, &args, result);
     }
     match path {
+        "std::env::get" => Ok(match std::env::var(&*want_str(&args[0])?) {
+            Ok(v) => Value::some(Value::str(v)),
+            Err(_) => Value::none(),
+        }),
+        "std::fs::read" => {
+            let path = want_str(&args[0])?;
+            Ok(match std::fs::read_to_string(&*path) {
+                Ok(text) => Value::Ok(Box::new(Value::str(text))),
+                Err(e) => Value::Err(Box::new(Value::str(format!("cannot read {path}: {e}")))),
+            })
+        }
+        "std::fs::write" => {
+            let path = want_str(&args[0])?;
+            let text = want_str(&args[1])?;
+            Ok(match std::fs::write(&*path, &*text) {
+                Ok(()) => Value::Ok(Box::new(Value::Unit)),
+                Err(e) => Value::Err(Box::new(Value::str(format!("cannot write {path}: {e}")))),
+            })
+        }
+        "std::fs::exists" => Ok(Value::Bool(
+            std::path::Path::new(&*want_str(&args[0])?).exists(),
+        )),
         "std::json::stringify" => Ok(Value::str(args[0].to_json().to_string())),
         "std::json::parse" => {
             let Ty::Result(target, _) = result else {

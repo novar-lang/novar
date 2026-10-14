@@ -1774,3 +1774,72 @@ fn dump(n: Text, a: Int) -> Text:
         r#"{"age":5,"name":"Bo"}"#
     );
 }
+
+#[test]
+fn files_and_environment_variables() {
+    let dir = std::env::temp_dir().join(format!("telvax-fs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("note.txt");
+    let src = r#"
+fn roundtrip(path: Text, body: Text) -> Text:
+    match std.fs.write(path, body):
+        case Err(e):
+            e
+        case Ok(_):
+            match std.fs.read(path):
+                case Ok(t):
+                    t
+                case Err(e):
+                    e
+
+fn missing(path: Text) -> Text:
+    match std.fs.read(path):
+        case Ok(t):
+            t
+        case Err(e):
+            e
+
+fn has(path: Text) -> Bool:
+    std.fs.exists(path)
+
+fn var_or(name: Text) -> Text:
+    std.env.get(name).unwrap_or("unset")
+"#;
+    let i = load(src);
+    let path = file.to_str().unwrap();
+    assert_eq!(
+        text(
+            i.call("roundtrip", vec![Value::str(path), Value::str("hello")])
+                .unwrap()
+        ),
+        "hello"
+    );
+    assert!(matches!(
+        i.call("has", vec![Value::str(path)]).unwrap(),
+        Value::Bool(true)
+    ));
+    let gone = dir.join("nope.txt");
+    assert!(
+        text(
+            i.call("missing", vec![Value::str(gone.to_str().unwrap())])
+                .unwrap()
+        )
+        .contains("cannot read")
+    );
+    unsafe { std::env::set_var("TELVAX_TEST_ENV_VAR", "set") };
+    assert_eq!(
+        text(
+            i.call("var_or", vec![Value::str("TELVAX_TEST_ENV_VAR")])
+                .unwrap()
+        ),
+        "set"
+    );
+    assert_eq!(
+        text(
+            i.call("var_or", vec![Value::str("TELVAX_NOT_SET_ANYWHERE")])
+                .unwrap()
+        ),
+        "unset"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
