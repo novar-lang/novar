@@ -17,7 +17,7 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-arrow = { version = "59", default-features = false, features = ["ffi"] }
+arrow = { version = "60", default-features = false, features = ["ffi"] }
 novar_diagnostics = { path = "../compiler/diagnostics" }
 novar_hir = { path = "../compiler/semantic" }
 novar_parser = { path = "../compiler/parser" }
