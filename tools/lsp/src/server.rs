@@ -186,8 +186,7 @@ pub fn diagnostics(snap: &Snapshot, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
 fn reply<T: serde::Serialize>(id: RequestId, result: T) -> Response {
     Response {
         id,
-        result: Some(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)),
-        error: None,
+        response_result: Ok(serde_json::to_value(result).unwrap_or(serde_json::Value::Null)),
     }
 }
 
@@ -195,8 +194,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
     let id = req.id.clone();
     let unknown = |id: RequestId| Response {
         id,
-        result: Some(serde_json::Value::Null),
-        error: None,
+        response_result: Ok(serde_json::Value::Null),
     };
     macro_rules! params {
         ($ty:ty) => {
@@ -339,8 +337,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
         }
         _ => Response {
             id,
-            result: None,
-            error: Some(lsp_server::ResponseError {
+            response_result: Err(lsp_server::ResponseError {
                 code: lsp_server::ErrorCode::MethodNotFound as i32,
                 message: format!("unsupported request `{}`", req.method),
                 data: None,
