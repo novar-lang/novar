@@ -220,6 +220,34 @@ fn openai_errors_and_missing_key() {
 }
 
 #[test]
+fn openai_failures_say_what_happened() {
+    let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let (url, _) = mock(vec![
+        (429, r#"{"error":{"message":"Rate limit reached"}}"#.into()),
+        (502, "<html>bad gateway</html>".into()),
+        (200, r#"{"choices":[]}"#.into()),
+        (200, r#"{"choices":[{"message":{"content":null}}]}"#.into()),
+    ]);
+    unsafe {
+        std::env::set_var("OPENAI_BASE_URL", &url);
+        std::env::set_var("OPENAI_API_KEY", "k");
+    }
+    let i = load_live(LLM).unwrap();
+    let ask = || i.call("ask", vec![Value::str("hi")]).unwrap_err().message;
+    let e = ask();
+    assert!(
+        e.contains("HTTP 429") && e.contains("Rate limit reached"),
+        "{e}"
+    );
+    let e = ask();
+    assert!(e.contains("HTTP 502") && e.contains("unreadable"), "{e}");
+    let e = ask();
+    assert!(e.contains("choices[0].message.content"), "{e}");
+    let e = ask();
+    assert!(e.contains("choices[0].message.content"), "{e}");
+}
+
+#[test]
 fn offline_mode_never_touches_the_network() {
     let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:1") };
