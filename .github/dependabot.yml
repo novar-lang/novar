@@ -4,6 +4,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # DataFusion pins the Arrow major version; Arrow, Parquet and DataFusion must move together,
+    # so only their minor and patch releases are proposed until DataFusion supports the next one.
+    ignore:
+      - dependency-name: "arrow*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "parquet"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "datafusion*"
+        update-types: ["version-update:semver-major"]
     groups:
       rust-minor-and-patch:
         update-types: [minor, patch]
@@ -11,6 +20,15 @@ updates:
     directory: /python
     schedule:
       interval: weekly
+    # DataFusion pins the Arrow major version; Arrow, Parquet and DataFusion must move together,
+    # so only their minor and patch releases are proposed until DataFusion supports the next one.
+    ignore:
+      - dependency-name: "arrow*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "parquet"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "datafusion*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-crate-minor-and-patch:
         update-types: [minor, patch]
