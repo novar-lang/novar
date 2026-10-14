@@ -92,7 +92,7 @@ RUN git clone --depth 1 --branch ${{NOVAR_REF}} ${{NOVAR_REPO}} /novar \\
     && cargo build --release --manifest-path /novar/Cargo.toml -p novar_cli
 WORKDIR /app
 COPY {program} .
-RUN /novar/target/release/novar build --serve {program} -o /out/service
+RUN mkdir -p /out && /novar/target/release/novar build --serve {program} -o /out/service
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /out/service /service

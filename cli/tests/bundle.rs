@@ -191,7 +191,9 @@ fn the_dockerfile_is_multi_stage_and_names_the_program() {
     let docker = std::fs::read_to_string(dir.join("Dockerfile")).unwrap();
     assert_eq!(docker.matches("\nFROM ").count(), 2, "{docker}");
     assert!(docker.contains("COPY app.nv ."));
-    assert!(docker.contains("build --serve app.nv -o /out/service"));
+    assert!(docker.contains(
+        "mkdir -p /out && /novar/target/release/novar build --serve app.nv -o /out/service"
+    ));
     assert!(docker.contains("COPY --from=builder /out/service /service"));
     assert!(docker.contains("USER nonroot") && docker.contains("EXPOSE 8080"));
 }
