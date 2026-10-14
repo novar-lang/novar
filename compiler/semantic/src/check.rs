@@ -43,7 +43,52 @@ pub(crate) fn lower(program: &ast::Program) -> (hir::Program, Vec<Diagnostic>) {
     (out, c.diags)
 }
 
+/// The candidate closest to `name` by edit distance (at most 2, and well under the name's length).
+fn closest<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let limit = (name.chars().count() / 3).clamp(1, 2);
+    candidates
+        .into_iter()
+        .filter(|c| *c != name && !c.starts_with('_'))
+        .map(|c| (edit_distance(name, c), c))
+        .filter(|(d, _)| *d <= limit)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, c)| c)
+}
+
+/// Edit distance where swapping two neighbouring letters counts once (`widht` -> `width`).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        d[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j] + 1)
+                .min(d[i][j - 1] + 1)
+                .min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    d[a.len()][b.len()]
+}
+
 impl Checker {
+    /// Like `err`, with a "did you mean" note when `hint` names a close match.
+    fn err_hint(&mut self, span: Span, msg: impl Into<String>, hint: Option<&str>) {
+        let mut d = Diagnostic::error(span, msg);
+        if let Some(h) = hint {
+            d = d.with_note(format!("did you mean `{h}`?"));
+        }
+        self.diags.push(d);
+    }
+
     fn err(&mut self, span: Span, msg: impl Into<String>) {
         self.diags.push(Diagnostic::error(span, msg));
     }
@@ -323,9 +368,18 @@ impl Checker {
             }
             _ if self.imports.contains_key(name) => Ty::Named(name.to_string()),
             _ => {
-                self.err(
+                let mut known: Vec<&str> = vec![
+                    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool",
+                    "String", "Tensor", "Table", "Vec", "Result",
+                ];
+                known.extend(self.struct_fields.keys().map(String::as_str));
+                known.extend(self.enums.keys().map(String::as_str));
+                known.extend(self.imports.keys().map(String::as_str));
+                let hint = closest(name, known).map(str::to_string);
+                self.err_hint(
                     t.span.clone(),
                     format!("cannot find type `{name}` in this scope"),
+                    hint.as_deref(),
                 );
                 Ty::Unknown
             }
@@ -1710,11 +1764,35 @@ impl Checker {
             }
             return Self::mk(hir::ExprKind::Extern(full), Ty::Unknown, span);
         }
-        self.err(
+        let hint = if names.len() == 1 {
+            let mut known: Vec<&str> = self
+                .scopes
+                .iter()
+                .flat_map(|s| s.keys().map(String::as_str))
+                .collect();
+            known.extend(self.globals.keys().map(String::as_str));
+            known.extend(self.fn_sigs.keys().map(String::as_str));
+            closest(first, known).map(str::to_string)
+        } else {
+            None
+        };
+        self.err_hint(
             span.clone(),
             format!("cannot find `{}` in this scope", names.join("::")),
+            hint.as_deref(),
         );
         Self::mk(hir::ExprKind::Error, Ty::Unknown, span)
+    }
+
+    /// Reports a method that the runtime does not have on a built-in type.
+    fn no_method(&mut self, name: &ast::Ident, ty: &str, methods: &[&str]) -> Ty {
+        let hint = closest(&name.node, methods.iter().copied()).map(str::to_string);
+        self.err_hint(
+            name.span.clone(),
+            format!("no method `{}` on type `{ty}`", name.node),
+            hint.as_deref(),
+        );
+        Ty::Unknown
     }
 
     fn field_ty(&mut self, base: &hir::Expr, name: &ast::Ident) -> Ty {
@@ -1729,7 +1807,14 @@ impl Checker {
                     Some((_, ty)) => ty.clone(),
                     None => {
                         let ty = base.ty.clone();
-                        self.err(name.span.clone(), format!("no field `{n}` on type `{ty}`"));
+                        let hint = self.struct_fields.get(s).and_then(|f| {
+                            closest(n, f.iter().map(|(name, _)| name.as_str())).map(str::to_string)
+                        });
+                        self.err_hint(
+                            name.span.clone(),
+                            format!("no field `{n}` on type `{ty}`"),
+                            hint.as_deref(),
+                        );
                         Ty::Unknown
                     }
                 }
@@ -1738,12 +1823,37 @@ impl Checker {
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 "trim" | "to_lowercase" | "to_uppercase" => Ty::Fn(vec![], Box::new(Ty::str())),
-                _ => Ty::Unknown,
+                "contains" | "starts_with" | "ends_with" => {
+                    Ty::Fn(vec![Ty::str()], Box::new(Ty::bool()))
+                }
+                "replace" => Ty::Fn(vec![Ty::str(), Ty::str()], Box::new(Ty::str())),
+                "split" => Ty::Fn(vec![Ty::str()], Box::new(Ty::Vec(Box::new(Ty::str())))),
+                _ => self.no_method(
+                    name,
+                    "String",
+                    &[
+                        "is_empty",
+                        "len",
+                        "trim",
+                        "to_lowercase",
+                        "to_uppercase",
+                        "contains",
+                        "starts_with",
+                        "ends_with",
+                        "replace",
+                        "split",
+                    ],
+                ),
             },
-            Ty::Vec(_) => match n {
+            Ty::Vec(elem) => match n {
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
-                _ => Ty::Unknown,
+                "push" => Ty::Fn(vec![(**elem).clone()], Box::new(Ty::Unit)),
+                "contains" => Ty::Fn(vec![(**elem).clone()], Box::new(Ty::bool())),
+                _ => {
+                    let shown = base.ty.to_string();
+                    self.no_method(name, &shown, &["is_empty", "len", "push", "contains"])
+                }
             },
             Ty::Table(s) => match n {
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),

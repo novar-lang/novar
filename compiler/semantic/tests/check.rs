@@ -264,7 +264,7 @@ fn endpoints() {
 #[test]
 fn closures_and_extern_calls_stay_lenient() {
     assert_clean(
-        "import std::iter::map; fn f(v: Vec<String>) { let r = v |> std::iter::map(|d| d.text) |> std::collect(); }",
+        "import std::iter::map; fn f(v: Vec) { let r = v |> std::iter::map(|d| d.text) |> std::collect(); }",
     );
     assert_clean("fn f() { let g = |a, b| a + b; }");
 }
@@ -850,4 +850,71 @@ fn enum_type_errors() {
         "fn f(n: i32) -> i32 { match n { \"a\" => 1, _ => 2 } }",
         "does not match",
     );
+}
+
+// ---- friendlier errors -----------------------------------------------------------------------
+
+fn full(src: &str) -> Vec<(String, Vec<String>)> {
+    let (ast, perrs) = novar_parser::parse(src);
+    assert!(perrs.is_empty(), "parse errors: {perrs:?}");
+    lower(&ast.unwrap())
+        .1
+        .into_iter()
+        .map(|d| (d.message, d.notes))
+        .collect()
+}
+
+#[test]
+fn misspelled_names_get_a_suggestion() {
+    let e = full("fn main() -> i32 { let total = 5; totl + 1 }");
+    assert!(
+        e[0].1.iter().any(|n| n.contains("did you mean `total`")),
+        "{e:?}"
+    );
+    let e = full("fn helper() -> i32 { 1 } fn main() -> i32 { helpr() }");
+    assert!(
+        e[0].1.iter().any(|n| n.contains("did you mean `helper`")),
+        "{e:?}"
+    );
+    let e = full("fn main() -> i32 { let s: Strng = \"a\"; 1 }");
+    assert!(
+        e[0].1.iter().any(|n| n.contains("did you mean `String`")),
+        "{e:?}"
+    );
+    let e = full("struct P { width: i32 } fn f(p: P) -> i32 { p.widht }");
+    assert!(
+        e[0].1.iter().any(|n| n.contains("did you mean `width`")),
+        "{e:?}"
+    );
+    // Nothing close: no suggestion.
+    let e = full("fn main() -> i32 { zzzzzz }");
+    assert!(e[0].1.is_empty(), "{e:?}");
+}
+
+#[test]
+fn unknown_methods_on_builtin_types_are_compile_errors() {
+    let e = full("fn f(v: Vec<i32>) -> u64 { v.lenn() }");
+    assert!(
+        e[0].0.contains("no method `lenn` on type `Vec<i32>`"),
+        "{e:?}"
+    );
+    assert!(
+        e[0].1.iter().any(|n| n.contains("did you mean `len`")),
+        "{e:?}"
+    );
+    assert_err(
+        "fn f(s: String) -> String { s.shout() }",
+        "no method `shout` on type `String`",
+    );
+    assert_clean("fn f(v: Vec<i32>, s: String) -> u64 { if s.is_empty() { v.len() } else { 0 } }");
+}
+
+#[test]
+fn a_missing_semicolon_is_reported_after_the_previous_token() {
+    let src = "fn main() -> i32 {\n    let x = 5\n    x + 1\n}\n";
+    let (_, errs) = novar_parser::parse(src);
+    let first = &errs[0];
+    assert_eq!(first.message, "expected `;` after this");
+    // The span is the last character of `5`, not the token that follows.
+    assert_eq!(&src[first.span.clone()], "5");
 }

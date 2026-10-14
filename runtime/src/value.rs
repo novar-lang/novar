@@ -48,6 +48,11 @@ impl VecVal {
         self.read().get(i).cloned()
     }
 
+    /// Appends to the shared storage, so every copy of this `Vec` sees the new element.
+    pub fn push(&self, v: Value) {
+        self.0.write().unwrap_or_else(|e| e.into_inner()).push(v);
+    }
+
     /// Replaces element `i`; `false` when out of bounds.
     pub fn set(&self, i: usize, v: Value) -> bool {
         match self.0.write().unwrap_or_else(|e| e.into_inner()).get_mut(i) {

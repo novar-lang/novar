@@ -656,3 +656,29 @@ fn enums_and_match() {
         json!(4.0)
     );
 }
+
+#[test]
+fn string_and_vec_methods() {
+    let src = "
+        fn has(s: String, t: String) -> bool { s.contains(t) }
+        fn edges(s: String) -> bool { s.starts_with(\"ab\") && s.ends_with(\"yz\") }
+        fn fix(s: String) -> String { s.replace(\"cat\", \"dog\") }
+        fn words(s: String) -> u64 { s.split(\" \").len() }
+        fn second(s: String) -> String { let parts = s.split(\",\"); parts[1] }
+        fn collect(n: i64) -> u64 {
+            let mut v = [0];
+            for i in 1..n { v.push(i * i); }
+            v.len()
+        }
+        fn shares(n: i64) -> bool { let v = [1, 2]; v.push(n); v.contains(n) }
+    ";
+    assert!(matches!(run(src, "has", vec![Value::str("hello world"), Value::str("o w")]), Value::Bool(true)));
+    assert!(matches!(run(src, "has", vec![Value::str("hello"), Value::str("xyz")]), Value::Bool(false)));
+    assert!(matches!(run(src, "edges", vec![Value::str("ab...yz")]), Value::Bool(true)));
+    assert!(matches!(run(src, "edges", vec![Value::str("ab...")]), Value::Bool(false)));
+    assert_eq!(text(run(src, "fix", vec![Value::str("a cat and a cat")])), "a dog and a dog");
+    assert_eq!(int(run(src, "words", vec![Value::str("one two three")])), 3);
+    assert_eq!(text(run(src, "second", vec![Value::str("a,b,c")])), "b");
+    assert_eq!(int(run(src, "collect", vec![Value::Int(5)])), 5);
+    assert!(matches!(run(src, "shares", vec![Value::Int(9)]), Value::Bool(true)));
+}

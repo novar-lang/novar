@@ -10,16 +10,44 @@ use novar_diagnostics::Diagnostic;
 use novar_lexer::Token;
 
 macro_rules! run {
-    ($parser:expr, $tokens:expr, $eoi:expr) => {{
+    ($parser:expr, $tokens:expr, $eoi:expr, $src:expr, $base:expr) => {{
         let iter = $tokens.into_iter().map(|(t, s)| (t, SimpleSpan::from(s)));
         let stream = Stream::from_iter(iter).map(SimpleSpan::from($eoi..$eoi), |(t, s)| (t, s));
         let (out, errs) = $parser.parse(stream).into_output_errors();
         let errs: Vec<Diagnostic> = errs
             .into_iter()
-            .map(|e| Diagnostic::error(e.span().into_range(), e.to_string()))
+            .map(|e| friendly(&e, $src, $base))
             .collect();
         (out, errs)
     }};
+}
+
+/// Turns a parser error into a readable diagnostic. A missing `;` is reported where it belongs
+/// (after the previous token), and long lists of acceptable tokens collapse to what was found.
+fn friendly(e: &Rich<'_, Token<'_>>, src: &str, base: usize) -> Diagnostic {
+    use chumsky::error::RichPattern;
+    let span = e.span().into_range();
+    let expects_semi = e
+        .expected()
+        .any(|p| matches!(p, RichPattern::Token(t) if **t == Token::Semi));
+    if expects_semi && span.start > base {
+        // The previous token ends at the last non-blank character before the offending one.
+        let before = &src[..(span.start - base).min(src.len())];
+        let trimmed = before.trim_end();
+        if !trimmed.is_empty() {
+            let end = base + trimmed.len();
+            let last = trimmed.chars().next_back().map_or(1, char::len_utf8);
+            return Diagnostic::error(end - last..end, "expected `;` after this").with_note(
+                "statements end with `;`; only the last expression of a block may omit it",
+            );
+        }
+    }
+    if e.expected().count() > 5
+        && let Some(found) = e.found()
+    {
+        return Diagnostic::error(span, format!("unexpected `{found}`"));
+    }
+    Diagnostic::error(span, e.to_string())
 }
 
 /// Lexes and parses `src`. Returns the program (when recovery allowed one) and all errors.
@@ -38,7 +66,7 @@ pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
         .into_iter()
         .map(|span| Diagnostic::error(span.start + base..span.end + base, "invalid token"))
         .collect();
-    let (program, parse_errors) = run!(program(), tokens, src.len() + base);
+    let (program, parse_errors) = run!(program(), tokens, src.len() + base, src, base);
     errors.extend(parse_errors);
     errors.sort_by_key(|e| e.span.start);
     (program, errors)
@@ -58,7 +86,13 @@ fn parse_expr_at(src: &str, offset: usize) -> (Option<Expr>, Vec<Diagnostic>) {
         .into_iter()
         .map(|s| Diagnostic::error(s.start + offset..s.end + offset, "invalid token"))
         .collect();
-    let (expr, parse_errors) = run!(expr().then_ignore(end()), tokens, src.len() + offset);
+    let (expr, parse_errors) = run!(
+        expr().then_ignore(end()),
+        tokens,
+        src.len() + offset,
+        src,
+        offset
+    );
     errors.extend(parse_errors);
     (expr, errors)
 }

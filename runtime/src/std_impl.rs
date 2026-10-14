@@ -186,6 +186,11 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
     }
 }
 
+fn arg(args: &[Value], i: usize) -> Result<&Value, RuntimeError> {
+    args.get(i)
+        .ok_or_else(|| RuntimeError::new(format!("missing argument {}", i + 1)))
+}
+
 /// `receiver.name(args)`. For vector-store query builders the piped query is `args[0]`.
 pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res {
     match receiver {
@@ -195,6 +200,19 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
             "trim" => Ok(Value::str(s.trim())),
             "to_lowercase" => Ok(Value::str(s.to_lowercase())),
             "to_uppercase" => Ok(Value::str(s.to_uppercase())),
+            "contains" => Ok(Value::Bool(s.contains(&*want_str(arg(&args, 0)?)?))),
+            "starts_with" => Ok(Value::Bool(s.starts_with(&*want_str(arg(&args, 0)?)?))),
+            "ends_with" => Ok(Value::Bool(s.ends_with(&*want_str(arg(&args, 0)?)?))),
+            "replace" => Ok(Value::str(
+                s.replace(&*want_str(arg(&args, 0)?)?, &want_str(arg(&args, 1)?)?),
+            )),
+            "split" => {
+                let sep = want_str(arg(&args, 0)?)?;
+                if sep.is_empty() {
+                    return err("`split` needs a separator that is not empty");
+                }
+                Ok(Value::vec(s.split(&*sep).map(Value::str).collect()))
+            }
             _ => err(format!("String has no method `{name}`")),
         },
         Value::Table(t) => match name {
@@ -205,6 +223,14 @@ pub(crate) fn call_method(receiver: &Value, name: &str, args: Vec<Value>) -> Res
         Value::Vec(v) => match name {
             "is_empty" => Ok(Value::Bool(v.is_empty())),
             "len" => Ok(Value::Int(v.len() as i64)),
+            "push" => {
+                v.push(arg(&args, 0)?.clone());
+                Ok(Value::Unit)
+            }
+            "contains" => {
+                let needle = arg(&args, 0)?;
+                Ok(Value::Bool(v.snapshot().iter().any(|x| x.equals(needle))))
+            }
             _ => err(format!("Vec has no method `{name}`")),
         },
         Value::Native(Native::Embedder { model, endpoint }) if name == "embed" => {
