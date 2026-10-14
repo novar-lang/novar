@@ -1,4 +1,4 @@
-//! Runtime implementations of the std items declared in `novar_hir::stdlib`.
+//! Runtime implementations of the std items declared in `telvax_hir::stdlib`.
 //!
 //! External services are replaced by deterministic in-process stand-ins (hashed bag-of-words
 //! embeddings, an in-memory vector store, a canned LLM) so programs run without network access.
@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::interp::{Interp, RuntimeError};
 use crate::value::{Db, MapKey, MapVal, Native, Query, StructVal, TensorVal, Value};
-use novar_hir::Ty;
-use novar_hir::stdlib::EMBEDDING_DIM;
+use telvax_hir::Ty;
+use telvax_hir::stdlib::EMBEDDING_DIM;
 
 type Res = Result<Value, RuntimeError>;
 

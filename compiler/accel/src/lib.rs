@@ -8,7 +8,7 @@
 //! Neither output is executed by this repository's tests: there is no TPU or NVIDIA GPU on the
 //! development machine. They are checked structurally (StableHLO text, the LLVM verifier and the
 //! PTX header and entry points). Execution on a real GPU in this repository goes through
-//! `novar_runtime`'s `gpu` feature instead.
+//! `telvax_runtime`'s `gpu` feature instead.
 
 mod stablehlo;
 pub use stablehlo::{StableHlo, stablehlo};
@@ -19,11 +19,11 @@ mod ptx;
 pub use ptx::{Ptx, ptx, used_ops};
 
 /// Names of the `std::tensor` operations a program calls, in first-use order.
-pub fn tensor_ops(program: &novar_hir::hir::Program) -> Vec<String> {
+pub fn tensor_ops(program: &telvax_hir::hir::Program) -> Vec<String> {
     let mut out = Vec::new();
     for f in &program.fns {
         walk_block(&f.body, &mut |e| {
-            if let novar_hir::hir::ExprKind::Extern(path) = &e.kind
+            if let telvax_hir::hir::ExprKind::Extern(path) = &e.kind
                 && path.len() == 3
                 && path[0] == "std"
                 && path[1] == "tensor"
@@ -36,8 +36,8 @@ pub fn tensor_ops(program: &novar_hir::hir::Program) -> Vec<String> {
     out
 }
 
-fn walk_block(b: &novar_hir::hir::Block, f: &mut impl FnMut(&novar_hir::hir::Expr)) {
-    use novar_hir::hir::Stmt;
+fn walk_block(b: &telvax_hir::hir::Block, f: &mut impl FnMut(&telvax_hir::hir::Expr)) {
+    use telvax_hir::hir::Stmt;
     for s in &b.stmts {
         match s {
             Stmt::Let { init, .. } => walk(init, f),
@@ -49,8 +49,8 @@ fn walk_block(b: &novar_hir::hir::Block, f: &mut impl FnMut(&novar_hir::hir::Exp
     }
 }
 
-fn walk(e: &novar_hir::hir::Expr, f: &mut impl FnMut(&novar_hir::hir::Expr)) {
-    use novar_hir::hir::ExprKind::*;
+fn walk(e: &telvax_hir::hir::Expr, f: &mut impl FnMut(&telvax_hir::hir::Expr)) {
+    use telvax_hir::hir::ExprKind::*;
     f(e);
     match &e.kind {
         Call { callee, args } => {

@@ -1,17 +1,17 @@
-//! `novar.DeviceTensor`: a GPU buffer handed through Novar by pointer.
+//! `telvax.DeviceTensor`: a GPU buffer handed through Telvax by pointer.
 //!
 //! Frameworks that keep tensors on the GPU (PyTorch, CuPy, Numba, JAX, ...) describe them with
 //! `__cuda_array_interface__`. A `DeviceTensor` records that description and keeps the source
 //! object alive, and exposes the same interface again, so another framework can adopt the buffer
-//! with no host round trip and no copy. Novar itself has no GPU kernels yet: the tensor is
+//! with no host round trip and no copy. Telvax itself has no GPU kernels yet: the tensor is
 //! carried, validated and re-exported, not computed on.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
-use crate::NovarError;
+use crate::TelvaxError;
 
-#[pyclass(module = "novar", frozen)]
+#[pyclass(module = "telvax", frozen)]
 pub struct DeviceTensor {
     ptr: usize,
     shape: Vec<usize>,
@@ -30,9 +30,9 @@ fn width_of(typestr: &str) -> PyResult<usize> {
         && matches!(bytes[0], b'<' | b'>' | b'|')
         && matches!(bytes[1], b'b' | b'i' | b'u' | b'f' | b'c');
     if !ok {
-        return Err(NovarError::new_err(format!("invalid typestr `{typestr}` in __cuda_array_interface__")));
+        return Err(TelvaxError::new_err(format!("invalid typestr `{typestr}` in __cuda_array_interface__")));
     }
-    typestr[2..].parse().map_err(|_| NovarError::new_err(format!("invalid typestr `{typestr}` in __cuda_array_interface__")))
+    typestr[2..].parse().map_err(|_| TelvaxError::new_err(format!("invalid typestr `{typestr}` in __cuda_array_interface__")))
 }
 
 impl DeviceTensor {
@@ -40,13 +40,13 @@ impl DeviceTensor {
         let iface = obj.getattr("__cuda_array_interface__")?;
         let dict = iface
             .cast::<PyDict>()
-            .map_err(|_| NovarError::new_err("__cuda_array_interface__ must be a dict"))?;
+            .map_err(|_| TelvaxError::new_err("__cuda_array_interface__ must be a dict"))?;
         let get = |k: &str| -> PyResult<Bound<'_, PyAny>> {
-            dict.get_item(k)?.ok_or_else(|| NovarError::new_err(format!("__cuda_array_interface__ has no `{k}`")))
+            dict.get_item(k)?.ok_or_else(|| TelvaxError::new_err(format!("__cuda_array_interface__ has no `{k}`")))
         };
         let version: u32 = get("version")?.extract()?;
         if version < 2 {
-            return Err(NovarError::new_err(format!("__cuda_array_interface__ version {version} is too old (need >= 2)")));
+            return Err(TelvaxError::new_err(format!("__cuda_array_interface__ version {version} is too old (need >= 2)")));
         }
         let typestr: String = get("typestr")?.extract()?;
         let width = width_of(&typestr)?;
@@ -54,13 +54,13 @@ impl DeviceTensor {
         let (ptr, readonly): (usize, bool) = get("data")?.extract()?;
         let n: usize = shape.iter().product();
         if ptr == 0 && n > 0 {
-            return Err(NovarError::new_err("null device pointer for a non-empty tensor"));
+            return Err(TelvaxError::new_err("null device pointer for a non-empty tensor"));
         }
         let strides = match dict.get_item("strides")? {
             Some(s) if !s.is_none() => {
                 let strides: Vec<usize> = s.extract()?;
                 if strides.len() != shape.len() {
-                    return Err(NovarError::new_err("strides and shape have different lengths"));
+                    return Err(TelvaxError::new_err("strides and shape have different lengths"));
                 }
                 Some(strides)
             }
@@ -143,6 +143,6 @@ impl DeviceTensor {
     }
 
     fn __repr__(&self) -> String {
-        format!("<novar.DeviceTensor shape={:?} typestr={} ptr=0x{:x}>", self.shape, self.typestr, self.ptr)
+        format!("<telvax.DeviceTensor shape={:?} typestr={} ptr=0x{:x}>", self.shape, self.typestr, self.ptr)
     }
 }

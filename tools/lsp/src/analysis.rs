@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 
-use novar_diagnostics::Diagnostic;
-use novar_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
-use novar_hir::stdlib::{self, ItemKind};
-use novar_hir::{Prim, Ty};
+use telvax_diagnostics::Diagnostic;
+use telvax_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
+use telvax_hir::stdlib::{self, ItemKind};
+use telvax_hir::{Prim, Ty};
 
 use crate::position::LineIndex;
 
@@ -46,7 +46,7 @@ pub struct Snapshot {
     pub diagnostics: Vec<Diagnostic>,
     pub hir: Option<hir::Program>,
     /// All files of the program (this document is the first); resolves names across modules.
-    pub map: novar_modules::SourceMap,
+    pub map: telvax_modules::SourceMap,
     nodes: Vec<Node>,
     locals: HashMap<LocalId, LocalInfo>,
     /// The program came from an earlier version of the text because the current one could not
@@ -162,17 +162,17 @@ impl Snapshot {
         let index = LineIndex::new(&text);
         #[cfg(feature = "project")]
         let deps = path
-            .and_then(|p| novar_pkg::Project::discover(p).ok().flatten())
+            .and_then(|p| telvax_pkg::Project::discover(p).ok().flatten())
             .and_then(|project| project.dependency_packages().ok())
             .unwrap_or_default();
         #[cfg(not(feature = "project"))]
         let deps = Vec::new();
         let name = path.map_or("<buffer>".to_string(), |p| p.display().to_string());
-        let loaded = novar_modules::load_text(&name, &text, path.and_then(Path::parent), &deps);
+        let loaded = telvax_modules::load_text(&name, &text, path.and_then(Path::parent), &deps);
         let mut diagnostics = loaded.diagnostics.clone();
         let mut hir = None;
         if loaded.entry_parsed {
-            let (h, d) = novar_hir::lower(&loaded.program);
+            let (h, d) = telvax_hir::lower(&loaded.program);
             diagnostics.extend(d);
             hir = Some(h);
         }
@@ -232,7 +232,7 @@ impl Snapshot {
         for f in &prog.fns {
             if f.name_span.contains(&offset) {
                 return Some((
-                    format!("```novar\n{}\n```", signature(f)),
+                    format!("```telvax\n{}\n```", signature(f)),
                     f.name_span.clone(),
                 ));
             }
@@ -246,7 +246,7 @@ impl Snapshot {
                     .collect();
                 return Some((
                     format!(
-                        "```novar\nstruct {} {{\n{}\n}}\n```",
+                        "```telvax\nstruct {} {{\n{}\n}}\n```",
                         s.name,
                         fields.join("\n")
                     ),
@@ -257,7 +257,7 @@ impl Snapshot {
         if let Some(l) = self.locals.values().find(|l| l.span.contains(&offset)) {
             return Some((
                 format!(
-                    "```novar\nlet {}{}: {}\n```",
+                    "```telvax\nlet {}{}: {}\n```",
                     if l.mutable { "mut " } else { "" },
                     l.name,
                     l.ty
@@ -270,7 +270,7 @@ impl Snapshot {
             Target::Local(id) => {
                 let l = self.locals.get(id)?;
                 format!(
-                    "```novar\nlet {}{}: {}\n```",
+                    "```telvax\nlet {}{}: {}\n```",
                     if l.mutable { "mut " } else { "" },
                     l.name,
                     node.ty
@@ -278,11 +278,11 @@ impl Snapshot {
             }
             Target::Fn(name) => {
                 let f = prog.fns.iter().find(|f| &f.name == name)?;
-                format!("```novar\n{}\n```", signature(f))
+                format!("```telvax\n{}\n```", signature(f))
             }
-            Target::Global(name) => format!("```novar\nlet {name}: {}\n```", node.ty),
-            Target::Struct(name) => format!("```novar\nstruct {name}\n```"),
-            Target::Other => format!("```novar\n{}\n```", node.ty),
+            Target::Global(name) => format!("```telvax\nlet {name}: {}\n```", node.ty),
+            Target::Struct(name) => format!("```telvax\nstruct {name}\n```"),
+            Target::Other => format!("```telvax\n{}\n```", node.ty),
         };
         Some((text, node.span.clone()))
     }
@@ -745,7 +745,7 @@ impl Snapshot {
                     match col {
                         Ty::Prim(p) if p.is_numeric() => Ty::Tensor {
                             elem: Box::new(Ty::Prim(p)),
-                            shape: vec![novar_hir::Dim::Named("N".into())],
+                            shape: vec![telvax_hir::Dim::Named("N".into())],
                         },
                         Ty::Prim(p) => Ty::Vec(Box::new(Ty::Prim(p))),
                         other => other,

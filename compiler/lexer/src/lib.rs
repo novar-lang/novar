@@ -1,4 +1,4 @@
-//! Zero-copy tokenizer for Novar source code.
+//! Zero-copy tokenizer for Telvax source code.
 
 use std::ops::Range;
 
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn rag_example_lexes_cleanly() {
-        let src = include_str!("../../../examples/rag-service.nv");
+        let src = include_str!("../../../examples/rag-service.tvx");
         let (toks, errs) = tokenize(src);
         assert!(errs.is_empty(), "{errs:?}");
         assert!(toks.iter().any(|(t, _)| *t == Pipe));

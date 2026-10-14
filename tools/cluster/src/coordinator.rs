@@ -3,15 +3,15 @@
 //! Each worker is driven by as many threads as it has CPUs; threads pull items from one shared
 //! queue, so fast workers take more work. A task that fails because a worker is unreachable (or
 //! lost its program) goes back on the queue for another worker; a call that fails because the
-//! Novar code itself failed (division by zero, bad data) aborts the whole map, as a local call would.
+//! Telvax code itself failed (division by zero, bad data) aborts the whole map, as a local call would.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use novar_modules::Image;
-use novar_runtime::Executor;
+use telvax_modules::Image;
+use telvax_runtime::Executor;
 use serde_json::{Value, json};
 
 /// How many times one item may be tried on workers that fail before the map gives up.

@@ -1,5 +1,5 @@
 // Parses "key=value" lines with Result, Option, `?`, `if let` and tuples.
-// Run from the repository root: novar run examples/errors/parse-config.nv main
+// Run from the repository root: telvax run examples/errors/parse-config.tvx main
 
 fn split_pair(line: String) -> Result<(String, String), String> {
     let parts = line.split("=");

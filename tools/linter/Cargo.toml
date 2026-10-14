@@ -1,6 +1,6 @@
 [package]
-name = "novar_lint"
-description = "Novar: lints for unused code"
+name = "telvax_lint"
+description = "Telvax: lints for unused code"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,8 +12,8 @@ publish = false
 workspace = true
 
 [dependencies]
-novar_diagnostics = { version = "0.0.4", path = "../../compiler/diagnostics" }
-novar_hir = { version = "0.0.4", path = "../../compiler/semantic" }
+telvax_diagnostics = { version = "0.0.4", path = "../../compiler/diagnostics" }
+telvax_hir = { version = "0.0.4", path = "../../compiler/semantic" }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.4", path = "../../compiler/parser" }
+telvax_parser = { version = "0.0.4", path = "../../compiler/parser" }

@@ -1,6 +1,6 @@
 [package]
-name = "novar_parser"
-description = "Novar: novar_parser"
+name = "telvax_parser"
+description = "Telvax: telvax_parser"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,6 @@ workspace = true
 
 [dependencies]
 chumsky = "0.13.0"
-novar_ast = { version = "0.0.4", path = "../ast" }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-novar_lexer = { version = "0.0.4", path = "../lexer" }
+telvax_ast = { version = "0.0.4", path = "../ast" }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_lexer = { version = "0.0.4", path = "../lexer" }

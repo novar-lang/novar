@@ -204,7 +204,7 @@ impl Gpu {
             let limits = adapter.limits();
             let (device, queue) = adapter
                 .request_device(&wgpu::DeviceDescriptor {
-                    label: Some("novar"),
+                    label: Some("telvax"),
                     required_limits: limits,
                     ..Default::default()
                 })

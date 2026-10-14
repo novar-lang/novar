@@ -1,4 +1,4 @@
-//! The Novar language server.
+//! The Telvax language server.
 //!
 //! Every feature runs on a [`analysis::Snapshot`]: the file is parsed and type-checked on each
 //! change, and the typed HIR is indexed by source position. Diagnostics, hover, go to

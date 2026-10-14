@@ -1,14 +1,14 @@
 """Run `std::dist::map` on a Ray cluster.
 
-    import ray, novar
+    import ray, telvax
     ray.init()                                   # or ray.init(address="auto") on a cluster
-    program = novar.compile(SOURCE)
-    program.set_executor(novar.ray.RayExecutor(SOURCE))
+    program = telvax.compile(SOURCE)
+    program.set_executor(telvax.ray.RayExecutor(SOURCE))
     program.call("process_all", items)           # each mapped call becomes a Ray task
 
 Every Ray worker compiles the program once and then runs the mapped function on the items it is
 given. Items and results travel as JSON, converted with the function's static types, exactly as
-on the built-in cluster (`novar worker`).
+on the built-in cluster (`telvax worker`).
 """
 
 import hashlib
@@ -21,11 +21,11 @@ _PROGRAMS = {}
 
 def _program(source):
     """Compiles `source` once per worker process."""
-    import novar
+    import telvax
 
     key = hashlib.sha256(source.encode()).hexdigest()
     if key not in _PROGRAMS:
-        _PROGRAMS[key] = novar.compile(source)
+        _PROGRAMS[key] = telvax.compile(source)
     return _PROGRAMS[key]
 
 

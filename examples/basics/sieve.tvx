@@ -1,5 +1,5 @@
 // Sieve of Eratosthenes with in-place array updates.
-// Run it interpreted (`novar run examples/basics/sieve.nv main`) or native (`novar build`).
+// Run it interpreted (`telvax run examples/basics/sieve.tvx main`) or native (`telvax build`).
 
 fn main() -> i32 {
     // Vec has no constructor for "n copies" yet, so start from a literal.

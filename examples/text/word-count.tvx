@@ -1,5 +1,5 @@
 // Counts words in a text with a Map, then lists the most frequent ones.
-// Run from the repository root: novar run examples/text/word-count.nv main
+// Run from the repository root: telvax run examples/text/word-count.tvx main
 
 fn count_words(text: String) -> Map<String, i64> {
     let counts: Map<String, i64> = std::map::new();

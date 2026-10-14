@@ -1,6 +1,6 @@
 ---
 name: Tester feedback
-about: You tried Novar and want to say how it went
+about: You tried Telvax and want to say how it went
 labels: feedback
 ---
 
@@ -10,4 +10,4 @@ labels: feedback
 
 **What was confusing, slow or missing?**
 
-**Version and system** (`novar --version`, OS)
+**Version and system** (`telvax --version`, OS)

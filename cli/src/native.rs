@@ -3,16 +3,16 @@
 #[cfg(feature = "llvm")]
 mod imp {
     use crate::{CliError, check, failed};
-    use novar_codegen::{
+    use telvax_codegen::{
         OptLevel, build_executable_with, build_object_with, llvm_ir_with, optimize_ir,
     };
-    use novar_mlir::JitValue;
+    use telvax_mlir::JitValue;
     use std::path::Path;
 
-    fn report(err: novar_codegen::BuildError, file: &str) -> CliError {
-        if let novar_codegen::BuildError::Diagnostics(diags) = &err {
+    fn report(err: telvax_codegen::BuildError, file: &str) -> CliError {
+        if let telvax_codegen::BuildError::Diagnostics(diags) = &err {
             let src = std::fs::read_to_string(file).unwrap_or_default();
-            eprint!("{}", novar_diagnostics::render(file, &src, diags, false));
+            eprint!("{}", telvax_diagnostics::render(file, &src, diags, false));
         }
         CliError::Failed(err.to_string())
     }
@@ -31,7 +31,7 @@ mod imp {
         let (quant, args) = crate::take_quantize(args)?;
         let hir = check(file)?;
         let args: Vec<_> = args.iter().map(|a| jit_arg(a)).collect();
-        match novar_mlir::jit_call_with(&hir, func, &args, quant) {
+        match telvax_mlir::jit_call_with(&hir, func, &args, quant) {
             Ok(JitValue::Int(i)) => println!("{i}"),
             Ok(JitValue::Float(x)) => println!("{x}"),
             Ok(JitValue::Bool(b)) => println!("{b}"),
@@ -66,8 +66,8 @@ mod imp {
         let wrote = |p: &str| eprintln!("wrote {p}");
         match emit {
             "mlir" => {
-                let text = novar_mlir::emit_mlir_with(&hir, false, quant)
-                    .map_err(|d| report(novar_codegen::BuildError::Diagnostics(d), file))?;
+                let text = telvax_mlir::emit_mlir_with(&hir, false, quant)
+                    .map_err(|d| report(telvax_codegen::BuildError::Diagnostics(d), file))?;
                 print!("{text}");
             }
             "llvm-ir" => {
@@ -96,7 +96,7 @@ mod imp {
 mod imp {
     use crate::{CliError, failed};
 
-    const MSG: &str = "this `novar` was built without the native backend; rebuild with `--features llvm` (see scripts/llvm-env.sh)";
+    const MSG: &str = "this `telvax` was built without the native backend; rebuild with `--features llvm` (see scripts/llvm-env.sh)";
 
     pub fn jit(_: &str, _: &str, _: &[&str]) -> Result<(), CliError> {
         failed(MSG)
@@ -111,7 +111,7 @@ pub use imp::jit;
 
 use crate::{CliError, failed};
 
-/// `novar build`; `--emit stablehlo|ptx` are handled here, the rest by the native backend.
+/// `telvax build`; `--emit stablehlo|ptx` are handled here, the rest by the native backend.
 pub fn build(file: &str, flags: &[&str]) -> Result<(), CliError> {
     let kind = flags
         .iter()
@@ -126,7 +126,7 @@ pub fn build(file: &str, flags: &[&str]) -> Result<(), CliError> {
 
 fn stablehlo(file: &str) -> Result<(), crate::CliError> {
     let checked = crate::check_project(file)?;
-    let out = novar_accel::stablehlo(&checked.hir).map_err(|d| {
+    let out = telvax_accel::stablehlo(&checked.hir).map_err(|d| {
         CliError::Failed(
             d.iter()
                 .map(|d| d.message.clone())
@@ -152,7 +152,7 @@ fn ptx(file: &str, flags: &[&str]) -> Result<(), CliError> {
         .and_then(|i| flags.get(i + 1).copied())
         .unwrap_or("sm_80");
     let checked = crate::check_project(file)?;
-    let out = novar_accel::ptx(&checked.hir, sm).or_else(failed)?;
+    let out = telvax_accel::ptx(&checked.hir, sm).or_else(failed)?;
     print!("{}", out.text);
     for op in &out.unsupported {
         eprintln!("no PTX kernel for `std::tensor::{op}`");

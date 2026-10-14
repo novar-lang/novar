@@ -1,7 +1,7 @@
 //! The typed, name-resolved High-Level IR produced by the checker.
 
 use crate::ty::Ty;
-pub use novar_ast::{BinOp, Lit, UnOp};
+pub use telvax_ast::{BinOp, Lit, UnOp};
 
 pub type Span = std::ops::Range<usize>;
 

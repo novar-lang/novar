@@ -1,12 +1,12 @@
 //! Measures the serving overhead and memory footprint of a bundled RAG service.
 //!
-//! The service runs with the offline model stand-ins, so what is timed is Novar itself: HTTP,
+//! The service runs with the offline model stand-ins, so what is timed is Telvax itself: HTTP,
 //! request validation, the interpreter, retrieval and JSON encoding (model and database latency
 //! would be added by the real services). Alpha targets: p99 overhead under 15 ms, base RSS under
 //! 30 MB.
 //!
-//!     cargo build --release -p novar_cli
-//!     cargo run --release -p novar_bench --bin rag_latency -- target/release/novar [--docs N]
+//!     cargo build --release -p telvax_cli
+//!     cargo run --release -p telvax_bench --bin rag_latency -- target/release/telvax [--docs N]
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -110,9 +110,9 @@ impl Drop for Service {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let novar = PathBuf::from(
+    let telvax = PathBuf::from(
         args.first()
-            .expect("usage: rag_latency <path to novar> [--docs N]"),
+            .expect("usage: rag_latency <path to telvax> [--docs N]"),
     );
     let docs: usize = args
         .windows(2)
@@ -120,19 +120,19 @@ fn main() {
         .map_or(200, |w| w[1].parse().expect("--docs N"));
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let dir = std::env::temp_dir().join(format!("novar-bench-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-bench-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let service = dir.join("rag-service");
-    let ok = Command::new(&novar)
+    let ok = Command::new(&telvax)
         .args(["build", "--serve"])
-        .arg(root.join("examples/rag-service.nv"))
+        .arg(root.join("examples/rag-service.tvx"))
         .arg("-o")
         .arg(&service)
         .stderr(Stdio::null())
         .status()
-        .expect("run novar")
+        .expect("run telvax")
         .success();
-    assert!(ok, "novar build --serve failed");
+    assert!(ok, "telvax build --serve failed");
 
     // A corpus of short documents with overlapping vocabulary.
     let words = [

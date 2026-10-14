@@ -1,17 +1,17 @@
 use std::process::Command;
 
-const NOVAR: &str = env!("CARGO_BIN_EXE_novar");
+const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 fn scratch(name: &str, text: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("novar-tools-{}-{name}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-tools-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join(format!("{name}.nv"));
+    let file = dir.join(format!("{name}.tvx"));
     std::fs::write(&file, text).unwrap();
     file
 }
 
 fn run(args: &[&str]) -> (bool, String, String) {
-    let out = Command::new(NOVAR).args(args).output().unwrap();
+    let out = Command::new(TELVAX).args(args).output().unwrap();
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),

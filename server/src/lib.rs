@@ -13,8 +13,8 @@ use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use novar_hir::hir::{self, HttpMethod};
-use novar_hir::{Dim, Prim, Ty};
+use telvax_hir::hir::{self, HttpMethod};
+use telvax_hir::{Dim, Prim, Ty};
 use serde_json::{Value, json};
 
 // ---- schemas -------------------------------------------------------------------------------
@@ -412,15 +412,15 @@ mod tests {
     use tower::ServiceExt;
 
     fn program(src: &str) -> hir::Program {
-        let (ast, errs) = novar_parser_for_tests(src);
+        let (ast, errs) = telvax_parser_for_tests(src);
         assert!(errs.is_empty(), "{errs:?}");
         ast
     }
 
-    fn novar_parser_for_tests(src: &str) -> (hir::Program, Vec<String>) {
-        let (ast, perrs) = novar_parser::parse(src);
+    fn telvax_parser_for_tests(src: &str) -> (hir::Program, Vec<String>) {
+        let (ast, perrs) = telvax_parser::parse(src);
         assert!(perrs.is_empty(), "{perrs:?}");
-        let (hir, diags) = novar_hir::lower(&ast.unwrap());
+        let (hir, diags) = telvax_hir::lower(&ast.unwrap());
         (hir, diags.into_iter().map(|d| d.message).collect())
     }
 
@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn rag_example_routes() {
-        let src = include_str!("../../examples/rag-service.nv");
+        let src = include_str!("../../examples/rag-service.tvx");
         let rs = routes(&program(src));
         assert_eq!(rs.len(), 1);
         assert_eq!(rs[0].path, "/v1/rag/query");

@@ -7,7 +7,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use novar_runtime::{Interp, Value};
+use telvax_runtime::{Interp, Value};
 
 /// Environment variables are process-global, so these tests run one at a time.
 static ENV: Mutex<()> = Mutex::new(());
@@ -71,10 +71,10 @@ fn mock(replies: Vec<(u16, String)>) -> (String, Arc<Mutex<Vec<Seen>>>) {
     (url, seen)
 }
 
-fn load_live(src: &str) -> Result<Interp, novar_runtime::RuntimeError> {
-    let (ast, perrs) = novar_parser::parse(src);
+fn load_live(src: &str) -> Result<Interp, telvax_runtime::RuntimeError> {
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "{perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "{:?}",
@@ -215,8 +215,8 @@ fn openai_errors_and_missing_key() {
 fn offline_mode_never_touches_the_network() {
     let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:1") };
-    let (ast, _) = novar_parser::parse(EMBED);
-    let (hir, _) = novar_hir::lower(&ast.unwrap());
+    let (ast, _) = telvax_parser::parse(EMBED);
+    let (hir, _) = telvax_hir::lower(&ast.unwrap());
     let i = Interp::new(hir).unwrap();
     assert!(matches!(
         i.call("dims", vec![Value::str("x")]).unwrap(),
@@ -224,11 +224,11 @@ fn offline_mode_never_touches_the_network() {
     ));
 }
 
-/// Needs a PostgreSQL server with pgvector: set NOVAR_TEST_PG_URL to run it.
+/// Needs a PostgreSQL server with pgvector: set TELVAX_TEST_PG_URL to run it.
 #[test]
 fn pgvector_round_trip() {
-    let Ok(url) = std::env::var("NOVAR_TEST_PG_URL") else {
-        eprintln!("skipped: NOVAR_TEST_PG_URL is not set");
+    let Ok(url) = std::env::var("TELVAX_TEST_PG_URL") else {
+        eprintln!("skipped: TELVAX_TEST_PG_URL is not set");
         return;
     };
     let src = format!(
@@ -236,9 +236,9 @@ fn pgvector_round_trip() {
         import std::ai::embeddings::OllamaEmbedder;
         import std::db::pgvector::PgVectorClient;
         let db = PgVectorClient::connect("{url}");
-        fn put(id: String, text: String, v: Tensor<f32, [768]>) {{ db.insert("novar_test_docs", id, text, v); }}
+        fn put(id: String, text: String, v: Tensor<f32, [768]>) {{ db.insert("telvax_test_docs", id, text, v); }}
         fn nearest(v: Tensor<f32, [768]>, k: i32) -> Vec<String> {{
-            db.search_collection("novar_test_docs") |> db.with_vector(v) |> db.limit(k) |> db.execute()
+            db.search_collection("telvax_test_docs") |> db.with_vector(v) |> db.limit(k) |> db.execute()
                 |> std::iter::map(|d| d.text)
         }}
     "#
@@ -247,7 +247,7 @@ fn pgvector_round_trip() {
     let vec_of = |axis: usize| {
         let mut v = vec![0.0f32; 768];
         v[axis] = 1.0;
-        Value::Tensor(Arc::new(novar_runtime::TensorVal::from_f32(vec![768], v)))
+        Value::Tensor(Arc::new(telvax_runtime::TensorVal::from_f32(vec![768], v)))
     };
     for (id, text, axis) in [("a", "alpha", 0), ("b", "beta", 1), ("c", "gamma", 2)] {
         i.call("put", vec![Value::str(id), Value::str(text), vec_of(axis)])

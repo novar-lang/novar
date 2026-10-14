@@ -1,6 +1,6 @@
 fn main() {
-    if let Err(e) = novar_lsp::run_stdio() {
-        eprintln!("novar-lsp: {e}");
+    if let Err(e) = telvax_lsp::run_stdio() {
+        eprintln!("telvax-lsp: {e}");
         std::process::exit(1);
     }
 }

@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use novar_runtime::{Device, Interp, TensorVal, Value};
+use telvax_runtime::{Device, Interp, TensorVal, Value};
 
 fn load(src: &str, device: Device) -> Interp {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "parse: {perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "check: {:?}",

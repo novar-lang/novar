@@ -3,12 +3,12 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use novar_pkg::manifest::Manifest;
-use novar_pkg::registry::{self, DirRegistry, Registry};
-use novar_pkg::{Lock, Project};
+use telvax_pkg::manifest::Manifest;
+use telvax_pkg::registry::{self, DirRegistry, Registry};
+use telvax_pkg::{Lock, Project};
 use semver::Version;
 
-/// `NVPM_HOME` is process-wide; tests that install packages take turns.
+/// `TVPM_HOME` is process-wide; tests that install packages take turns.
 static HOME: Mutex<()> = Mutex::new(());
 
 struct Dir(PathBuf);
@@ -17,7 +17,7 @@ impl Dir {
     fn new(tag: &str) -> Dir {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let d = std::env::temp_dir().join(format!(
-            "nvpm-{}-{}-{tag}",
+            "tvpm-{}-{}-{tag}",
             std::process::id(),
             N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         ));
@@ -44,7 +44,7 @@ impl Drop for Dir {
     }
 }
 
-/// A package with one module `src/lib.nv`, published to `registry`.
+/// A package with one module `src/lib.tvx`, published to `registry`.
 fn publish(registry: &Dir, name: &str, version: &str, deps: &[(&str, &str)], lib: &str) {
     let work = Dir::new(&format!("pub-{name}-{version}"));
     let dep_lines: String = deps
@@ -52,12 +52,12 @@ fn publish(registry: &Dir, name: &str, version: &str, deps: &[(&str, &str)], lib
         .map(|(n, r)| format!("{n} = \"{r}\"\n"))
         .collect();
     work.write(
-        "novar.toml",
+        "telvax.toml",
         &format!(
             "[package]\nname = \"{name}\"\nversion = \"{version}\"\n\n[dependencies]\n{dep_lines}"
         ),
     );
-    work.write("src/lib.nv", lib);
+    work.write("src/lib.tvx", lib);
     registry::publish(&registry.0, &work.0)
         .unwrap_or_else(|e| panic!("publish {name} {version}: {e}"));
 }
@@ -73,7 +73,7 @@ fn app(deps: &[(&str, &str)]) -> Manifest {
     .unwrap()
 }
 
-fn versions(res: &novar_pkg::resolver::Resolution) -> Vec<String> {
+fn versions(res: &telvax_pkg::resolver::Resolution) -> Vec<String> {
     res.packages
         .iter()
         .map(|p| format!("{} {}", p.name, p.version))
@@ -82,7 +82,7 @@ fn versions(res: &novar_pkg::resolver::Resolution) -> Vec<String> {
 
 fn resolve(deps: &[(&str, &str)], reg: &Dir) -> Result<Vec<String>, String> {
     let r = DirRegistry::new(&reg.0);
-    novar_pkg::resolver::resolve(Path::new("."), &app(deps), Some(&r)).map(|res| versions(&res))
+    telvax_pkg::resolver::resolve(Path::new("."), &app(deps), Some(&r)).map(|res| versions(&res))
 }
 
 // ---- manifests -------------------------------------------------------------------------------
@@ -105,7 +105,7 @@ fn manifests_round_trip_and_validate() {
         ),
         (
             "[package]\nname = \"a\"\nversion = \"one\"\n",
-            "invalid novar.toml",
+            "invalid telvax.toml",
         ),
         (
             "[package]\nname = \"a\"\nversion = \"1.0.0\"\n[dependencies]\nb = { path = \"x\", version = \"1\" }\n",
@@ -117,7 +117,7 @@ fn manifests_round_trip_and_validate() {
         ),
         (
             "[package]\nname = \"a\"\nversion = \"1.0.0\"\n[dependencies]\nb = \"not a req\"\n",
-            "invalid novar.toml",
+            "invalid telvax.toml",
         ),
     ] {
         let e = Manifest::parse(text).unwrap_err().0;
@@ -150,10 +150,10 @@ fn publishing_rules() {
     publish(&reg, "a", "1.0.0", &[], "pub fn f() {}\n");
     let work = Dir::new("again");
     work.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"a\"\nversion = \"1.0.0\"\n",
     )
-    .write("src/lib.nv", "pub fn f() {}\n");
+    .write("src/lib.tvx", "pub fn f() {}\n");
     assert!(
         registry::publish(&reg.0, &work.0)
             .unwrap_err()
@@ -161,7 +161,7 @@ fn publishing_rules() {
     );
 
     let local = Dir::new("pathdep");
-    local.write("novar.toml", "[package]\nname = \"b\"\nversion = \"1.0.0\"\n[dependencies]\na = { path = \"../a\" }\n").write("src/lib.nv", "pub fn g() {}\n");
+    local.write("telvax.toml", "[package]\nname = \"b\"\nversion = \"1.0.0\"\n[dependencies]\na = { path = \"../a\" }\n").write("src/lib.tvx", "pub fn g() {}\n");
     assert!(
         registry::publish(&reg.0, &local.0)
             .unwrap_err()
@@ -170,7 +170,7 @@ fn publishing_rules() {
 
     let empty = Dir::new("empty");
     empty.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"c\"\nversion = \"1.0.0\"\n",
     );
     assert!(
@@ -189,7 +189,7 @@ fn tampered_archives_are_rejected() {
     let mut archive = r.download("a", &entry.vers).unwrap();
     let dest = Dir::new("dest");
     registry::unpack(&archive, &entry.cksum, &dest.p("ok")).unwrap();
-    assert!(dest.p("ok/src/lib.nv").is_file() && dest.p("ok/novar.toml").is_file());
+    assert!(dest.p("ok/src/lib.tvx").is_file() && dest.p("ok/telvax.toml").is_file());
     *archive.last_mut().unwrap() ^= 0xff;
     assert!(
         registry::unpack(&archive, &entry.cksum, &dest.p("bad"))
@@ -270,18 +270,18 @@ fn path_dependencies_are_fixed_and_can_have_registry_dependencies() {
     publish(&reg, "c", "1.5.0", &[], "pub fn c() {}\n");
     let ws = Dir::new("ws");
     ws.write(
-        "shared/novar.toml",
+        "shared/telvax.toml",
         "[package]\nname = \"shared\"\nversion = \"0.3.0\"\n[dependencies]\nc = \"^1\"\n",
     )
-    .write("shared/src/lib.nv", "pub fn s() {}\n");
+    .write("shared/src/lib.tvx", "pub fn s() {}\n");
     let m = Manifest::parse("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nshared = { path = \"shared\" }\n").unwrap();
     let r = DirRegistry::new(&reg.0);
-    let res = novar_pkg::resolver::resolve(&ws.0, &m, Some(&r)).unwrap();
+    let res = telvax_pkg::resolver::resolve(&ws.0, &m, Some(&r)).unwrap();
     assert_eq!(versions(&res), ["c 1.5.0", "shared 0.3.0"]);
 
     let wrong = Manifest::parse("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nother = { path = \"shared\" }\n").unwrap();
     assert!(
-        novar_pkg::resolver::resolve(&ws.0, &wrong, Some(&r))
+        telvax_pkg::resolver::resolve(&ws.0, &wrong, Some(&r))
             .unwrap_err()
             .contains("points to a package named `shared`")
     );
@@ -293,7 +293,7 @@ fn path_dependencies_are_fixed_and_can_have_registry_dependencies() {
 
 #[test]
 fn registry_dependencies_need_a_registry() {
-    let e = novar_pkg::resolver::resolve(Path::new("."), &app(&[("a", "1")]), None).unwrap_err();
+    let e = telvax_pkg::resolver::resolve(Path::new("."), &app(&[("a", "1")]), None).unwrap_err();
     assert!(e.contains("no registry is configured"), "{e}");
 }
 
@@ -303,7 +303,7 @@ fn registry_dependencies_need_a_registry() {
 fn locking_installing_and_compiling_against_dependencies() {
     let _g = HOME.lock().unwrap_or_else(|e| e.into_inner());
     let home = Dir::new("home");
-    unsafe { std::env::set_var("NVPM_HOME", &home.0) };
+    unsafe { std::env::set_var("TVPM_HOME", &home.0) };
     let reg = Dir::new("e2e");
     publish(
         &reg,
@@ -322,11 +322,11 @@ fn locking_installing_and_compiling_against_dependencies() {
 
     let proj = Dir::new("proj");
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\ncalc = \"^0.5\"\n",
     )
     .write(
-        "src/main.nv",
+        "src/main.tvx",
         "import calc::quad;\nfn main() -> i32 { quad(5) }\n",
     );
     let project = Project::open(&proj.0).unwrap();
@@ -335,7 +335,7 @@ fn locking_installing_and_compiling_against_dependencies() {
         project
             .dependency_packages()
             .unwrap_err()
-            .contains("nvpm install")
+            .contains("tvpm install")
     );
 
     let r = DirRegistry::new(&reg.0);
@@ -362,9 +362,9 @@ fn locking_installing_and_compiling_against_dependencies() {
     );
 
     let deps = project.dependency_packages().unwrap();
-    let loaded = novar_modules::load(&project.entry().unwrap(), &deps).unwrap();
+    let loaded = telvax_modules::load(&project.entry().unwrap(), &deps).unwrap();
     assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
-    let (hir, diags) = novar_hir_check(&loaded.program);
+    let (hir, diags) = telvax_hir_check(&loaded.program);
     assert!(diags.is_empty(), "{diags:?}");
     assert_eq!(run_main(hir), "20");
 
@@ -375,36 +375,36 @@ fn locking_installing_and_compiling_against_dependencies() {
     );
 }
 
-fn novar_hir_check(p: &novar_ast_program::Program) -> (novar_hir::hir::Program, Vec<String>) {
-    let (hir, d) = novar_hir::lower(p);
+fn telvax_hir_check(p: &telvax_ast_program::Program) -> (telvax_hir::hir::Program, Vec<String>) {
+    let (hir, d) = telvax_hir::lower(p);
     (hir, d.into_iter().map(|d| d.message).collect())
 }
 
-fn run_main(hir: novar_hir::hir::Program) -> String {
-    novar_runtime::Interp::new(hir)
+fn run_main(hir: telvax_hir::hir::Program) -> String {
+    telvax_runtime::Interp::new(hir)
         .unwrap()
         .call("main", vec![])
         .unwrap()
         .to_string()
 }
 
-mod novar_ast_program {
-    pub use novar_ast::Program;
+mod telvax_ast_program {
+    pub use telvax_ast::Program;
 }
 
 #[test]
 fn a_stale_lock_is_detected_and_checksums_are_enforced() {
     let _g = HOME.lock().unwrap_or_else(|e| e.into_inner());
     let home = Dir::new("home2");
-    unsafe { std::env::set_var("NVPM_HOME", &home.0) };
+    unsafe { std::env::set_var("TVPM_HOME", &home.0) };
     let reg = Dir::new("stale");
     publish(&reg, "a", "1.0.0", &[], "pub fn a() {}\n");
     let proj = Dir::new("proj2");
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\na = \"^1\"\n",
     )
-    .write("src/main.nv", "fn main() {}\n");
+    .write("src/main.tvx", "fn main() {}\n");
     let project = Project::open(&proj.0).unwrap();
     let r = DirRegistry::new(&reg.0);
     project.lock(Some(&r)).unwrap();
@@ -412,14 +412,14 @@ fn a_stale_lock_is_detected_and_checksums_are_enforced() {
 
     // Changing the requirement so the locked version no longer fits makes the lock stale.
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\na = \"^2\"\n",
     );
     assert!(!Project::open(&proj.0).unwrap().lock_is_fresh());
 
     // A lockfile whose checksum disagrees with the download refuses to install.
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\na = \"^1\"\n",
     );
     let mut lock = Lock::read(&proj.0).unwrap().unwrap();
@@ -440,16 +440,16 @@ fn a_stale_lock_is_detected_and_checksums_are_enforced() {
 fn discovery_walks_up_to_the_manifest() {
     let proj = Dir::new("discover");
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
     )
-    .write("src/deep/x.nv", "fn f() {}\n")
-    .write("src/main.nv", "fn main() {}\n");
-    let found = Project::discover(&proj.p("src/deep/x.nv"))
+    .write("src/deep/x.tvx", "fn f() {}\n")
+    .write("src/main.tvx", "fn main() {}\n");
+    let found = Project::discover(&proj.p("src/deep/x.tvx"))
         .unwrap()
         .unwrap();
     assert_eq!(found.manifest.package.name, "app");
-    assert!(found.entry().unwrap().ends_with("src/main.nv"));
+    assert!(found.entry().unwrap().ends_with("src/main.tvx"));
     let nowhere = Dir::new("nothing");
     assert!(Project::discover(&nowhere.0).unwrap().is_none());
 }
@@ -494,7 +494,7 @@ fn serve_static(root: PathBuf) -> String {
 fn registries_work_over_http() {
     let _g = HOME.lock().unwrap_or_else(|e| e.into_inner());
     let home = Dir::new("home3");
-    unsafe { std::env::set_var("NVPM_HOME", &home.0) };
+    unsafe { std::env::set_var("TVPM_HOME", &home.0) };
     let reg = Dir::new("http");
     publish(&reg, "webdep", "2.1.0", &[], "pub fn w() -> i32 { 7 }\n");
     let url = serve_static(reg.0.clone());
@@ -507,11 +507,11 @@ fn registries_work_over_http() {
 
     let proj = Dir::new("proj3");
     proj.write(
-        "novar.toml",
+        "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nwebdep = \"2\"\n",
     )
     .write(
-        "src/main.nv",
+        "src/main.tvx",
         "import webdep::w;\nfn main() -> i32 { w() }\n",
     );
     let project = Project::open(&proj.0).unwrap();
@@ -521,8 +521,8 @@ fn registries_work_over_http() {
         ["webdep 2.1.0"]
     );
     let deps = project.dependency_packages().unwrap();
-    let loaded = novar_modules::load(&project.entry().unwrap(), &deps).unwrap();
-    let (hir, diags) = novar_hir_check(&loaded.program);
+    let loaded = telvax_modules::load(&project.entry().unwrap(), &deps).unwrap();
+    let (hir, diags) = telvax_hir_check(&loaded.program);
     assert!(diags.is_empty(), "{diags:?}");
     assert_eq!(run_main(hir), "7");
 }

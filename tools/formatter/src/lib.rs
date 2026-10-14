@@ -1,11 +1,11 @@
-//! A conservative formatter for Novar source.
+//! A conservative formatter for Telvax source.
 //!
 //! It works on the token stream, so it never changes what a program means: line breaks you chose
 //! stay where they are, comments are kept, and only indentation, spacing inside a line and runs of
 //! blank lines are normalised. After formatting, the result is tokenised again and compared with
 //! the input; if the tokens differ, formatting fails instead of returning something wrong.
 
-use novar_lexer::{Token, tokenize};
+use telvax_lexer::{Token, tokenize};
 
 const INDENT: &str = "    ";
 
@@ -407,10 +407,10 @@ mod tests {
     #[test]
     fn is_idempotent_on_the_bundled_examples() {
         for src in [
-            include_str!("../../../examples/rag-service.nv"),
-            include_str!("../../../examples/basics/primes.nv"),
-            include_str!("../../../examples/basics/sieve.nv"),
-            include_str!("../../../examples/hello-world/hello.nv"),
+            include_str!("../../../examples/rag-service.tvx"),
+            include_str!("../../../examples/basics/primes.tvx"),
+            include_str!("../../../examples/basics/sieve.tvx"),
+            include_str!("../../../examples/hello-world/hello.tvx"),
         ] {
             let once = fmt(src);
             assert_eq!(fmt(&once), once, "not idempotent");

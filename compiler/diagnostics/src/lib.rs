@@ -105,23 +105,23 @@ mod tests {
         let d = Diagnostic::error(8..9, "expected expression")
             .with_label(0..3, "statement starts here")
             .with_note("try adding a value");
-        let out = render("a.nv", src, &[d], false);
+        let out = render("a.tvx", src, &[d], false);
         assert!(out.contains("Error: expected expression"), "{out}");
-        assert!(out.contains("a.nv:1:9"), "{out}");
+        assert!(out.contains("a.tvx:1:9"), "{out}");
         assert!(out.contains("statement starts here"), "{out}");
         assert!(out.contains("try adding a value"), "{out}");
     }
 
     #[test]
     fn out_of_range_span_does_not_panic() {
-        let out = render("a.nv", "x", &[Diagnostic::warning(5..9, "eof")], false);
+        let out = render("a.tvx", "x", &[Diagnostic::warning(5..9, "eof")], false);
         assert!(out.contains("Warning"));
     }
 
     #[test]
     fn multibyte_source_uses_byte_offsets() {
         let src = "é = ;";
-        let out = render("a.nv", src, &[Diagnostic::error(5..6, "bad")], false);
-        assert!(out.contains("a.nv:1:5"), "{out}");
+        let out = render("a.tvx", src, &[Diagnostic::error(5..6, "bad")], false);
+        assert!(out.contains("a.tvx:1:5"), "{out}");
     }
 }

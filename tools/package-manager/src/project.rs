@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use novar_modules::Package;
+use telvax_modules::Package;
 
 use crate::lock::{LOCKFILE, Lock};
 use crate::manifest::{MANIFEST, Manifest};
@@ -15,18 +15,18 @@ pub struct Project {
     pub manifest: Manifest,
 }
 
-/// Where downloaded registry packages are unpacked: `$NVPM_HOME` or `~/.nvpm`.
+/// Where downloaded registry packages are unpacked: `$TVPM_HOME` or `~/.tvpm`.
 pub fn home() -> PathBuf {
-    if let Some(h) = std::env::var_os("NVPM_HOME") {
+    if let Some(h) = std::env::var_os("TVPM_HOME") {
         return PathBuf::from(h);
     }
     std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join(".nvpm"))
-        .unwrap_or_else(|| PathBuf::from(".nvpm"))
+        .map(|h| PathBuf::from(h).join(".tvpm"))
+        .unwrap_or_else(|| PathBuf::from(".tvpm"))
 }
 
 impl Project {
-    /// The project containing `start` (a file or directory): the nearest ancestor with a `novar.toml`.
+    /// The project containing `start` (a file or directory): the nearest ancestor with a `telvax.toml`.
     pub fn discover(start: &Path) -> Result<Option<Project>, String> {
         let start = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
         let mut dir = if start.is_dir() {
@@ -54,11 +54,11 @@ impl Project {
         Ok(Project { dir, manifest })
     }
 
-    /// The file to run: `package.entry`, else `src/main.nv`, else `src/lib.nv`.
+    /// The file to run: `package.entry`, else `src/main.tvx`, else `src/lib.tvx`.
     pub fn entry(&self) -> Result<PathBuf, String> {
         let candidates: Vec<PathBuf> = match &self.manifest.package.entry {
             Some(e) => vec![self.dir.join(e)],
-            None => vec![self.dir.join("src/main.nv"), self.dir.join("src/lib.nv")],
+            None => vec![self.dir.join("src/main.tvx"), self.dir.join("src/lib.tvx")],
         };
         candidates
             .iter()
@@ -76,7 +76,7 @@ impl Project {
             })
     }
 
-    /// Resolves the dependency graph and writes `novar.lock`.
+    /// Resolves the dependency graph and writes `telvax.lock`.
     pub fn lock(&self, registry: Option<&dyn Registry>) -> Result<(Resolution, Lock), String> {
         let resolution = resolver::resolve(&self.dir, &self.manifest, registry)?;
         let lock = resolution.to_lock(&self.manifest);
@@ -98,7 +98,7 @@ impl Project {
     /// Downloads and unpacks every registry package of the lockfile that is not installed yet.
     pub fn install(&self, registry: Option<&dyn Registry>) -> Result<Vec<String>, String> {
         let lock = Lock::read(&self.dir)?
-            .ok_or_else(|| format!("no {LOCKFILE}; run `nvpm lock` first"))?;
+            .ok_or_else(|| format!("no {LOCKFILE}; run `tvpm lock` first"))?;
         let mut fetched = Vec::new();
         for p in &lock.packages {
             if p.source.as_deref() != Some("registry") {
@@ -128,7 +128,7 @@ impl Project {
         Ok(fetched)
     }
 
-    /// The dependencies for the compiler, from `novar.lock`. Fails when the lockfile is missing or
+    /// The dependencies for the compiler, from `telvax.lock`. Fails when the lockfile is missing or
     /// does not cover the manifest, or a package is not installed.
     pub fn dependency_packages(&self) -> Result<Vec<Package>, String> {
         if self.manifest.dependencies.is_empty() {
@@ -136,7 +136,7 @@ impl Project {
         }
         let lock = Lock::read(&self.dir)?.ok_or_else(|| {
             format!(
-                "{} has dependencies but no {LOCKFILE}; run `nvpm install`",
+                "{} has dependencies but no {LOCKFILE}; run `tvpm install`",
                 MANIFEST
             )
         })?;
@@ -146,7 +146,7 @@ impl Project {
             let src_dir = self.package_src(&p.name, source, &p.version);
             if !src_dir.is_dir() {
                 return Err(format!(
-                    "package `{}` {} is not installed; run `nvpm install`",
+                    "package `{}` {} is not installed; run `tvpm install`",
                     p.name, p.version
                 ));
             }
@@ -158,7 +158,7 @@ impl Project {
         for name in self.manifest.dependencies.keys() {
             if lock.get(name).is_none() {
                 return Err(format!(
-                    "dependency `{name}` is not in {LOCKFILE}; run `nvpm lock`"
+                    "dependency `{name}` is not in {LOCKFILE}; run `tvpm lock`"
                 ));
             }
         }
@@ -168,7 +168,7 @@ impl Project {
     /// A printable dependency tree.
     pub fn tree(&self) -> Result<String, String> {
         let lock = Lock::read(&self.dir)?
-            .ok_or_else(|| format!("no {LOCKFILE}; run `nvpm lock` first"))?;
+            .ok_or_else(|| format!("no {LOCKFILE}; run `tvpm lock` first"))?;
         let mut out = format!(
             "{} {}\n",
             self.manifest.package.name, self.manifest.package.version

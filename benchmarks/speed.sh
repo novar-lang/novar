@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fails when the interpreter gets much slower: runs two small programs and compares the wall
 # time with generous limits (about ten times what they take on a laptop).
-#   benchmarks/speed.sh target/release/novar
+#   benchmarks/speed.sh target/release/telvax
 set -euo pipefail
-novar="${1:?usage: speed.sh path/to/novar}"
+telvax="${1:?usage: speed.sh path/to/telvax}"
 here="$(cd "$(dirname "$0")" && pwd)"
 status=0
 
@@ -12,7 +12,7 @@ check() {
   local name="$1" fn="$2" arg="$3" want="$4" limit="$5"
   local start end ms out
   start=$(date +%s%N)
-  out="$("$novar" run "$here/speed.nv" "$fn" "$arg" 2>/dev/null)"
+  out="$("$telvax" run "$here/speed.tvx" "$fn" "$arg" 2>/dev/null)"
   end=$(date +%s%N)
   ms=$(( (end - start) / 1000000 ))
   if [ "$out" != "$want" ]; then

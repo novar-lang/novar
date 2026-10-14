@@ -7,8 +7,8 @@
 
 use std::sync::Arc;
 
-use novar_hir::hir::{self, ExprKind};
-use novar_hir::{Prim, Quantization, Ty};
+use telvax_hir::hir::{self, ExprKind};
+use telvax_hir::{Prim, Quantization, Ty};
 
 use super::{Ctrl, Ctx, Interp, RuntimeError};
 use crate::gpu::{self, Elementwise, Gpu, GpuBuf};

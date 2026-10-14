@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! index/<name>.json              one JSON line per published version
-//! packages/<name>-<version>.nvpkg   gzip-compressed tar: novar.toml + src/**
+//! packages/<name>-<version>.nvpkg   gzip-compressed tar: telvax.toml + src/**
 //! ```
 
 use std::io::Read;
@@ -179,14 +179,14 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<(
         }
         if path.is_dir() {
             collect(&path, root, out)?;
-        } else if path.extension().is_some_and(|x| x == "nv") {
+        } else if path.extension().is_some_and(|x| x == "tvx") {
             out.push(path.strip_prefix(root).expect("inside root").to_path_buf());
         }
     }
     Ok(())
 }
 
-/// Archives the project at `dir`: its manifest, `src/**/*.nv` and README / LICENSE files.
+/// Archives the project at `dir`: its manifest, `src/**/*.tvx` and README / LICENSE files.
 pub fn pack(dir: &Path) -> Result<(Manifest, Vec<u8>), String> {
     let manifest = Manifest::read(dir).map_err(|e| e.0)?;
     if let Some((name, _)) = manifest
@@ -205,7 +205,7 @@ pub fn pack(dir: &Path) -> Result<(Manifest, Vec<u8>), String> {
     let mut files = vec![PathBuf::from(MANIFEST)];
     collect(&src, dir, &mut files).map_err(|e| e.to_string())?;
     if files.len() == 1 {
-        return Err("`src/` contains no .nv files".into());
+        return Err("`src/` contains no .tvx files".into());
     }
     for extra in ["README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE"] {
         if dir.join(extra).is_file() {
@@ -305,6 +305,6 @@ pub fn unpack(archive: &[u8], cksum: &str, dest: &Path) -> Result<(), String> {
     let mut buf = String::new();
     let _ = std::fs::File::open(dest.join(MANIFEST))
         .and_then(|mut f| f.read_to_string(&mut buf))
-        .map_err(|_| "the package has no novar.toml".to_string())?;
+        .map_err(|_| "the package has no telvax.toml".to_string())?;
     Ok(())
 }

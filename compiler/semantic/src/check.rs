@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use novar_ast as ast;
-use novar_diagnostics::Diagnostic;
+use telvax_ast as ast;
+use telvax_diagnostics::Diagnostic;
 
 use crate::hir::{self, Endpoint, HttpMethod, LocalId};
 use crate::stdlib::{self, Sig};

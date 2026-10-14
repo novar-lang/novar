@@ -9,7 +9,7 @@
 //! is lowered to a symmetric per-tensor int8 kernel with `i32` accumulation.
 
 use super::*;
-use novar_hir::{Dim, Quantization};
+use telvax_hir::{Dim, Quantization};
 
 /// Element type and static dimensions of a tensor type, when the native backend supports it.
 pub(super) fn tensor_info(ty: &Ty) -> Option<(Prim, Vec<usize>)> {

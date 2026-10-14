@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use novar_cluster::{ClusterExecutor, spawn};
-use novar_modules::Image;
-use novar_runtime::{Executor, Interp, Value};
+use telvax_cluster::{ClusterExecutor, spawn};
+use telvax_modules::Image;
+use telvax_runtime::{Executor, Interp, Value};
 use serde_json::json;
 
 const PROGRAM: &str = r#"
@@ -27,8 +27,8 @@ const PROGRAM: &str = r#"
 
 fn image(src: &str) -> Image {
     Image {
-        entry: "app.nv".into(),
-        files: vec![("app.nv".into(), src.into())],
+        entry: "app.tvx".into(),
+        files: vec![("app.tvx".into(), src.into())],
         deps: vec![],
     }
 }
@@ -37,7 +37,7 @@ fn interp_with(workers: Vec<String>, token: Option<String>) -> Interp {
     let image = image(PROGRAM);
     let loaded = image.load();
     assert!(loaded.diagnostics.is_empty());
-    let (hir, diags) = novar_hir::lower(&loaded.program);
+    let (hir, diags) = telvax_hir::lower(&loaded.program);
     assert!(
         diags.is_empty(),
         "{:?}",
@@ -105,13 +105,13 @@ fn structs_travel_as_json_in_both_directions() {
     let jobs = Value::vec(vec![
         interp
             .value_from_json(
-                &novar_hir::Ty::Struct("Job".into()),
+                &telvax_hir::Ty::Struct("Job".into()),
                 &json!({"id": 1, "text": "hello big world"}),
             )
             .unwrap(),
         interp
             .value_from_json(
-                &novar_hir::Ty::Struct("Job".into()),
+                &telvax_hir::Ty::Struct("Job".into()),
                 &json!({"id": 2, "text": "tiny"}),
             )
             .unwrap(),
@@ -251,7 +251,7 @@ fn results_match_local_execution() {
     let remote = interp_with(vec![w.address()], None);
     let local = {
         let loaded = image(PROGRAM).load();
-        Interp::new(novar_hir::lower(&loaded.program).0).unwrap()
+        Interp::new(telvax_hir::lower(&loaded.program).0).unwrap()
     };
     let items = range(50);
     assert_eq!(

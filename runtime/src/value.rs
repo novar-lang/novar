@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, RwLock};
 
-use novar_hir::hir::{self, LocalId};
-use novar_hir::{Prim, Ty};
+use telvax_hir::hir::{self, LocalId};
+use telvax_hir::{Prim, Ty};
 use serde_json::{Map, Number, Value as Json};
 
 pub type Env = HashMap<LocalId, Value>;

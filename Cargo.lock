@@ -2554,61 +2554,61 @@ dependencies = [
 ]
 
 [[package]]
-name = "novar_accel"
+name = "telvax_accel"
 version = "0.0.4"
 dependencies = [
  "inkwell",
- "novar_diagnostics",
- "novar_hir",
- "novar_parser",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
 ]
 
 [[package]]
-name = "novar_ast"
+name = "telvax_ast"
 version = "0.0.4"
 
 [[package]]
-name = "novar_bench"
+name = "telvax_bench"
 version = "0.0.4"
 dependencies = [
- "novar_hir",
- "novar_parser",
- "novar_runtime",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
  "serde_json",
 ]
 
 [[package]]
-name = "novar_cli"
+name = "telvax_cli"
 version = "0.0.4"
 dependencies = [
  "axum",
- "novar_accel",
- "novar_cluster",
- "novar_codegen",
- "novar_diagnostics",
- "novar_fmt",
- "novar_hir",
- "novar_lint",
- "novar_lsp",
- "novar_mlir",
- "novar_modules",
- "novar_parser",
- "novar_pkg",
- "novar_runtime",
- "novar_server",
+ "telvax_accel",
+ "telvax_cluster",
+ "telvax_codegen",
+ "telvax_diagnostics",
+ "telvax_fmt",
+ "telvax_hir",
+ "telvax_lint",
+ "telvax_lsp",
+ "telvax_mlir",
+ "telvax_modules",
+ "telvax_parser",
+ "telvax_pkg",
+ "telvax_runtime",
+ "telvax_server",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "novar_cluster"
+name = "telvax_cluster"
 version = "0.0.4"
 dependencies = [
  "axum",
- "novar_hir",
- "novar_modules",
- "novar_runtime",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_runtime",
  "serde_json",
  "sha2",
  "tokio",
@@ -2616,117 +2616,117 @@ dependencies = [
 ]
 
 [[package]]
-name = "novar_codegen"
+name = "telvax_codegen"
 version = "0.0.4"
 dependencies = [
  "inkwell",
  "libc",
  "melior",
  "mlir-sys",
- "novar_diagnostics",
- "novar_hir",
- "novar_mlir",
- "novar_parser",
- "novar_runtime",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_mlir",
+ "telvax_parser",
+ "telvax_runtime",
 ]
 
 [[package]]
-name = "novar_diagnostics"
+name = "telvax_diagnostics"
 version = "0.0.4"
 dependencies = [
  "ariadne",
 ]
 
 [[package]]
-name = "novar_fmt"
+name = "telvax_fmt"
 version = "0.0.4"
 dependencies = [
- "novar_lexer",
+ "telvax_lexer",
 ]
 
 [[package]]
-name = "novar_hir"
+name = "telvax_hir"
 version = "0.0.4"
 dependencies = [
- "novar_ast",
- "novar_diagnostics",
- "novar_parser",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_parser",
 ]
 
 [[package]]
-name = "novar_lexer"
+name = "telvax_lexer"
 version = "0.0.4"
 dependencies = [
  "logos",
 ]
 
 [[package]]
-name = "novar_lint"
+name = "telvax_lint"
 version = "0.0.4"
 dependencies = [
- "novar_diagnostics",
- "novar_hir",
- "novar_parser",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
 ]
 
 [[package]]
-name = "novar_lsp"
+name = "telvax_lsp"
 version = "0.0.4"
 dependencies = [
  "lsp-server",
  "lsp-types",
- "novar_diagnostics",
- "novar_fmt",
- "novar_hir",
- "novar_modules",
- "novar_parser",
- "novar_pkg",
+ "telvax_diagnostics",
+ "telvax_fmt",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_parser",
+ "telvax_pkg",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "novar_mlir"
+name = "telvax_mlir"
 version = "0.0.4"
 dependencies = [
  "melior",
- "novar_diagnostics",
- "novar_hir",
- "novar_parser",
- "novar_runtime",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
 ]
 
 [[package]]
-name = "novar_modules"
+name = "telvax_modules"
 version = "0.0.4"
 dependencies = [
- "novar_ast",
- "novar_diagnostics",
- "novar_hir",
- "novar_parser",
- "novar_runtime",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_parser",
+ "telvax_runtime",
  "serde",
 ]
 
 [[package]]
-name = "novar_parser"
+name = "telvax_parser"
 version = "0.0.4"
 dependencies = [
  "chumsky",
- "novar_ast",
- "novar_diagnostics",
- "novar_lexer",
+ "telvax_ast",
+ "telvax_diagnostics",
+ "telvax_lexer",
 ]
 
 [[package]]
-name = "novar_pkg"
+name = "telvax_pkg"
 version = "0.0.4"
 dependencies = [
  "flate2",
- "novar_ast",
- "novar_hir",
- "novar_modules",
- "novar_runtime",
+ "telvax_ast",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_runtime",
  "semver",
  "serde",
  "serde_json",
@@ -2737,14 +2737,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "novar_runtime"
+name = "telvax_runtime"
 version = "0.0.4"
 dependencies = [
  "arrow",
  "bytemuck",
  "datafusion",
- "novar_hir",
- "novar_parser",
+ "telvax_hir",
+ "telvax_parser",
  "parquet",
  "pollster",
  "postgres",
@@ -2756,27 +2756,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "novar_server"
+name = "telvax_server"
 version = "0.0.4"
 dependencies = [
  "axum",
  "http-body-util",
- "novar_hir",
- "novar_parser",
+ "telvax_hir",
+ "telvax_parser",
  "serde_json",
  "tokio",
  "tower",
 ]
 
 [[package]]
-name = "novar_wasm"
+name = "telvax_wasm"
 version = "0.0.4"
 dependencies = [
- "novar_diagnostics",
- "novar_hir",
- "novar_lsp",
- "novar_parser",
- "novar_runtime",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_lsp",
+ "telvax_parser",
+ "telvax_runtime",
  "serde_json",
  "wasm-bindgen",
 ]

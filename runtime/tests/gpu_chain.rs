@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
-use novar_runtime::{Device, Interp, TensorVal, Value};
+use telvax_runtime::{Device, Interp, TensorVal, Value};
 
 fn load(src: &str, device: Device) -> Interp {
-    let (ast, perrs) = novar_parser::parse(src);
+    let (ast, perrs) = telvax_parser::parse(src);
     assert!(perrs.is_empty(), "parse: {perrs:?}");
-    let (hir, diags) = novar_hir::lower(&ast.unwrap());
+    let (hir, diags) = telvax_hir::lower(&ast.unwrap());
     assert!(
         diags.is_empty(),
         "check: {:?}",
@@ -50,7 +50,7 @@ const SRC: &str = "
 
 #[test]
 fn chained_expressions_stay_on_the_gpu() {
-    let gpu = novar_runtime::gpu::global().expect("a GPU is needed for this test");
+    let gpu = telvax_runtime::gpu::global().expect("a GPU is needed for this test");
     let args = || {
         vec![
             tensor(&[8, 16], 13),
@@ -104,7 +104,7 @@ fn chained_expressions_stay_on_the_gpu() {
 }
 
 /// Not a pass/fail check: prints how much the chain saves on a 1024-wide network.
-/// Run with `cargo test -p novar_runtime --features gpu --test gpu_chain -- --ignored --nocapture`.
+/// Run with `cargo test -p telvax_runtime --features gpu --test gpu_chain -- --ignored --nocapture`.
 #[test]
 #[ignore]
 fn timing_of_chained_and_split_networks() {

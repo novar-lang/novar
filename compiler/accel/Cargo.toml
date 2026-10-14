@@ -1,6 +1,6 @@
 [package]
-name = "novar_accel"
-description = "Novar: accelerator code generation (StableHLO for TPUs, PTX for NVIDIA GPUs)"
+name = "telvax_accel"
+description = "Telvax: accelerator code generation (StableHLO for TPUs, PTX for NVIDIA GPUs)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,8 +17,8 @@ llvm = ["dep:inkwell"]
 
 [dependencies]
 inkwell = { version = "0.10", default-features = false, features = ["llvm22-1-prefer-dynamic", "target-nvptx"], optional = true }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-novar_hir = { version = "0.0.4", path = "../semantic" }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_hir = { version = "0.0.4", path = "../semantic" }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.4", path = "../parser" }
+telvax_parser = { version = "0.0.4", path = "../parser" }

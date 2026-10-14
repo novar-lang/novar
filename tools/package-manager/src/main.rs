@@ -1,36 +1,36 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use novar_pkg::manifest::{Dependency, MANIFEST, validate_name};
-use novar_pkg::registry::{self, DirRegistry, Registry};
-use novar_pkg::{Manifest, Project};
+use telvax_pkg::manifest::{Dependency, MANIFEST, validate_name};
+use telvax_pkg::registry::{self, DirRegistry, Registry};
+use telvax_pkg::{Manifest, Project};
 use semver::{Version, VersionReq};
 
 const USAGE: &str = "\
-nvpm: the Novar package manager
+tvpm: the Telvax package manager
 
 usage:
-  nvpm new <name> [--lib]            create a project in ./<name>
-  nvpm init                          create novar.toml in the current directory
-  nvpm add <name>[@req] [--path DIR] add a dependency (registry, or a local directory)
-  nvpm remove <name>                 remove a dependency
-  nvpm lock                          resolve versions and write novar.lock
-  nvpm install                       lock (if needed) and download what is missing
-  nvpm tree                          print the dependency tree
-  nvpm search <text>                 find packages in a directory registry
-  nvpm publish                       publish this package to the registry
-  nvpm yank <name> <version> [--undo]
-  nvpm check | run [fn] | serve [flags] | build [flags]
-                                     install, then run the matching `novar` command
+  tvpm new <name> [--lib]            create a project in ./<name>
+  tvpm init                          create telvax.toml in the current directory
+  tvpm add <name>[@req] [--path DIR] add a dependency (registry, or a local directory)
+  tvpm remove <name>                 remove a dependency
+  tvpm lock                          resolve versions and write telvax.lock
+  tvpm install                       lock (if needed) and download what is missing
+  tvpm tree                          print the dependency tree
+  tvpm search <text>                 find packages in a directory registry
+  tvpm publish                       publish this package to the registry
+  tvpm yank <name> <version> [--undo]
+  tvpm check | run [fn] | serve [flags] | build [flags]
+                                     install, then run the matching `telvax` command
 
-The registry is a directory or an http(s) URL: --registry <where> or NVPM_REGISTRY.";
+The registry is a directory or an http(s) URL: --registry <where> or TVPM_REGISTRY.";
 
 type Res<T> = Result<T, String>;
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let registry =
-        take_flag(&mut args, "--registry").or_else(|| std::env::var("NVPM_REGISTRY").ok());
+        take_flag(&mut args, "--registry").or_else(|| std::env::var("TVPM_REGISTRY").ok());
     match run(args, registry) {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) if msg.is_empty() => ExitCode::from(2),
@@ -71,7 +71,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
             let lib = take_switch(&mut args, "--lib");
             let name = args
                 .first()
-                .ok_or_else(|| String::from("usage: nvpm new <name>"))?;
+                .ok_or_else(|| String::from("usage: tvpm new <name>"))?;
             new_project(Path::new(name), name, lib)
         }
         "init" => {
@@ -88,7 +88,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
         "remove" => {
             let name = args
                 .first()
-                .ok_or_else(|| String::from("usage: nvpm remove <name>"))?;
+                .ok_or_else(|| String::from("usage: tvpm remove <name>"))?;
             let project = current_project()?;
             let mut m = project.manifest.clone();
             if m.dependencies.remove(name).is_none() {
@@ -146,7 +146,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
             let undo = take_switch(&mut args, "--undo");
             let spec = registry_spec.ok_or("yank needs --registry <directory>")?;
             let [name, version] = args.as_slice() else {
-                return Err("usage: nvpm yank <name> <version> [--undo]".into());
+                return Err("usage: tvpm yank <name> <version> [--undo]".into());
             };
             let version: Version = version
                 .parse()
@@ -167,7 +167,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
                 eprintln!("downloaded {fetched}");
             }
             let entry = project.entry()?;
-            let mut command = Command::new(novar_binary());
+            let mut command = Command::new(telvax_binary());
             command.arg(&cmd);
             if cmd == "build" && args.first().is_some_and(|a| a == "--serve") {
                 args.remove(0);
@@ -180,7 +180,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
             let status = command
                 .args(&args)
                 .status()
-                .map_err(|e| format!("cannot run `novar` (set NOVAR_BIN): {e}"))?;
+                .map_err(|e| format!("cannot run `telvax` (set TELVAX_BIN): {e}"))?;
             if status.success() {
                 Ok(())
             } else {
@@ -194,23 +194,23 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
     }
 }
 
-fn novar_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("NOVAR_BIN") {
+fn telvax_binary() -> PathBuf {
+    if let Some(p) = std::env::var_os("TELVAX_BIN") {
         return PathBuf::from(p);
     }
     if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.with_file_name("novar");
+        let sibling = exe.with_file_name("telvax");
         if sibling.is_file() {
             return sibling;
         }
     }
-    PathBuf::from("novar")
+    PathBuf::from("telvax")
 }
 
 fn current_project() -> Res<Project> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     Project::discover(&cwd)?
-        .ok_or_else(|| format!("no {MANIFEST} here or in a parent directory; run `nvpm init`"))
+        .ok_or_else(|| format!("no {MANIFEST} here or in a parent directory; run `tvpm init`"))
 }
 
 fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
@@ -220,7 +220,7 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
     }
     std::fs::create_dir_all(dir.join("src")).map_err(|e| e.to_string())?;
     Manifest {
-        package: novar_pkg::manifest::PackageInfo {
+        package: telvax_pkg::manifest::PackageInfo {
             name: name.to_string(),
             version: Version::new(0, 1, 0),
             description: None,
@@ -232,12 +232,12 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
     .map_err(|e| e.0)?;
     let (file, body) = if lib {
         (
-            "lib.nv",
+            "lib.tvx",
             "pub fn hello() -> String {\n    \"hello from a library\"\n}\n",
         )
     } else {
         (
-            "main.nv",
+            "main.tvx",
             "fn main() -> i32 {\n    std::io::println(\"hello, world\");\n    0\n}\n",
         )
     };
@@ -247,7 +247,7 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
     }
     let ignore = dir.join(".gitignore");
     if !ignore.exists() {
-        std::fs::write(ignore, "target/\n.nvpm/\n").map_err(|e| e.to_string())?;
+        std::fs::write(ignore, "target/\n.tvpm/\n").map_err(|e| e.to_string())?;
     }
     println!(
         "created {} `{name}`",
@@ -260,7 +260,7 @@ fn add(args: &mut Vec<String>, reg: Option<&dyn Registry>) -> Res<()> {
     let path = take_flag(args, "--path");
     let spec = args
         .first()
-        .ok_or_else(|| String::from("usage: nvpm add <name>[@req] [--path DIR]"))?
+        .ok_or_else(|| String::from("usage: tvpm add <name>[@req] [--path DIR]"))?
         .clone();
     let (name, req) = match spec.split_once('@') {
         Some((n, r)) => (n.to_string(), Some(r.to_string())),
@@ -293,7 +293,7 @@ fn add(args: &mut Vec<String>, reg: Option<&dyn Registry>) -> Res<()> {
         (None, None) => {
             // No requirement given: depend on the newest published version, compatibly.
             let reg =
-                reg.ok_or("give a version (`nvpm add name@1.2`) or a --registry to look it up")?;
+                reg.ok_or("give a version (`tvpm add name@1.2`) or a --registry to look it up")?;
             let newest = reg
                 .versions(&name)?
                 .into_iter()

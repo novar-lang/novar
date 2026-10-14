@@ -1,11 +1,11 @@
-# Novar
+# Telvax
 
-Novar is a statically typed, compiled language for data processing, ML pipelines and AI serving.
+Telvax is a statically typed, compiled language for data processing, ML pipelines and AI serving.
 Tensor shapes are part of the type system, a pipeline operator (`|>`) composes stages, and a
 function marked `@endpoint` becomes an HTTP route with validation and JSON handling generated
 for it.
 
-```novar
+```telvax
 import std::ai::embeddings::OllamaEmbedder;
 import std::http::Status;
 
@@ -24,7 +24,7 @@ pub fn handle(payload: QueryPayload) -> Result<Tensor<f32, [768]>, Status> {
 }
 ```
 
-The full RAG service from the specification is in [`examples/rag-service.nv`](examples/rag-service.nv).
+The full RAG service from the specification is in [`examples/rag-service.tvx`](examples/rag-service.tvx).
 
 > **Status: 0.0.4, an early alpha.** Good for trying the language and giving feedback; expect
 > bugs and breaking changes. What works, and what has not been run on real hardware, is listed in
@@ -34,33 +34,33 @@ The full RAG service from the specification is in [`examples/rag-service.nv`](ex
 
 | Use case | Example |
 |---|---|
-| Summarise a CSV / Parquet file with typed columns and SQL | [`examples/dataframe/sales.nv`](examples/dataframe/sales.nv) |
-| Models whose tensor shapes are checked before they run | [`examples/ml/forward.nv`](examples/ml/forward.nv) |
-| Turn a function into a validated JSON HTTP route | [`examples/service/sentiment.nv`](examples/service/sentiment.nv) |
-| A RAG service: embeddings, vector search, an LLM | [`examples/rag-service.nv`](examples/rag-service.nv) |
-| Text processing with `Map`, `Vec` and iterator methods | [`examples/text/word-count.nv`](examples/text/word-count.nv) |
-| Errors as values: `Result`, `Option`, `?`, `if let` | [`examples/errors/parse-config.nv`](examples/errors/parse-config.nv) |
+| Summarise a CSV / Parquet file with typed columns and SQL | [`examples/dataframe/sales.tvx`](examples/dataframe/sales.tvx) |
+| Models whose tensor shapes are checked before they run | [`examples/ml/forward.tvx`](examples/ml/forward.tvx) |
+| Turn a function into a validated JSON HTTP route | [`examples/service/sentiment.tvx`](examples/service/sentiment.tvx) |
+| A RAG service: embeddings, vector search, an LLM | [`examples/rag-service.tvx`](examples/rag-service.tvx) |
+| Text processing with `Map`, `Vec` and iterator methods | [`examples/text/word-count.tvx`](examples/text/word-count.tvx) |
+| Errors as values: `Result`, `Option`, `?`, `if let` | [`examples/errors/parse-config.tvx`](examples/errors/parse-config.tvx) |
 
 Each one comes with the commands to run it in [`docs/guide/use-cases.md`](docs/guide/use-cases.md).
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/novar-lang/novar/main/scripts/install.sh | sh
-novar --version
+curl -fsSL https://raw.githubusercontent.com/telvax/telvax/main/scripts/install.sh | sh
+telvax --version
 ```
 
 The script downloads a release binary or, if there is none for your system, builds from source
 (needs [Rust](https://rustup.rs)). To build by hand: `cargo install --locked --path cli`.
 
-Two builds are published for each system: the full `novar` (about 50 MB, with SQL and Parquet)
-and `novar-lite` (about 10 MB). The lite build has everything else, in-memory tables and CSV
-included; `std::table::sql` and Parquet report a clear error there. `NOVAR_LITE=1` makes the install script pick the lite one.
+Two builds are published for each system: the full `telvax` (about 50 MB, with SQL and Parquet)
+and `telvax-lite` (about 10 MB). The lite build has everything else, in-memory tables and CSV
+included; `std::table::sql` and Parquet report a clear error there. `TELVAX_LITE=1` makes the install script pick the lite one.
 
 On Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/novar-lang/novar/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/telvax/telvax/main/scripts/install.ps1 | iex
 ```
 
 Windows builds are new and have only been compiled and tested by CI, not by hand. The native
@@ -69,15 +69,15 @@ backend (`--features llvm`) is not available on Windows yet.
 ## Quick start
 
 ```sh
-cargo build --release -p novar_cli          # target/release/novar
-novar check examples/rag-service.nv         # parse + type-check, diagnostics point at the exact span
-novar run examples/basics/primes.nv main    # interpret
-novar serve examples/rag-service.nv         # HTTP server on :8080 (offline model stand-ins)
+cargo build --release -p telvax_cli          # target/release/telvax
+telvax check examples/rag-service.tvx         # parse + type-check, diagnostics point at the exact span
+telvax run examples/basics/primes.tvx main    # interpret
+telvax serve examples/rag-service.tvx         # HTTP server on :8080 (offline model stand-ins)
 # curl -XPOST localhost:8080/v1/rag/query -H 'content-type: application/json' -d '{"query":"hello","top_k":3}'
-novar serve examples/rag-service.nv --live  # real Ollama / OpenAI / PostgreSQL+pgvector
-novar run model.nv infer --device gpu       # tensor ops on the GPU (build with --features gpu)
-novar build model.nv --emit stablehlo       # StableHLO for XLA / TPUs (--emit ptx for NVIDIA)
-novar build --serve examples/rag-service.nv -o service --dockerfile   # one binary + Dockerfile
+telvax serve examples/rag-service.tvx --live  # real Ollama / OpenAI / PostgreSQL+pgvector
+telvax run model.tvx infer --device gpu       # tensor ops on the GPU (build with --features gpu)
+telvax build model.tvx --emit stablehlo       # StableHLO for XLA / TPUs (--emit ptx for NVIDIA)
+telvax build --serve examples/rag-service.tvx -o service --dockerfile   # one binary + Dockerfile
 ```
 
 Nightly Rust is required (`rust-toolchain.toml` selects it). More in the [tour](docs/guide/tour.md) and the [use cases](docs/guide/use-cases.md).
@@ -89,13 +89,13 @@ Nightly Rust is required (`rust-toolchain.toml` selects it). More in the [tour](
 | Compiler front end | `compiler/{lexer,parser,ast,semantic}` | `logos` + `chumsky` with error recovery; typed HIR; literal type inference; tensor shapes checked statically |
 | Interpreter and runtime | `runtime/` | Arrow-backed tensors and tables, CSV / Parquet / SQL (DataFusion), real Ollama / OpenAI / pgvector clients |
 | Native backend | `compiler/{ir,codegen}` | MLIR (`melior`) and LLVM (`inkwell`) 22; JIT and executables; int8 quantization of `matmul`. Optional: `--features llvm` |
-| HTTP serving | `server/`, `cli/` | `@endpoint` becomes an Axum route; `novar build --serve` embeds the program in one binary |
-| Modules and packages | `compiler/modules`, `tools/package-manager` | `import` between files, `nvpm` with registries, a resolver and a lockfile |
+| HTTP serving | `server/`, `cli/` | `@endpoint` becomes an Axum route; `telvax build --serve` embeds the program in one binary |
+| Modules and packages | `compiler/modules`, `tools/package-manager` | `import` between files, `tvpm` with registries, a resolver and a lockfile |
 | Editor support | `tools/lsp`, `editors/vscode` | diagnostics, hover, completion, go to definition, inferred-type hints |
 | Web playground | `playground/` | the checker and interpreter compiled to WebAssembly |
 | Accelerators | `compiler/accel/` | StableHLO and PTX generators (not run on TPU / NVIDIA hardware); GPU execution lives in `runtime` (`gpu` feature) |
 | Python | `python/` | PyO3 module; zero-copy Arrow, NumPy and CUDA-array interchange; Ray executor |
-| Distribution | `tools/cluster` | `novar worker` + `--workers` for `std::dist::map` |
+| Distribution | `tools/cluster` | `telvax worker` + `--workers` for `std::dist::map` |
 | Benchmarks | `benchmarks/` | alpha targets: RAG overhead, memory footprint, ingestion throughput |
 
 [`docs/design/status.md`](docs/design/status.md) maps every item of the original engineering

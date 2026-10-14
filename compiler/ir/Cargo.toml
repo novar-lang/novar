@@ -1,6 +1,6 @@
 [package]
-name = "novar_mlir"
-description = "Novar: novar_mlir"
+name = "telvax_mlir"
+description = "Telvax: telvax_mlir"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,13 +13,13 @@ workspace = true
 
 [features]
 # Native backend through MLIR/LLVM 22 (needs LLVM installed; see scripts/llvm-env.sh).
-llvm = ["dep:melior", "dep:novar_hir"]
+llvm = ["dep:melior", "dep:telvax_hir"]
 
 [dependencies]
 melior = { version = "0.27", optional = true }
-novar_diagnostics = { version = "0.0.4", path = "../diagnostics" }
-novar_hir = { version = "0.0.4", path = "../semantic", optional = true }
+telvax_diagnostics = { version = "0.0.4", path = "../diagnostics" }
+telvax_hir = { version = "0.0.4", path = "../semantic", optional = true }
 
 [dev-dependencies]
-novar_parser = { version = "0.0.4", path = "../parser" }
-novar_runtime = { version = "0.0.4", path = "../../runtime" }
+telvax_parser = { version = "0.0.4", path = "../parser" }
+telvax_runtime = { version = "0.0.4", path = "../../runtime" }

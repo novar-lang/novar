@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use novar_diagnostics::Diagnostic;
-use novar_hir::hir::{self, Expr, ExprKind, ForIter, Local, LocalId, Pat, Proj, Stmt};
+use telvax_diagnostics::Diagnostic;
+use telvax_hir::hir::{self, Expr, ExprKind, ForIter, Local, LocalId, Pat, Proj, Stmt};
 
 pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
     let mut l = Linter::default();
@@ -209,9 +209,9 @@ mod tests {
     use super::*;
 
     fn messages(src: &str) -> Vec<String> {
-        let (ast, errs) = novar_parser::parse(src);
+        let (ast, errs) = telvax_parser::parse(src);
         assert!(errs.is_empty(), "{errs:?}");
-        let (hir, diags) = novar_hir::lower(&ast.unwrap());
+        let (hir, diags) = telvax_hir::lower(&ast.unwrap());
         assert!(
             diags.is_empty(),
             "{:?}",
@@ -264,8 +264,8 @@ mod tests {
     #[test]
     fn examples_are_clean() {
         for src in [
-            include_str!("../../../examples/basics/primes.nv"),
-            include_str!("../../../examples/basics/sieve.nv"),
+            include_str!("../../../examples/basics/primes.tvx"),
+            include_str!("../../../examples/basics/sieve.tvx"),
         ] {
             let m = messages(src);
             assert!(m.is_empty(), "{m:?}");

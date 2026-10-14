@@ -1,4 +1,4 @@
-// Counts primes and prints a few facts. Runs interpreted (`novar run`) or native (`novar build`).
+// Counts primes and prints a few facts. Runs interpreted (`telvax run`) or native (`telvax build`).
 
 fn is_prime(n: i64) -> bool {
     if n < 2 { return false; }

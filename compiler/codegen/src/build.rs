@@ -10,9 +10,9 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use novar_diagnostics::Diagnostic;
-use novar_hir::hir;
-use novar_hir::{Quantization, Ty};
+use telvax_diagnostics::Diagnostic;
+use telvax_hir::hir;
+use telvax_hir::{Quantization, Ty};
 
 #[derive(Debug)]
 pub enum BuildError {
@@ -53,10 +53,10 @@ pub fn llvm_ir(program: &hir::Program) -> Result<String, BuildError> {
 
 /// Like [`llvm_ir`], with `f32` matrix products at the given precision.
 pub fn llvm_ir_with(program: &hir::Program, quant: Quantization) -> Result<String, BuildError> {
-    let ctx = novar_mlir::context();
+    let ctx = telvax_mlir::context();
     let mut module =
-        novar_mlir::lower_with(&ctx, program, quant).map_err(BuildError::Diagnostics)?;
-    tool(novar_mlir::lower_to_llvm_dialect(&ctx, &mut module))?;
+        telvax_mlir::lower_with(&ctx, program, quant).map_err(BuildError::Diagnostics)?;
+    tool(telvax_mlir::lower_to_llvm_dialect(&ctx, &mut module))?;
     // SAFETY: `module` is a live LLVM-dialect module; the returned buffer is malloc'ed and owned by us.
     unsafe {
         let raw = mlir_sys::mlirTranslateModuleToLLVMIRToString(module.as_operation().to_raw());
@@ -123,7 +123,7 @@ fn parse_and_optimize<'c>(
         )
         .ok_or_else(|| BuildError::Tool("cannot create a target machine for the host".into()))?;
 
-    let buffer = MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "novar");
+    let buffer = MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "telvax");
     let module = context
         .create_module_from_ir(buffer)
         .map_err(|e| BuildError::Tool(format!("invalid LLVM IR: {e}")))?;
@@ -161,7 +161,7 @@ pub fn check_entry_point(program: &hir::Program) -> Result<(), BuildError> {
             0..0,
             "an executable needs an entry point: `fn main() -> i32`",
         )),
-        Some(f) if !f.params.is_empty() || f.ret != Ty::Prim(novar_hir::Prim::I32) => Err(diag(
+        Some(f) if !f.params.is_empty() || f.ret != Ty::Prim(telvax_hir::Prim::I32) => Err(diag(
             f.span.clone(),
             "`main` must have the signature `fn main() -> i32`",
         )),

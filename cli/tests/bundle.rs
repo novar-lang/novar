@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const NOVAR: &str = env!("CARGO_BIN_EXE_novar");
+const TELVAX: &str = env!("CARGO_BIN_EXE_telvax");
 
 const APP: &str = r#"
     struct In { name: String }
@@ -14,13 +14,13 @@ const APP: &str = r#"
 "#;
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("novar-cli-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("telvax-cli-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
 
-/// A scratch path for an executable written by `novar build --serve` (`.exe` on Windows). Each
-/// one is a full copy of the `novar` binary (over a gigabyte in a debug build), so it is deleted
+/// A scratch path for an executable written by `telvax build --serve` (`.exe` on Windows). Each
+/// one is a full copy of the `telvax` binary (over a gigabyte in a debug build), so it is deleted
 /// when the test ends, passing or not.
 struct TempExe(PathBuf);
 
@@ -91,10 +91,10 @@ fn wait_for(port: u16) {
 
 #[test]
 fn a_bundled_binary_serves_its_program() {
-    let src = scratch("hello.nv");
+    let src = scratch("hello.tvx");
     std::fs::write(&src, APP).unwrap();
     let exe = scratch_exe("hello-service");
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["build", "--serve"])
         .arg(&src)
         .arg("-o")
@@ -127,11 +127,11 @@ fn a_bundled_binary_serves_its_program() {
 
 #[test]
 fn the_port_can_come_from_the_environment() {
-    let src = scratch("env.nv");
+    let src = scratch("env.tvx");
     std::fs::write(&src, APP).unwrap();
     let exe = scratch_exe("env-service");
     assert!(
-        Command::new(NOVAR)
+        Command::new(TELVAX)
             .args(["build", "--serve"])
             .arg(&src)
             .arg("-o")
@@ -155,9 +155,9 @@ fn the_port_can_come_from_the_environment() {
 
 #[test]
 fn programs_without_endpoints_are_rejected() {
-    let src = scratch("noep.nv");
+    let src = scratch("noep.tvx");
     std::fs::write(&src, "fn main() -> i32 { 0 }").unwrap();
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["build", "--serve"])
         .arg(&src)
         .arg("-o")
@@ -172,10 +172,10 @@ fn programs_without_endpoints_are_rejected() {
 fn the_dockerfile_is_multi_stage_and_names_the_program() {
     let dir = scratch("docker-app");
     std::fs::create_dir_all(&dir).unwrap();
-    let src = dir.join("app.nv");
+    let src = dir.join("app.tvx");
     std::fs::write(&src, APP).unwrap();
     let exe = scratch_exe("docker-app/app");
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["build", "--serve"])
         .arg(&src)
         .arg("-o")
@@ -190,9 +190,9 @@ fn the_dockerfile_is_multi_stage_and_names_the_program() {
     );
     let docker = std::fs::read_to_string(dir.join("Dockerfile")).unwrap();
     assert_eq!(docker.matches("\nFROM ").count(), 2, "{docker}");
-    assert!(docker.contains("COPY app.nv ."));
+    assert!(docker.contains("COPY app.tvx ."));
     assert!(docker.contains(
-        "mkdir -p /out && /novar/target/release/novar build --serve app.nv -o /out/service"
+        "mkdir -p /out && /telvax/target/release/telvax build --serve app.tvx -o /out/service"
     ));
     assert!(docker.contains("COPY --from=builder /out/service /service"));
     assert!(docker.contains("USER nonroot") && docker.contains("EXPOSE 8080"));
@@ -203,20 +203,20 @@ fn a_multi_file_program_is_bundled_with_all_its_modules() {
     let dir = scratch("multi-app");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("main.nv"),
+        dir.join("main.tvx"),
         "import util::shout;\nstruct In { name: String }\nstruct Out { greeting: String }\n\
          @endpoint(path = \"/hello\", method = \"POST\")\npub fn hello(p: In) -> Result<Out, String> { Ok(Out { greeting: shout(p.name) }) }\n",
     )
     .unwrap();
     std::fs::write(
-        dir.join("util.nv"),
+        dir.join("util.tvx"),
         "pub fn shout(s: String) -> String { f\"{s}!\" }\n",
     )
     .unwrap();
     let exe = scratch_exe("multi-service");
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .args(["build", "--serve"])
-        .arg(dir.join("main.nv"))
+        .arg(dir.join("main.tvx"))
         .arg("-o")
         .arg(&exe)
         .output()
@@ -251,33 +251,33 @@ fn errors_in_a_module_are_reported_against_that_file() {
     let dir = scratch("err-app");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("main.nv"),
+        dir.join("main.tvx"),
         "import util::bad;\nfn main() -> i32 { bad() }\n",
     )
     .unwrap();
     std::fs::write(
-        dir.join("util.nv"),
+        dir.join("util.tvx"),
         "pub fn bad() -> i32 {\n    \"nope\"\n}\n",
     )
     .unwrap();
-    let out = Command::new(NOVAR)
+    let out = Command::new(TELVAX)
         .arg("check")
-        .arg(dir.join("main.nv"))
+        .arg(dir.join("main.tvx"))
         .output()
         .unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("util.nv:2:5") && err.contains("expected `i32`, found `String`"),
+        err.contains("util.tvx:2:5") && err.contains("expected `i32`, found `String`"),
         "{err}"
     );
 }
 
 #[test]
-fn nvpm_projects_run_against_installed_dependencies() {
-    use novar_pkg::{Project, registry};
+fn tvpm_projects_run_against_installed_dependencies() {
+    use telvax_pkg::{Project, registry};
 
-    let root = scratch("nvpm-e2e");
+    let root = scratch("tvpm-e2e");
     let _ = std::fs::remove_dir_all(&root);
     let (reg, lib, app, home) = (
         root.join("registry"),
@@ -288,47 +288,47 @@ fn nvpm_projects_run_against_installed_dependencies() {
     std::fs::create_dir_all(lib.join("src")).unwrap();
     std::fs::create_dir_all(app.join("src")).unwrap();
     std::fs::write(
-        lib.join("novar.toml"),
+        lib.join("telvax.toml"),
         "[package]\nname = \"mathx\"\nversion = \"1.3.0\"\n",
     )
     .unwrap();
     std::fs::write(
-        lib.join("src/lib.nv"),
+        lib.join("src/lib.tvx"),
         "pub fn cube(x: i64) -> i64 { x * x * x }\n",
     )
     .unwrap();
     registry::publish(&reg, &lib).unwrap();
 
     std::fs::write(
-        app.join("novar.toml"),
+        app.join("telvax.toml"),
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nmathx = \"^1.2\"\n",
     )
     .unwrap();
     std::fs::write(
-        app.join("src/main.nv"),
+        app.join("src/main.tvx"),
         "import mathx::cube;\nfn main() -> i64 { cube(3) + 1 }\n",
     )
     .unwrap();
 
-    // Without a lockfile the compiler asks for `nvpm install`.
-    let out = Command::new(NOVAR)
-        .env("NVPM_HOME", &home)
+    // Without a lockfile the compiler asks for `tvpm install`.
+    let out = Command::new(TELVAX)
+        .env("TVPM_HOME", &home)
         .arg("check")
-        .arg(app.join("src/main.nv"))
+        .arg(app.join("src/main.tvx"))
         .output()
         .unwrap();
-    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("nvpm install"));
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("tvpm install"));
 
     let project = Project::open(&app).unwrap();
     let r = registry::open(reg.to_str().unwrap());
-    unsafe { std::env::set_var("NVPM_HOME", &home) };
+    unsafe { std::env::set_var("TVPM_HOME", &home) };
     project.lock(Some(r.as_ref())).unwrap();
     project.install(Some(r.as_ref())).unwrap();
 
-    let out = Command::new(NOVAR)
-        .env("NVPM_HOME", &home)
+    let out = Command::new(TELVAX)
+        .env("TVPM_HOME", &home)
         .args(["run"])
-        .arg(app.join("src/main.nv"))
+        .arg(app.join("src/main.tvx"))
         .arg("main")
         .output()
         .unwrap();

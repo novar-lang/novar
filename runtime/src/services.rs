@@ -1,5 +1,5 @@
 //! Real backends for the std AI services: Ollama embeddings, OpenAI-compatible chat completions
-//! and pgvector. Enabled with `Interp::set_live(true)` (`novar serve --live`).
+//! and pgvector. Enabled with `Interp::set_live(true)` (`telvax serve --live`).
 
 use std::collections::HashSet;
 use std::sync::Mutex;

@@ -91,7 +91,7 @@ impl Solver<'_> {
         if let Some(v) = self.cache.borrow().get(name) {
             return Ok(v.clone());
         }
-        let reg = self.registry.ok_or_else(|| format!("`{name}` is a registry dependency but no registry is configured (use --registry or NVPM_REGISTRY)"))?;
+        let reg = self.registry.ok_or_else(|| format!("`{name}` is a registry dependency but no registry is configured (use --registry or TVPM_REGISTRY)"))?;
         let v = reg.versions(name)?;
         self.cache.borrow_mut().insert(name.to_string(), v.clone());
         Ok(v)

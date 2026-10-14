@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use novar_diagnostics::Diagnostic;
+use telvax_diagnostics::Diagnostic;
 
 #[derive(Debug, Clone)]
 pub struct SourceFile {
@@ -85,7 +85,7 @@ impl SourceMap {
                 .map(|(s, t)| (shift(s), self.demangle(t)))
                 .collect();
             local_diag.notes = d.notes.iter().map(|n| self.demangle(n)).collect();
-            out.push_str(&novar_diagnostics::render(
+            out.push_str(&telvax_diagnostics::render(
                 &file.name,
                 &file.text,
                 &[local_diag],
@@ -103,16 +103,16 @@ mod tests {
     #[test]
     fn files_get_disjoint_ranges_and_can_be_located() {
         let mut m = SourceMap::default();
-        let a = m.add("a.nv", "fn a() {}");
-        let b = m.add("b.nv", "fn b() {}");
+        let a = m.add("a.tvx", "fn a() {}");
+        let b = m.add("b.tvx", "fn b() {}");
         assert_eq!((a, b), (0, 10));
         assert_eq!(
             m.locate(3).map(|(f, o)| (f.name.as_str(), o)),
-            Some(("a.nv", 3))
+            Some(("a.tvx", 3))
         );
         assert_eq!(
             m.locate(12).map(|(f, o)| (f.name.as_str(), o)),
-            Some(("b.nv", 2))
+            Some(("b.tvx", 2))
         );
         assert!(m.locate(500).is_none());
     }
@@ -120,13 +120,13 @@ mod tests {
     #[test]
     fn diagnostics_render_against_their_own_file_with_demangled_names() {
         let mut m = SourceMap::default();
-        m.add("a.nv", "fn a() {}");
-        let base = m.add("b.nv", "let x = 1;\nlet y = pkg__f;");
+        m.add("a.tvx", "fn a() {}");
+        let base = m.add("b.tvx", "let x = 1;\nlet y = pkg__f;");
         m.display_names.insert("pkg__f".into(), "pkg::f".into());
         let at = base + "let x = 1;\nlet y = ".len();
         let d = Diagnostic::error(at..at + 6, "cannot find `pkg__f` in this scope");
         let text = m.render(&[d], false);
-        assert!(text.contains("b.nv:2:9"), "{text}");
+        assert!(text.contains("b.tvx:2:9"), "{text}");
         assert!(
             text.contains("cannot find `pkg::f` in this scope"),
             "{text}"

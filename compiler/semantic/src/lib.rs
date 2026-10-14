@@ -27,10 +27,10 @@ pub enum Quantization {
     Int4Channel,
 }
 
-use novar_diagnostics::Diagnostic;
+use telvax_diagnostics::Diagnostic;
 
 /// Checks a parsed program, returning its typed HIR and every diagnostic found.
 /// The HIR is always produced so later tooling can work on partially valid code.
-pub fn lower(program: &novar_ast::Program) -> (hir::Program, Vec<Diagnostic>) {
+pub fn lower(program: &telvax_ast::Program) -> (hir::Program, Vec<Diagnostic>) {
     check::lower(program)
 }
