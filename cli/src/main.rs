@@ -49,6 +49,14 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         .collect::<Vec<_>>()
         .as_slice()
     {
+        ["--version" | "-V" | "version"] => {
+            println!("novar {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        ["--help" | "-h" | "help"] => {
+            println!("{USAGE}");
+            Ok(())
+        }
         ["check", file] => check(file).map(|_| ()),
         ["run", file, func, rest @ ..] => run(file, func, rest),
         ["serve", file, rest @ ..] => {
