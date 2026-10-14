@@ -42,7 +42,10 @@ fn the_command_line_covers_the_whole_workflow() {
     assert!(lib.join("telvax.toml").is_file() && lib.join("src/lib.tvx").is_file());
     std::fs::write(
         lib.join("src/lib.tvx"),
-        "pub fn double(x: i32) -> i32 { x * 2 }\n",
+        r#"
+def double(x: int32) -> int32:
+    return x * 2
+"#,
     )
     .unwrap();
     let o = tvpm(&lib, &home, &["publish", "--registry", reg_s]);

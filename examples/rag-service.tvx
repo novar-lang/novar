@@ -1,65 +1,57 @@
-import std::db::pgvector::PgVectorClient;
-import std::ai::embeddings::OllamaEmbedder;
-import std::ai::llm::OpenAIClient;
-import std::http::{Request, Response, Status};
+from std.db.pgvector import PgVectorClient
+from std.ai.embeddings import OllamaEmbedder
+from std.ai.llm import OpenAIClient
+from std.http import Request, Response, Status
 
-let embedder = OllamaEmbedder::new("nomic-embed-text");
-let vector_db = PgVectorClient::connect("postgresql://localhost:5432/vectors");
-let llm = OpenAIClient::new("gpt-4o-mini");
+embedder = OllamaEmbedder.new("nomic-embed-text")
+vector_db = PgVectorClient.connect("postgresql://localhost:5432/vectors")
+llm = OpenAIClient.new("gpt-4o-mini")
 
-struct QueryPayload {
-    query: String,
-    top_k: i32
-}
+class QueryPayload:
+    query: str
+    top_k: int32
 
-struct DocumentChunk {
-    id: String,
-    text: String,
-    score: f32
-}
+class DocumentChunk:
+    id: str
+    text: str
+    score: float32
 
-struct RagResponse {
-    query: String,
-    retrieved_context: Vector,
-    answer: String
-}
+class RagResponse:
+    query: str
+    retrieved_context: Vector
+    answer: str
 
-fn generate_embedding(text: String) -> Tensor<f32, [768]> {
-    text
-        |> std::text::clean_whitespace()
-        |> std::text::truncate(512)
+def generate_embedding(text: str) -> Tensor[float32, [768]]:
+    return text
+        |> std.text.clean_whitespace()
+        |> std.text.truncate(512)
         |> embedder.embed()
-}
 
-fn retrieve_docs(query: String, top_k: i32) -> Vec {
-    let query_vector = generate_embedding(query);
+def retrieve_docs(query: str, top_k: int32) -> Vec:
+    query_vector = generate_embedding(query)
     return vector_db.search_collection("knowledge_base")
         |> vector_db.with_vector(query_vector)
         |> vector_db.limit(top_k)
-        |> vector_db.execute();
-}
+        |> vector_db.execute()
 
-fn assemble_prompt(query: String, docs: Vec) -> String {
-    let context = docs
-        |> std::iter::map(|d| d.text)
-        |> std::string::join("\n---\n");
-    return f"Context information:\n{context}\n\nUser Question: {query}\nProvide a concise answer based on the context above.";
-}
+def assemble_prompt(query: str, docs: Vec) -> str:
+    context = docs
+        |> std.iter.map(lambda d: d.text)
+        |> std.string.join("\n---\n")
+    return f"Context information:\n{context}\n\nUser Question: {query}\nProvide a concise answer based on the context above."
 
-@endpoint(path = "/v1/rag/query", method = "POST")
-pub fn handle_rag(payload: QueryPayload) -> Result<RagResponse, Status> {
-    if payload.query.is_empty() {
-        return Err(Status::BadRequest("Query string cannot be empty."));
-    }
+@endpoint(path="/v1/rag/query", method="POST")
+def handle_rag(payload: QueryPayload) -> Result[RagResponse, Status]:
+    if payload.query.is_empty():
+        return Err(Status.BadRequest("Query string cannot be empty."))
 
-    let docs = retrieve_docs(payload.query, payload.top_k);
-    let prompt = assemble_prompt(payload.query, docs);
-    let answer = prompt |> llm.complete() |> std::text::trim();
-    let retrieved_texts = docs |> std::iter::map(|d| d.text) |> std::collect();
+    docs = retrieve_docs(payload.query, payload.top_k)
+    prompt = assemble_prompt(payload.query, docs)
+    answer = prompt |> llm.complete() |> std.text.trim()
+    retrieved_texts = docs |> std.iter.map(lambda d: d.text) |> std.collect()
 
-    return Ok(RagResponse {
-        query: payload.query,
-        retrieved_context: retrieved_texts,
-        answer: answer
-    });
-}
+    return Ok(RagResponse(
+        query=payload.query,
+        retrieved_context=retrieved_texts,
+        answer=answer,
+    ))

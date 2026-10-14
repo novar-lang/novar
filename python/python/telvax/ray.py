@@ -1,4 +1,4 @@
-"""Run `std::dist::map` on a Ray cluster.
+"""Run `std.dist.map` on a Ray cluster.
 
     import ray, telvax
     ray.init()                                   # or ray.init(address="auto") on a cluster

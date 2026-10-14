@@ -1,19 +1,23 @@
-// Reads a CSV into a typed table, then summarises it with column methods and SQL.
-// Run from the repository root: telvax run examples/dataframe/sales.tvx main
+# Reads a CSV into a typed table, then summarises it with column methods and SQL.
+# Run from the repository root: telvax run examples/dataframe/sales.tvx main
 
-struct Sale { id: i64, region: String, units: i64, price: f64 }
+class Sale:
+    id: int
 
-fn main() {
-    let sales: Table<Sale> = read_csv("examples/dataframe/sales.csv");
-    println(f"rows: {sales.len()}");
-    println(f"mean price: {sales.price.mean()}");
+    region: str
 
-    let by_region: Table<{ region: String, revenue: f64 }> =
-        sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC");
-    for row in by_region {
-        println(f"{row.region}: {row.revenue}");
-    }
+    units: int
 
-    let big: Table<Sale> = sales.sql("SELECT * FROM t WHERE units >= 9");
-    println(f"big sales: {big.len()}");
-}
+    price: float
+
+def main():
+    sales: Table[Sale] = read_csv("examples/dataframe/sales.csv")
+    print(f"rows: {sales.len()}")
+    print(f"mean price: {sales.price.mean()}")
+
+    by_region: Table[{region: str, revenue: float}] = sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC")
+    for row in by_region:
+        print(f"{row.region}: {row.revenue}")
+
+    big: Table[Sale] = sales.sql("SELECT * FROM t WHERE units >= 9")
+    print(f"big sales: {big.len()}")

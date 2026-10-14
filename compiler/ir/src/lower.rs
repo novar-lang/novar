@@ -138,11 +138,11 @@ impl<'c, 'p> Cx<'c, 'p> {
             }],
             Ty::Struct(name) => {
                 if depth > 16 {
-                    return Err(format!("recursive struct `{name}`"));
+                    return Err(format!("recursive class `{name}`"));
                 }
                 let def = self
                     .struct_def(name)
-                    .ok_or_else(|| format!("unknown struct `{name}`"))?;
+                    .ok_or_else(|| format!("unknown class `{name}`"))?;
                 let mut out = Vec::new();
                 for (_, fty) in &def.fields {
                     out.extend(self.flat_at(fty, depth + 1)?);
@@ -1370,7 +1370,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
         match ty {
             Ty::Prim(Prim::Str) => Ok((v[0], v[1])),
             Ty::Prim(Prim::Bool) => {
-                let (t, f) = (self.str_const(blk, "true"), self.str_const(blk, "false"));
+                let (t, f) = (self.str_const(blk, "True"), self.str_const(blk, "False"));
                 let ptr = self.push(
                     blk,
                     OperationBuilder::new("llvm.select", self.loc)

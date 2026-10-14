@@ -6,23 +6,41 @@ use telvax_modules::Image;
 use telvax_runtime::{Executor, Interp, Value};
 
 const PROGRAM: &str = r#"
-    struct Job { id: i64, text: String }
-    struct Done { id: i64, words: u64, shout: String }
+class Job:
+    id: int
+    text: str
 
-    fn square(x: i64) -> i64 { x * x }
-    fn heavy(n: i64) -> i64 {
-        let mut acc: i64 = 0;
-        for i in 0..n { acc += (i * i) % 7; }
-        acc
-    }
-    fn process(j: Job) -> Done {
-        Done { id: j.id, words: std::iter::count(std::text::split(j.text, " ")), shout: std::text::uppercase(j.text) }
-    }
-    fn fails(x: i64) -> i64 { 100 / x }
-    fn squares(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, square) }
-    fn crunch(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, heavy) }
-    fn jobs(v: Vec<Job>) -> Vec<Done> { std::dist::map(v, process) }
-    fn risky(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, fails) }
+class Done:
+    id: int
+    words: uint64
+    shout: str
+
+def square(x: int) -> int:
+    return x * x
+
+def heavy(n: int) -> int:
+    acc: int = 0
+    for i in range(n):
+        acc += i * i % 7
+    return acc
+
+def process(j: Job) -> Done:
+    return Done(id=j.id, words=std.iter.count(std.text.split(j.text, " ")), shout=std.text.uppercase(j.text))
+
+def fails(x: int) -> int:
+    return 100 / x
+
+def squares(v: list[int]) -> list[int]:
+    return std.dist.map(v, square)
+
+def crunch(v: list[int]) -> list[int]:
+    return std.dist.map(v, heavy)
+
+def jobs(v: list[Job]) -> list[Done]:
+    return std.dist.map(v, process)
+
+def risky(v: list[int]) -> list[int]:
+    return std.dist.map(v, fails)
 "#;
 
 fn image(src: &str) -> Image {
@@ -225,7 +243,12 @@ fn tokens_protect_workers() {
 #[test]
 fn workers_refuse_programs_that_do_not_compile() {
     let w = spawn(None).unwrap();
-    let broken = image("fn f() -> i32 { \"nope\" }");
+    let broken = image(
+        r#"
+def f() -> int32:
+    return "nope"
+"#,
+    );
     let exec = ClusterExecutor::new(vec![w.address()], &broken, None).unwrap();
     let e = exec.map("f", vec![json!(1)]).unwrap_err();
     assert!(e.contains("does not type-check"), "{e}");

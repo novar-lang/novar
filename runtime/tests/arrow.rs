@@ -60,16 +60,25 @@ fn scratch(name: &str) -> String {
 
 #[test]
 fn elementwise_and_reductions() {
-    let src = "
-        fn add(a: Tensor<f32, [3]>, b: Tensor<f32, [3]>) -> Tensor<f32, [3]> { std::tensor::add(a, b) }
-        fn chain(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> {
-            a |> std::tensor::scale(2.0) |> std::tensor::relu() |> std::tensor::scale(0.5)
-        }
-        fn total(a: Tensor<f32, [4]>) -> f32 { std::tensor::sum(a) }
-        fn avg(a: Tensor<f32, [4]>) -> f32 { std::tensor::mean(a) }
-        fn best(a: Tensor<f32, [4]>) -> u64 { std::tensor::argmax(a) }
-        fn dot(a: Tensor<f32, [3]>, b: Tensor<f32, [3]>) -> f32 { std::tensor::dot(a, b) }
-    ";
+    let src = r#"
+def add(a: Tensor[float32, [3]], b: Tensor[float32, [3]]) -> Tensor[float32, [3]]:
+    return std.tensor.add(a, b)
+
+def chain(a: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
+    return a |> std.tensor.scale(2.0) |> std.tensor.relu() |> std.tensor.scale(0.5)
+
+def total(a: Tensor[float32, [4]]) -> float32:
+    return std.tensor.sum(a)
+
+def avg(a: Tensor[float32, [4]]) -> float32:
+    return std.tensor.mean(a)
+
+def best(a: Tensor[float32, [4]]) -> uint64:
+    return std.tensor.argmax(a)
+
+def dot(a: Tensor[float32, [3]], b: Tensor[float32, [3]]) -> float32:
+    return std.tensor.dot(a, b)
+"#;
     let sum = tensor(run(
         src,
         "add",
@@ -97,12 +106,19 @@ fn elementwise_and_reductions() {
 
 #[test]
 fn matmul_transpose_and_softmax() {
-    let src = "
-        fn mm(a: Tensor<f32, [2, 3]>, b: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }
-        fn mv(a: Tensor<f32, [2, 3]>, v: Tensor<f32, [3]>) -> Tensor<f32, [2]> { std::tensor::matmul(a, v) }
-        fn tr(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [3, 2]> { std::tensor::transpose(a) }
-        fn sm(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [2, 3]> { std::tensor::softmax(a) }
-    ";
+    let src = r#"
+def mm(a: Tensor[float32, [2, 3]], b: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
+    return std.tensor.matmul(a, b)
+
+def mv(a: Tensor[float32, [2, 3]], v: Tensor[float32, [3]]) -> Tensor[float32, [2]]:
+    return std.tensor.matmul(a, v)
+
+def tr(a: Tensor[float32, [2, 3]]) -> Tensor[float32, [3, 2]]:
+    return std.tensor.transpose(a)
+
+def sm(a: Tensor[float32, [2, 3]]) -> Tensor[float32, [2, 3]]:
+    return std.tensor.softmax(a)
+"#;
     let a = f32s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let b = f32s(&[3, 2], &[7.0, 8.0, 9.0, 10.0, 11.0, 12.0]);
     let c = tensor(run(src, "mm", vec![a.clone(), b]));
@@ -135,13 +151,22 @@ fn matmul_transpose_and_softmax() {
 
 #[test]
 fn constructors_use_the_declared_type() {
-    let src = "
-        fn z() -> Tensor<f32, [2, 2]> { std::tensor::zeros() }
-        fn fv(v: Vec<f32>) -> Tensor<f32, [2, 2]> { std::tensor::from_vec(v) }
-        fn rs(a: Tensor<f32, [2, 3]>) -> Tensor<f32, [3, 2]> { std::tensor::reshape(a) }
-        fn back(a: Tensor<f32, [3]>) -> Vec<f32> { std::tensor::to_vec(a) }
-        fn ints() -> Tensor<i64, [3]> { std::tensor::from_vec([1, 2, 3]) }
-    ";
+    let src = r#"
+def z() -> Tensor[float32, [2, 2]]:
+    return std.tensor.zeros()
+
+def fv(v: list[float32]) -> Tensor[float32, [2, 2]]:
+    return std.tensor.from_vec(v)
+
+def rs(a: Tensor[float32, [2, 3]]) -> Tensor[float32, [3, 2]]:
+    return std.tensor.reshape(a)
+
+def back(a: Tensor[float32, [3]]) -> list[float32]:
+    return std.tensor.to_vec(a)
+
+def ints() -> Tensor[int, [3]]:
+    return std.tensor.from_vec([1, 2, 3])
+"#;
     assert_eq!(tensor(run(src, "z", vec![])).to_f32_vec(), [0.0; 4]);
     let v = Value::vec(vec![
         Value::Float(1.0),
@@ -178,7 +203,10 @@ fn constructors_use_the_declared_type() {
 
 #[test]
 fn runtime_shape_checks_catch_dynamic_mismatches() {
-    let src = "fn add(a: Tensor<f32, [N]>, b: Tensor<f32, [N]>) -> Tensor<f32, [N]> { std::tensor::add(a, b) }";
+    let src = r#"
+def add(a: Tensor[float32, [N]], b: Tensor[float32, [N]]) -> Tensor[float32, [N]]:
+    return std.tensor.add(a, b)
+"#;
     let i = load(src);
     let e = i
         .call(
@@ -190,20 +218,53 @@ fn runtime_shape_checks_catch_dynamic_mismatches() {
 }
 
 const TABLE_SRC: &str = r#"
-    struct Row { id: i64, score: f32, name: String, ok: bool }
-    fn load(path: String) -> Table<Row> { std::table::read_csv(path) }
-    fn scores(t: Table<Row>) -> Tensor<f32, [N]> { t.score }
-    fn names(t: Table<Row>) -> Vec<String> { t.name }
-    fn count(t: Table<Row>) -> u64 { t.len() }
-    fn second(t: Table<Row>) -> Row { t[1] }
-    fn total(t: Table<Row>) -> f32 { let mut s = 0.0; for r in t { s += r.score; } s }
-    fn top(t: Table<Row>) -> Table<Row> { t |> std::table::sql("SELECT * FROM t WHERE score > 1.5 ORDER BY score DESC") }
-    fn good(t: Table<Row>) -> Table<Row> { t |> std::table::filter(|r| r.ok) }
-    fn avg(t: Table<Row>) -> f32 { t.score |> std::tensor::mean() }
-    fn save_csv(t: Table<Row>, path: String) { std::table::write_csv(t, path); }
-    fn save_pq(t: Table<Row>, path: String) { std::table::write_parquet(t, path); }
-    fn load_pq(path: String) -> Table<Row> { std::table::read_parquet(path) }
-    fn rebuild(t: Table<Row>) -> Table<Row> { std::table::from_rows(std::table::to_rows(t)) }
+class Row:
+    id: int
+    score: float32
+    name: str
+    ok: bool
+
+def load(path: str) -> Table[Row]:
+    return std.table.read_csv(path)
+
+def scores(t: Table[Row]) -> Tensor[float32, [N]]:
+    return t.score
+
+def names(t: Table[Row]) -> list[str]:
+    return t.name
+
+def count(t: Table[Row]) -> uint64:
+    return t.len()
+
+def second(t: Table[Row]) -> Row:
+    return t[1]
+
+def total(t: Table[Row]) -> float32:
+    s = 0.0
+    for r in t:
+        s += r.score
+    return s
+
+def top(t: Table[Row]) -> Table[Row]:
+    return t |> std.table.sql("SELECT * FROM t WHERE score > 1.5 ORDER BY score DESC")
+
+def good(t: Table[Row]) -> Table[Row]:
+    return t |> std.table.filter(lambda r: r.ok)
+
+def avg(t: Table[Row]) -> float32:
+    return t.score |> std.tensor.mean()
+
+def save_csv(t: Table[Row], path: str):
+    std.table.write_csv(t, path)
+
+def save_pq(t: Table[Row], path: str):
+    std.table.write_parquet(t, path)
+
+def load_pq(path: str) -> Table[Row]:
+    return std.table.read_parquet(path)
+
+def rebuild(t: Table[Row]) -> Table[Row]:
+    return std.table.from_rows(std.table.to_rows(t))
 "#;
 
 fn csv() -> String {
@@ -236,7 +297,7 @@ fn csv_ingestion_columns_and_rows() {
     );
     assert_eq!(
         i.call("second", vec![t.clone()]).unwrap().to_string(),
-        "Row { id: 2, score: 2.5, name: bob, ok: false }"
+        "Row(id=2, score=2.5, name=bob, ok=False)"
     );
     assert_eq!(float(i.call("total", vec![t.clone()]).unwrap()), 7.0);
     assert_eq!(
@@ -308,14 +369,23 @@ fn tables_report_bad_input() {
 #[test]
 fn tables_and_tensors_travel_as_json() {
     let src = r#"
-        struct Row { id: i64, score: f32 }
-        struct In { rows: Table<Row>, w: Tensor<f32, [2]> }
-        struct Out { n: u64, weighted: Tensor<f32, [N]>, rows: Table<Row> }
-        @endpoint(path = "/score", method = "POST")
-        fn score(p: In) -> Result<Out, String> {
-            Ok(Out { n: p.rows.len(), weighted: p.rows.score |> std::tensor::scale(2.0), rows: p.rows })
-        }
-    "#;
+class Row:
+    id: int
+    score: float32
+
+class In:
+    rows: Table[Row]
+    w: Tensor[float32, [2]]
+
+class Out:
+    n: uint64
+    weighted: Tensor[float32, [N]]
+    rows: Table[Row]
+
+@endpoint(path="/score", method="POST")
+def score(p: In) -> Result[Out, str]:
+    return Ok(Out(n=p.rows.len(), weighted=p.rows.score |> std.tensor.scale(2.0), rows=p.rows))
+"#;
     let i = load(src);
     let body = json!({"rows": [{"id": 1, "score": 0.5}, {"id": 2, "score": 1.5}], "w": [1.0, 2.0]});
     let out = i.call_endpoint("score", &body).unwrap();
@@ -326,7 +396,10 @@ fn tables_and_tensors_travel_as_json() {
 
 #[test]
 fn int8_quantized_matmul_stays_close_to_float() {
-    let src = "fn mm(a: Tensor<f32, [4, 8]>, b: Tensor<f32, [8, 3]>) -> Tensor<f32, [4, 3]> { std::tensor::matmul(a, b) }";
+    let src = r#"
+def mm(a: Tensor[float32, [4, 8]], b: Tensor[float32, [8, 3]]) -> Tensor[float32, [4, 3]]:
+    return std.tensor.matmul(a, b)
+"#;
     let a: Vec<f32> = (0..32)
         .map(|i| ((i * 37 % 19) as f32 - 9.0) / 4.0)
         .collect();
@@ -358,7 +431,10 @@ fn int8_quantized_matmul_stays_close_to_float() {
 
 #[test]
 fn int8_quantization_handles_zeros_and_exact_cases() {
-    let src = "fn mm(a: Tensor<f32, [2, 2]>, b: Tensor<f32, [2, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::matmul(a, b) }";
+    let src = r#"
+def mm(a: Tensor[float32, [2, 2]], b: Tensor[float32, [2, 2]]) -> Tensor[float32, [2, 2]]:
+    return std.tensor.matmul(a, b)
+"#;
     let i = load(src);
     i.set_quantization(telvax_hir::Quantization::Int8);
     let zero = f32s(&[2, 2], &[0.0; 4]);
@@ -379,7 +455,10 @@ fn int8_quantization_handles_zeros_and_exact_cases() {
 fn per_channel_quantization_is_more_accurate_when_columns_differ() {
     // One column is a thousand times larger than the others: a single per-tensor scale wastes
     // almost every level on the small columns.
-    let src = "fn mm(a: Tensor<f32, [6, 16]>, b: Tensor<f32, [16, 4]>) -> Tensor<f32, [6, 4]> { std::tensor::matmul(a, b) }";
+    let src = r#"
+def mm(a: Tensor[float32, [6, 16]], b: Tensor[float32, [16, 4]]) -> Tensor[float32, [6, 4]]:
+    return std.tensor.matmul(a, b)
+"#;
     let a: Vec<f32> = (0..96)
         .map(|i| ((i * 37 % 29) as f32 - 14.0) / 5.0)
         .collect();
@@ -430,18 +509,31 @@ fn per_channel_quantization_is_more_accurate_when_columns_differ() {
 
 #[test]
 fn tensor_methods_and_operators_match_the_function_forms() {
-    let src = "
-        fn methods(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w).relu() }
-        fn functions(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { std::tensor::relu(std::tensor::matmul(x, w)) }
-        fn chain(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 2]>) -> Tensor<f32, [2, 2]> { x.matmul(w).sigmoid().scale(2.0) }
-        fn total(x: Tensor<f32, [2, 3]>) -> f32 { x.sum() + x.mean() }
-        fn ops(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> { (a + b) * a - b / a }
-        fn ops_by_hand(a: Tensor<f32, [4]>, b: Tensor<f32, [4]>) -> Tensor<f32, [4]> {
-            std::tensor::sub(std::tensor::mul(std::tensor::add(a, b), a), std::tensor::div(b, a))
-        }
-        fn scaled(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { a * 3.0 + a * 0.5 }
-        fn flipped(a: Tensor<f32, [4]>) -> Tensor<f32, [4]> { 2.0 * a }
-    ";
+    let src = r#"
+def methods(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
+    return x.matmul(w).relu()
+
+def functions(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
+    return std.tensor.relu(std.tensor.matmul(x, w))
+
+def chain(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 2]]) -> Tensor[float32, [2, 2]]:
+    return x.matmul(w).sigmoid().scale(2.0)
+
+def total(x: Tensor[float32, [2, 3]]) -> float32:
+    return x.sum() + x.mean()
+
+def ops(a: Tensor[float32, [4]], b: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
+    return (a + b) * a - b / a
+
+def ops_by_hand(a: Tensor[float32, [4]], b: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
+    return std.tensor.sub(std.tensor.mul(std.tensor.add(a, b), a), std.tensor.div(b, a))
+
+def scaled(a: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
+    return a * 3.0 + a * 0.5
+
+def flipped(a: Tensor[float32, [4]]) -> Tensor[float32, [4]]:
+    return 2.0 * a
+"#;
     let x = f32s(&[2, 3], &[1.0, -2.0, 3.0, -4.0, 5.0, -6.0]);
     let w = f32s(&[3, 2], &[0.5, -1.0, 1.5, 2.0, -0.25, 1.0]);
     let get = |f: &str, args: Vec<Value>| tensor(run(src, f, args)).to_f32_vec();
@@ -464,15 +556,24 @@ fn tensor_methods_and_operators_match_the_function_forms() {
 
 #[test]
 fn inline_row_types_prelude_and_table_methods() {
-    let src = "
-        struct Sale { id: i64, region: String, units: i64 }
-        fn totals(t: Table<Sale>) -> Table<{ region: String, units: i64 }> {
-            t.sql(\"SELECT region, SUM(units) AS units FROM t GROUP BY region ORDER BY region\")
-        }
-        fn count(t: Table<{ region: String, units: i64 }>) -> u64 { t.len() }
-        fn run_it(t: Table<Sale>) -> u64 { count(totals(t)) }
-        fn shout() { println(\"hello\"); }
-    ";
+    let src = r#"
+class Sale:
+    id: int
+    region: str
+    units: int
+
+def totals(t: Table[Sale]) -> Table[{region: str, units: int}]:
+    return t.sql("SELECT region, SUM(units) AS units FROM t GROUP BY region ORDER BY region")
+
+def count(t: Table[{region: str, units: int}]) -> uint64:
+    return t.len()
+
+def run_it(t: Table[Sale]) -> uint64:
+    return count(totals(t))
+
+def shout():
+    print("hello")
+"#;
     let interp = load(src);
     let out = interp
         .call_json(

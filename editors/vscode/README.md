@@ -6,7 +6,7 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
 * **Diagnostics** from the real parser and type checker, including tensor-shape mismatches.
 * **Hover** with inferred types and function signatures.
 * **Inlay hints** showing the inferred type of `let` bindings and loop variables.
-* **Completion** for fields, table columns, methods, `std::` paths, functions and variables.
+* **Completion** for fields, table columns, methods, `std.` paths, functions and variables.
 * **Go to definition** and **document symbols**.
 
 ## Setup

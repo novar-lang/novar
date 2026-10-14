@@ -62,9 +62,19 @@ fn program(tag: &str) -> PathBuf {
     let path = dir.join("app.tvx");
     std::fs::write(
         &path,
-        "fn square(x: i64) -> i64 { x * x }\n\
-         fn ones() -> Vec<i64> { [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }\n\
-         fn all() -> i64 {\n    let mut s: i64 = 0;\n    for v in std::dist::map(ones(), square) { s += v; }\n    s\n}\n",
+        r#"
+def square(x: int) -> int:
+    return x * x
+
+def ones() -> list[int]:
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+def all() -> int:
+    s: int = 0
+    for v in std.dist.map(ones(), square):
+        s += v
+    return s
+"#,
     )
     .unwrap();
     path

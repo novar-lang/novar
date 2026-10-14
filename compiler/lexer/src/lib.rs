@@ -1,4 +1,9 @@
 //! Zero-copy tokenizer for Telvax source code.
+//!
+//! Blocks are made by indentation, as in Python. [`tokenize`] turns the indentation into
+//! [`Token::Indent`], [`Token::Dedent`] and the ends of lines into [`Token::Newline`], so the parser
+//! never looks at whitespace. Line breaks inside `()`, `[]` and `{}` are ignored, and a line that
+//! starts with `|>` continues the line before it.
 
 use std::ops::Range;
 
@@ -13,48 +18,60 @@ pub struct LexError;
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 #[logos(error = LexError)]
 #[logos(skip r"[ \t\r\n]+")]
-#[logos(skip(r"//[^\n]*", allow_greedy = true))]
+#[logos(skip(r"#[^\n]*", allow_greedy = true))]
 pub enum Token<'src> {
     // Keywords
     #[token("import")]
     Import,
-    #[token("fn")]
-    Fn,
-    #[token("let")]
-    Let,
-    #[token("mut")]
-    Mut,
-    #[token("struct")]
-    Struct,
+    #[token("from")]
+    From,
+    #[token("def")]
+    Def,
+    #[token("class")]
+    Class,
     #[token("enum")]
     Enum,
-    #[token("pub")]
-    Pub,
-    #[token("match")]
-    Match,
-    #[token("impl")]
-    Impl,
     #[token("trait")]
     Trait,
+    #[token("extend")]
+    Extend,
+    #[token("match")]
+    Match,
+    #[token("case")]
+    Case,
     #[token("return")]
     Return,
     #[token("break")]
     Break,
     #[token("continue")]
     Continue,
+    #[token("pass")]
+    Pass,
     #[token("if")]
     If,
+    #[token("elif")]
+    Elif,
     #[token("else")]
     Else,
     #[token("for")]
     For,
     #[token("in")]
     In,
+    #[token("is")]
+    Is,
     #[token("while")]
     While,
-    #[token("true")]
+    #[token("lambda")]
+    Lambda,
+    #[token("and")]
+    And,
+    #[token("or")]
+    Or,
+    #[token("not")]
+    Not,
+    #[token("True")]
     True,
-    #[token("false")]
+    #[token("False")]
     False,
 
     // Literals and identifiers
@@ -64,19 +81,17 @@ pub enum Token<'src> {
     Int(&'src str),
     #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?")]
     Float(&'src str),
-    #[regex(r#""([^"\\]|\\.)*""#)]
+    #[regex(r#""([^"\\]|\\.)*"|'([^'\\]|\\.)*'"#)]
     Str(&'src str),
     /// `f"..."`; interpolation is split by the parser.
-    #[regex(r#"f"([^"\\]|\\.)*""#)]
+    #[regex(r#"f"([^"\\]|\\.)*"|f'([^'\\]|\\.)*'"#)]
     FStr(&'src str),
 
     // Operators
     #[token("|>")]
     Pipe,
-    #[token("..=")]
-    DotDotEq,
-    #[token("..")]
-    DotDot,
+    #[token("...")]
+    Ellipsis,
     #[token("+=")]
     PlusEq,
     #[token("-=")]
@@ -85,12 +100,8 @@ pub enum Token<'src> {
     StarEq,
     #[token("/=")]
     SlashEq,
-    #[token("::")]
-    PathSep,
     #[token("->")]
     Arrow,
-    #[token("=>")]
-    FatArrow,
     #[token("==")]
     EqEq,
     #[token("!=")]
@@ -99,10 +110,6 @@ pub enum Token<'src> {
     LtEq,
     #[token(">=")]
     GtEq,
-    #[token("&&")]
-    AndAnd,
-    #[token("||")]
-    OrOr,
     #[token("=")]
     Eq,
     #[token("<")]
@@ -111,8 +118,6 @@ pub enum Token<'src> {
     Gt,
     #[token("|")]
     Bar,
-    #[token("!")]
-    Bang,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -127,8 +132,6 @@ pub enum Token<'src> {
     Dot,
     #[token(",")]
     Comma,
-    #[token(";")]
-    Semi,
     #[token(":")]
     Colon,
     #[token("@")]
@@ -149,6 +152,14 @@ pub enum Token<'src> {
     LBracket,
     #[token("]")]
     RBracket,
+
+    // Layout, produced by `tokenize` and never by the lexer itself.
+    /// End of a logical line.
+    Newline,
+    /// The next line is indented one more level.
+    Indent,
+    /// The block ends.
+    Dedent,
 }
 
 impl std::fmt::Display for Token<'_> {
@@ -156,47 +167,47 @@ impl std::fmt::Display for Token<'_> {
         use Token::*;
         let s = match self {
             Import => "import",
-            Fn => "fn",
-            Let => "let",
-            Mut => "mut",
-            Struct => "struct",
+            From => "from",
+            Def => "def",
+            Class => "class",
             Enum => "enum",
-            Pub => "pub",
-            Match => "match",
-            Impl => "impl",
             Trait => "trait",
+            Extend => "extend",
+            Match => "match",
+            Case => "case",
             Return => "return",
             Break => "break",
             Continue => "continue",
+            Pass => "pass",
             If => "if",
+            Elif => "elif",
             Else => "else",
             For => "for",
             In => "in",
+            Is => "is",
             While => "while",
-            True => "true",
-            False => "false",
+            Lambda => "lambda",
+            And => "and",
+            Or => "or",
+            Not => "not",
+            True => "True",
+            False => "False",
             Ident(s) | Int(s) | Float(s) | Str(s) | FStr(s) => s,
             Pipe => "|>",
-            DotDotEq => "..=",
-            DotDot => "..",
+            Ellipsis => "...",
             PlusEq => "+=",
             MinusEq => "-=",
             StarEq => "*=",
             SlashEq => "/=",
-            PathSep => "::",
             Arrow => "->",
-            FatArrow => "=>",
             EqEq => "==",
             NotEq => "!=",
             LtEq => "<=",
             GtEq => ">=",
-            AndAnd => "&&",
-            OrOr => "||",
             Eq => "=",
             Lt => "<",
             Gt => ">",
             Bar => "|",
-            Bang => "!",
             Plus => "+",
             Minus => "-",
             Star => "*",
@@ -204,7 +215,6 @@ impl std::fmt::Display for Token<'_> {
             Percent => "%",
             Dot => ".",
             Comma => ",",
-            Semi => ";",
             Colon => ":",
             At => "@",
             Question => "?",
@@ -214,13 +224,17 @@ impl std::fmt::Display for Token<'_> {
             RBrace => "}",
             LBracket => "[",
             RBracket => "]",
+            Newline => "end of line",
+            Indent => "indent",
+            Dedent => "dedent",
         };
         f.write_str(s)
     }
 }
 
-/// Tokenizes `src`, collecting lexical errors instead of stopping at the first one.
-pub fn tokenize(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
+/// Tokenizes `src` without any layout tokens, collecting lexical errors instead of stopping at the
+/// first one. Used for pieces that never span lines, such as the expressions inside an f-string.
+pub fn tokenize_flat(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
     let mut tokens = Vec::new();
     let mut errors = Vec::new();
     for (res, span) in Token::lexer(src).spanned() {
@@ -232,10 +246,71 @@ pub fn tokenize(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
     (tokens, errors)
 }
 
+/// Tokenizes a whole file: [`tokenize_flat`] plus `Newline`, `Indent` and `Dedent`.
+///
+/// A `Newline` ends every logical line; `Indent` and `Dedent` open and close blocks. Tabs in the
+/// indentation and a dedent to a level that was never opened are lexical errors.
+pub fn tokenize(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
+    let (raw, mut errors) = tokenize_flat(src);
+    let mut out: Vec<(Token<'_>, Span)> = Vec::with_capacity(raw.len() + raw.len() / 4);
+    let mut levels = vec![0usize];
+    let mut depth = 0usize;
+    let mut prev_end = 0usize;
+    for (tok, span) in raw {
+        let first = out.is_empty();
+        let new_line = first || src[prev_end..span.start].contains('\n');
+        if new_line && depth == 0 && (first || tok != Token::Pipe) {
+            if !first {
+                out.push((Token::Newline, prev_end..prev_end));
+            }
+            let line_start = src[..span.start].rfind('\n').map_or(0, |i| i + 1);
+            let indent = &src[line_start..span.start];
+            if indent.contains('\t') {
+                errors.push(line_start..span.start);
+            }
+            let col = indent.chars().count();
+            let top = *levels.last().unwrap_or(&0);
+            if col > top {
+                levels.push(col);
+                out.push((Token::Indent, span.start..span.start));
+            } else {
+                while col < *levels.last().unwrap_or(&0) {
+                    levels.pop();
+                    out.push((Token::Dedent, span.start..span.start));
+                }
+                if col != *levels.last().unwrap_or(&0) {
+                    errors.push(line_start..span.start);
+                }
+            }
+        }
+        match tok {
+            Token::LParen | Token::LBracket | Token::LBrace => depth += 1,
+            Token::RParen | Token::RBracket | Token::RBrace => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        prev_end = span.end;
+        out.push((tok, span));
+    }
+    if !out.is_empty() {
+        out.push((Token::Newline, prev_end..prev_end));
+        while levels.len() > 1 {
+            levels.pop();
+            out.push((Token::Dedent, src.len()..src.len()));
+        }
+    }
+    (out, errors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use Token::*;
+
+    fn flat(src: &str) -> Vec<Token<'_>> {
+        let (toks, errs) = tokenize_flat(src);
+        assert!(errs.is_empty(), "unexpected lex errors: {errs:?}");
+        toks.into_iter().map(|(t, _)| t).collect()
+    }
 
     fn kinds(src: &str) -> Vec<Token<'_>> {
         let (toks, errs) = tokenize(src);
@@ -246,14 +321,14 @@ mod tests {
     #[test]
     fn pipeline() {
         assert_eq!(
-            kinds("text |> std::text::trim()"),
+            flat("text |> std.text.trim()"),
             [
                 Ident("text"),
                 Pipe,
                 Ident("std"),
-                PathSep,
+                Dot,
                 Ident("text"),
-                PathSep,
+                Dot,
                 Ident("trim"),
                 LParen,
                 RParen
@@ -262,35 +337,35 @@ mod tests {
     }
 
     #[test]
-    fn closure_does_not_collide_with_pipe() {
+    fn lambda_does_not_collide_with_pipe() {
         assert_eq!(
-            kinds("|d| d.text"),
-            [Bar, Ident("d"), Bar, Ident("d"), Dot, Ident("text")]
+            flat("lambda d: d.text"),
+            [Lambda, Ident("d"), Colon, Ident("d"), Dot, Ident("text")]
         );
     }
 
     #[test]
     fn tensor_type() {
         assert_eq!(
-            kinds("-> Tensor<f32, [768]>"),
+            flat("-> Tensor[float32, [768]]"),
             [
                 Arrow,
                 Ident("Tensor"),
-                Lt,
-                Ident("f32"),
+                LBracket,
+                Ident("float32"),
                 Comma,
                 LBracket,
                 Int("768"),
                 RBracket,
-                Gt
+                RBracket
             ]
         );
     }
 
     #[test]
-    fn endpoint_annotation() {
+    fn endpoint_decorator() {
         assert_eq!(
-            kinds(r#"@endpoint(path = "/v1/rag/query", method = "POST")"#),
+            flat(r#"@endpoint(path="/v1/rag/query", method="POST")"#),
             [
                 At,
                 Ident("endpoint"),
@@ -308,72 +383,174 @@ mod tests {
     }
 
     #[test]
-    fn fstring_is_not_ident_plus_string() {
-        assert_eq!(kinds(r#"f"a {b} \" c""#), [FStr(r#"f"a {b} \" c""#)]);
-        assert_eq!(kinds(r#"f "x""#), [Ident("f"), Str(r#""x""#)]);
+    fn strings_use_either_quote() {
+        assert_eq!(flat(r#"f"a {b} \" c""#), [FStr(r#"f"a {b} \" c""#)]);
+        assert_eq!(flat("f'{d.get(\"k\")}'"), [FStr("f'{d.get(\"k\")}'")]);
+        assert_eq!(flat("'it\\'s'"), [Str("'it\\'s'")]);
+        assert_eq!(flat(r#"f "x""#), [Ident("f"), Str(r#""x""#)]);
     }
 
     #[test]
     fn numbers() {
         assert_eq!(
-            kinds("1_000 3.14 2.5e-3"),
+            flat("1_000 3.14 2.5e-3"),
             [Int("1_000"), Float("3.14"), Float("2.5e-3")]
         );
     }
 
     #[test]
-    fn ranges_and_compound_assignment() {
-        assert_eq!(kinds("0..n"), [Int("0"), DotDot, Ident("n")]);
-        assert_eq!(kinds("0..=9"), [Int("0"), DotDotEq, Int("9")]);
-        assert_eq!(kinds("1.5..2.5"), [Float("1.5"), DotDot, Float("2.5")]);
+    fn operators_and_words() {
         assert_eq!(
-            kinds("a += 1; b -= 2; c *= 3; d /= 4"),
-            [
-                Ident("a"),
-                PlusEq,
-                Int("1"),
-                Semi,
-                Ident("b"),
-                MinusEq,
-                Int("2"),
-                Semi,
-                Ident("c"),
-                StarEq,
-                Int("3"),
-                Semi,
-                Ident("d"),
-                SlashEq,
-                Int("4"),
-            ]
+            flat("a += 1\nb -= 2"),
+            [Ident("a"), PlusEq, Int("1"), Ident("b"), MinusEq, Int("2")]
         );
-        assert_eq!(kinds("x.y"), [Ident("x"), Dot, Ident("y")]);
+        assert_eq!(flat("x.y"), [Ident("x"), Dot, Ident("y")]);
         assert_eq!(
-            kinds("a -> b - c"),
+            flat("a -> b - c"),
             [Ident("a"), Arrow, Ident("b"), Minus, Ident("c")]
+        );
+        assert_eq!(
+            flat("not a and b or c"),
+            [Not, Ident("a"), And, Ident("b"), Or, Ident("c")]
+        );
+        assert_eq!(flat("True False None"), [True, False, Ident("None")]);
+        assert_eq!(
+            flat("def f(): ..."),
+            [Def, Ident("f"), LParen, RParen, Colon, Ellipsis]
         );
     }
 
     #[test]
     fn keywords_vs_identifiers() {
-        assert_eq!(kinds("let letter"), [Let, Ident("letter")]);
+        assert_eq!(flat("def define"), [Def, Ident("define")]);
+        assert_eq!(
+            flat("let fn mut"),
+            [Ident("let"), Ident("fn"), Ident("mut")]
+        );
     }
 
     #[test]
     fn comments_are_skipped() {
-        assert_eq!(kinds("a // hi\nb"), [Ident("a"), Ident("b")]);
+        assert_eq!(flat("a # hi\nb"), [Ident("a"), Ident("b")]);
     }
 
     #[test]
     fn spans_are_byte_offsets() {
-        let (toks, _) = tokenize("let x");
+        let (toks, _) = tokenize_flat("def x");
         assert_eq!(toks[1].1, 4..5);
     }
 
     #[test]
     fn errors_are_collected_and_lexing_continues() {
-        let (toks, errs) = tokenize("a # b \"open");
+        let (toks, errs) = tokenize_flat("a $ b \"open");
         assert_eq!(toks.len(), 2);
         assert_eq!(errs, [2..3, 6..11]);
+    }
+
+    #[test]
+    fn blocks_become_indent_and_dedent() {
+        assert_eq!(
+            kinds("if x:\n    a\n    b\nc\n"),
+            [
+                If,
+                Ident("x"),
+                Colon,
+                Newline,
+                Indent,
+                Ident("a"),
+                Newline,
+                Ident("b"),
+                Newline,
+                Dedent,
+                Ident("c"),
+                Newline
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_blocks_close_together() {
+        assert_eq!(
+            kinds("if a:\n    if b:\n        c\nd"),
+            [
+                If,
+                Ident("a"),
+                Colon,
+                Newline,
+                Indent,
+                If,
+                Ident("b"),
+                Colon,
+                Newline,
+                Indent,
+                Ident("c"),
+                Newline,
+                Dedent,
+                Dedent,
+                Ident("d"),
+                Newline
+            ]
+        );
+        // The blocks still open at the end of the file are closed.
+        let toks = kinds("if a:\n    b");
+        assert_eq!(&toks[toks.len() - 2..], [Newline, Dedent]);
+    }
+
+    #[test]
+    fn blank_and_comment_lines_do_not_count() {
+        assert_eq!(
+            kinds("if x:\n\n    # note\n    a\n\n# end\nb"),
+            kinds("if x:\n    a\nb")
+        );
+    }
+
+    #[test]
+    fn brackets_join_lines() {
+        assert_eq!(
+            kinds("f(1,\n  2)\ng"),
+            [
+                Ident("f"),
+                LParen,
+                Int("1"),
+                Comma,
+                Int("2"),
+                RParen,
+                Newline,
+                Ident("g"),
+                Newline
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_starting_with_a_pipe_continues_the_previous_one() {
+        assert_eq!(
+            kinds("x = a\n    |> f()\n    |> g()\ny"),
+            [
+                Ident("x"),
+                Eq,
+                Ident("a"),
+                Pipe,
+                Ident("f"),
+                LParen,
+                RParen,
+                Pipe,
+                Ident("g"),
+                LParen,
+                RParen,
+                Newline,
+                Ident("y"),
+                Newline
+            ]
+        );
+    }
+
+    #[test]
+    fn tabs_and_bad_dedents_are_errors() {
+        let (_, errs) = tokenize("if x:\n\ta");
+        assert_eq!(errs.len(), 1);
+        let (_, errs) = tokenize("if x:\n        a\n    b");
+        assert_eq!(errs.len(), 1);
     }
 
     #[test]

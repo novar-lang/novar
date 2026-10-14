@@ -1,4 +1,4 @@
-//! Arrow-backed tensors and the `std::tensor` operations.
+//! Arrow-backed tensors and the `std.tensor` operations.
 //!
 //! A tensor is a flat Arrow array plus a shape, so tables, Parquet files and Python buffers can
 //! share the same memory. Arithmetic is carried out in `f64` and rounded back to the tensor's own

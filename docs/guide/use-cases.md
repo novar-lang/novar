@@ -15,20 +15,23 @@ Every program below is in [`examples/`](../../examples) and is run by the comman
 
 ## 1. Data analysis on tables
 
-A `Table<Row>` is an Arrow table whose columns are the fields of the struct `Row`. The column names
+A `Table[Row]` is an Arrow table whose columns are the fields of the class `Row`. The column names
 and types are checked before the program runs, and a column is read as a tensor without copying it.
 
 ```telvax
-struct Sale { id: i64, region: String, units: i64, price: f64 }
+class Sale:
+    id: int
+    region: str
+    units: int
+    price: float
 
-fn main() {
-    let sales: Table<Sale> = read_csv("examples/dataframe/sales.csv");
-    println(f"mean price: {sales.price.mean()}");
+def main():
+    sales: Table[Sale] = read_csv("examples/dataframe/sales.csv")
+    print(f"mean price: {sales.price.mean()}")
 
-    let by_region: Table<{ region: String, revenue: f64 }> =
-        sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC");
-    for row in by_region { println(f"{row.region}: {row.revenue}"); }
-}
+    by_region: Table[{region: str, revenue: float}] = sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region ORDER BY revenue DESC")
+    for row in by_region:
+        print(f"{row.region}: {row.revenue}")
 ```
 
 ```sh
@@ -36,7 +39,7 @@ telvax run examples/dataframe/sales.tvx main
 ```
 
 Use it for reports, feature preparation and quick checks of a data file. A misspelled column
-(`sales.prise`) is a compile error (`no column prise on type Table<Sale>`) instead of a failure
+(`sales.prise`) is a compile error (`no column prise on type Table[Sale]`) instead of a failure
 halfway through a run. SQL (and Parquet) need the full build; `telvax-lite` keeps tables in memory and reads CSV.
 
 ## 2. Models whose shapes are checked
@@ -44,9 +47,8 @@ halfway through a run. SQL (and Parquet) need the full build; `telvax-lite` keep
 Tensor shapes are part of the type, so a matrix product of mismatched shapes does not compile:
 
 ```telvax
-fn layer1(x: Tensor<f32, [2, 3]>, w: Tensor<f32, [3, 4]>) -> Tensor<f32, [2, 4]> {
-    x.matmul(w).relu()
-}
+def layer1(x: Tensor[float32, [2, 3]], w: Tensor[float32, [3, 4]]) -> Tensor[float32, [2, 4]]:
+    return x.matmul(w).relu()
 ```
 
 ```sh
@@ -55,21 +57,21 @@ telvax run examples/ml/forward.tvx main --device gpu      # needs a build with -
 telvax run examples/ml/forward.tvx main --quantize int8   # int8 matrix products
 ```
 
-Change the weights in `layer1` to `Tensor<f32, [4, 4]>` and `telvax check` reports
-``matmul inner dimensions differ: 3 and 4`` at the call. Use symbolic dimensions (`Tensor<f32, [N, 3]>`) when a size is only known at run time.
-Weights come from `std::tensor::from_vec` here; a real model would load them from a file or a table.
+Change the weights in `layer1` to `Tensor[float32, [4, 4]]` and `telvax check` reports
+``matmul inner dimensions differ: 3 and 4`` at the call. Use symbolic dimensions (`Tensor[float32, [N, 3]]`) when a size is only known at run time.
+Weights come from `std.tensor.from_vec` here; a real model would load them from a file or a table.
 
 ## 3. Serving a function over HTTP
 
-`@endpoint` turns a function into a route. The parameter struct is the JSON body and is validated
-for you; `Err(Status::BadRequest(...))` becomes a 400.
+`@endpoint` turns a function into a route. The parameter class is the JSON body and is validated
+for you; `Err(Status.BadRequest(...))` becomes a 400.
 
 ```telvax
-@endpoint(path = "/v1/sentiment", method = "POST")
-pub fn sentiment(input: Input) -> Result<Output, Status> {
-    if input.text.is_empty() { return Err(Status::BadRequest("empty text")); }
+@endpoint(path="/v1/sentiment", method="POST")
+def sentiment(input: Input) -> Result[Output, Status]:
+    if input.text.is_empty():
+        return Err(Status.BadRequest("empty text"))
     ...
-}
 ```
 
 ```sh
@@ -90,7 +92,7 @@ store, builds a prompt from the hits and asks a model, as one `@endpoint`. Stage
 `|>`:
 
 ```telvax
-let answer = prompt |> llm.complete() |> std::text::trim();
+answer = prompt |> llm.complete() |> std.text.trim()
 ```
 
 ```sh
@@ -103,18 +105,16 @@ talks to the real ones.
 
 ## 5. Text processing
 
-`String`, `Vec` and `Map` have the methods you expect, and `Vec` has iterator methods (`map`,
+`str`, `list` and `dict` have the methods you expect, and `list` has iterator methods (`map`,
 `filter`, `fold`, `sum`, `enumerate`, `zip`, ...):
 
 ```telvax
-fn count_words(text: String) -> Map<String, i64> {
-    let counts: Map<String, i64> = std::map::new();
-    for word in text.to_lowercase().split(" ") {
-        let seen = counts.get(word).unwrap_or(0);
-        counts.insert(word, seen + 1);
-    }
-    counts
-}
+def count_words(text: str) -> dict[str, int]:
+    counts: dict[str, int] = std.map.new()
+    for word in text.to_lowercase().split(" "):
+        seen = counts.get(word).unwrap_or(0)
+        counts.insert(word, seen + 1)
+    return counts
 ```
 
 ```sh
@@ -123,14 +123,13 @@ telvax run examples/text/word-count.tvx main
 
 ## 6. Errors as values
 
-There are no exceptions. A function that can fail returns `Result<T, E>` or `Option<T>`, `match`
+There are no exceptions. A function that can fail returns `Result[T, E]` or `T | None`, `match`
 must cover every case, and `?` passes an error up to the caller.
 
 ```telvax
-fn port_of(line: String) -> Result<i64, String> {
-    let (key, value) = split_pair(line)?;
+def port_of(line: str) -> Result[int, str]:
+    key, value = split_pair(line)?
     ...
-}
 ```
 
 ```sh
@@ -139,7 +138,7 @@ telvax run examples/errors/parse-config.tvx main
 
 ## 7. Plain numeric code, interpreted or native
 
-Integers, floats, loops and structs also work as an ordinary language. The interpreter runs
+Integers, floats, loops and classes also work as an ordinary language. The interpreter runs
 anything; the native backend (`--features llvm`) compiles the subset described in the
 [README](../../README.md#language-notes).
 
@@ -150,8 +149,8 @@ telvax build examples/basics/primes.tvx -o primes     # native, needs --features
 
 ## Beyond one file
 
-* **Several files and packages:** `import util::helper;` and `tvpm`, see the [tour](tour.md#modules-and-packages).
-* **Many machines:** `std::dist::map` with `telvax worker`, see the [tour](tour.md#distribution).
+* **Several files and packages:** `from util import helper` and `tvpm`, see the [tour](tour.md#modules-and-packages).
+* **Many machines:** `std.dist.map` with `telvax worker`, see the [tour](tour.md#distribution).
 * **From Python:** the `python/` module exchanges Arrow tables and NumPy arrays without copying.
 * **In the browser:** the playground runs the checker and interpreter as WebAssembly.
 * **Editor:** `telvax lsp` and the VS Code extension give diagnostics, hover and completion.

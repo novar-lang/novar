@@ -1,8 +1,8 @@
 //! Lints for code that is declared but never used.
 //!
 //! * a local variable or parameter that is never read (names starting with `_` are exempt);
-//! * a `let mut` variable that is never assigned;
-//! * a private function that nothing calls (`main`, `pub` functions and endpoints are exempt).
+//! * a private function (a name starting with `_`) that nothing calls (`main` and endpoints are
+//!   exempt, and so is every public function).
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,7 +17,7 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
     for f in &program.fns {
         l.fn_names.insert(f.name.clone(), f.name_span.clone());
         for p in &f.params {
-            l.declare(p, true);
+            l.declare(p);
         }
         l.block(&f.body);
     }
@@ -35,14 +35,6 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
                 )
                 .with_note("prefix it with `_` if that is intentional"),
             );
-        } else if local.mutable && !l.assigned.contains(id) && !l.params.contains(id) {
-            out.push(Diagnostic::warning(
-                local.span.clone(),
-                format!(
-                    "variable `{}` is declared `mut` but never assigned",
-                    local.name
-                ),
-            ));
         }
     }
     for f in &program.fns {
@@ -50,7 +42,7 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
         if !exempt && !l.called.contains(&f.name) {
             out.push(Diagnostic::warning(
                 f.name_span.clone(),
-                format!("function `{}` is never used", f.name),
+                format!("function `{}` is never used", f.name.replace("::", ".")),
             ));
         }
     }
@@ -61,19 +53,14 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
 #[derive(Default)]
 struct Linter {
     locals: HashMap<LocalId, Local>,
-    params: HashSet<LocalId>,
     read: HashSet<LocalId>,
-    assigned: HashSet<LocalId>,
     called: HashSet<String>,
     fn_names: HashMap<String, std::ops::Range<usize>>,
 }
 
 impl Linter {
-    fn declare(&mut self, l: &Local, is_param: bool) {
+    fn declare(&mut self, l: &Local) {
         self.locals.insert(l.id, l.clone());
-        if is_param {
-            self.params.insert(l.id);
-        }
     }
 
     fn block(&mut self, b: &hir::Block) {
@@ -81,7 +68,7 @@ impl Linter {
             match s {
                 Stmt::Let { local, init } => {
                     self.expr(init);
-                    self.declare(local, false);
+                    self.declare(local);
                 }
                 Stmt::Expr(e) => self.expr(e),
             }
@@ -93,7 +80,7 @@ impl Linter {
 
     fn pattern(&mut self, p: &Pat) {
         match p {
-            Pat::Bind(l) => self.declare(l, false),
+            Pat::Bind(l) => self.declare(l),
             Pat::Variant { args, .. } | Pat::Tuple(args) => {
                 args.iter().for_each(|a| self.pattern(a))
             }
@@ -126,7 +113,7 @@ impl Linter {
                 self.expr(rhs);
             }
             ExprKind::Closure { params, body } => {
-                params.iter().for_each(|p| self.declare(p, true));
+                params.iter().for_each(|p| self.declare(p));
                 self.expr(body);
             }
             ExprKind::StructLit { fields, .. } => fields.iter().for_each(|(_, v)| self.expr(v)),
@@ -160,7 +147,6 @@ impl Linter {
                 }
             }
             ExprKind::Assign { place, value } => {
-                self.assigned.insert(place.local);
                 // `v[i] = x` and `p.f = x` read the root (it must already hold a value); a plain
                 // `x = value` does not.
                 if !place.projs.is_empty() {
@@ -178,7 +164,7 @@ impl Linter {
                 self.block(body);
             }
             ExprKind::For { var, iter, body } => {
-                self.declare(var, true);
+                self.declare(var);
                 match iter {
                     ForIter::Range { start, end, .. } => {
                         self.expr(start);
@@ -221,27 +207,33 @@ mod tests {
     }
 
     #[test]
-    fn reports_unused_variables_mut_and_functions() {
+    fn reports_unused_variables_and_functions() {
         let m = messages(
-            "fn helper() -> i32 { 1 }
-             fn used() -> i32 { 2 }
-             pub fn api(unused_param: i32) -> i32 {
-                 let a = 1;
-                 let mut b = 2;
-                 let _quiet = 3;
-                 let mut c = 0;
-                 c = c + used();
-                 b
-             }
-             fn main() -> i32 { api(1) }",
+            r#"
+def _helper() -> int32:
+    return 1
+
+def used() -> int32:
+    return 2
+
+def api(unused_param: int32) -> int32:
+    a = 1
+    b = 2
+    _quiet = 3
+    c = 0
+    c = c + used()
+    return b
+
+def main() -> int32:
+    return api(1)
+"#,
         );
         assert_eq!(
             m,
             [
-                "function `helper` is never used",
+                "function `_helper` is never used",
                 "unused variable `unused_param`",
                 "unused variable `a`",
-                "variable `b` is declared `mut` but never assigned",
             ]
         );
     }
@@ -249,14 +241,25 @@ mod tests {
     #[test]
     fn counts_uses_in_loops_matches_and_closures() {
         let m = messages(
-            "enum E { A(i32), B }
-             fn main() -> i32 {
-                 let mut total = 0;
-                 let v = [1, 2, 3];
-                 for x in v { if x == 2 { continue; } total += x; }
-                 let e = E::A(total);
-                 match e { E::A(n) => n, E::B => 0 }
-             }",
+            r#"
+enum E:
+    A(int32)
+    B
+
+def main() -> int32:
+    total = 0
+    v = [1, 2, 3]
+    for x in v:
+        if x == 2:
+            continue
+        total += x
+    e = E.A(total)
+    match e:
+        case E.A(n):
+            return n
+        case E.B:
+            return 0
+"#,
         );
         assert!(m.is_empty(), "{m:?}");
     }

@@ -207,7 +207,7 @@ pub enum Stmt {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Lit(Lit),
-    /// `x` or `std::text::trim`
+    /// `x` or `std.text.trim`
     Path(Vec<Ident>),
     Call {
         callee: Box<Expr>,

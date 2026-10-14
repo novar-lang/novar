@@ -35,18 +35,17 @@ fn data(v: Value) -> Vec<f32> {
     }
 }
 
-const SRC: &str = "
-    fn chained(x: Tensor<f32, [8, 16]>, w1: Tensor<f32, [16, 32]>, w2: Tensor<f32, [32, 4]>) -> Tensor<f32, [8, 4]> {
-        std::tensor::softmax(std::tensor::matmul(std::tensor::relu(std::tensor::matmul(x, w1)), w2))
-    }
-    fn split(x: Tensor<f32, [8, 16]>, w1: Tensor<f32, [16, 32]>, w2: Tensor<f32, [32, 4]>) -> Tensor<f32, [8, 4]> {
-        let h = std::tensor::relu(std::tensor::matmul(x, w1));
-        std::tensor::softmax(std::tensor::matmul(h, w2))
-    }
-    fn scaled(a: Tensor<f32, [4, 4]>, b: Tensor<f32, [4, 4]>) -> Tensor<f32, [4, 4]> {
-        std::tensor::sigmoid(std::tensor::scale(std::tensor::sub(std::tensor::add(a, b), b), 0.5))
-    }
-";
+const SRC: &str = r#"
+def chained(x: Tensor[float32, [8, 16]], w1: Tensor[float32, [16, 32]], w2: Tensor[float32, [32, 4]]) -> Tensor[float32, [8, 4]]:
+    return std.tensor.softmax(std.tensor.matmul(std.tensor.relu(std.tensor.matmul(x, w1)), w2))
+
+def split(x: Tensor[float32, [8, 16]], w1: Tensor[float32, [16, 32]], w2: Tensor[float32, [32, 4]]) -> Tensor[float32, [8, 4]]:
+    h = std.tensor.relu(std.tensor.matmul(x, w1))
+    return std.tensor.softmax(std.tensor.matmul(h, w2))
+
+def scaled(a: Tensor[float32, [4, 4]], b: Tensor[float32, [4, 4]]) -> Tensor[float32, [4, 4]]:
+    return std.tensor.sigmoid(std.tensor.scale(std.tensor.sub(std.tensor.add(a, b), b), 0.5))
+"#;
 
 #[test]
 fn chained_expressions_stay_on_the_gpu() {
@@ -108,15 +107,15 @@ fn chained_expressions_stay_on_the_gpu() {
 #[test]
 #[ignore]
 fn timing_of_chained_and_split_networks() {
-    let src = "
-        fn chained(x: Tensor<f32, [512, 1024]>, w1: Tensor<f32, [1024, 1024]>, w2: Tensor<f32, [1024, 1024]>, w3: Tensor<f32, [1024, 64]>) -> Tensor<f32, [512, 64]> {
-            std::tensor::softmax(std::tensor::matmul(std::tensor::relu(std::tensor::matmul(std::tensor::relu(std::tensor::matmul(x, w1)), w2)), w3))
-        }
-        fn split(x: Tensor<f32, [512, 1024]>, w1: Tensor<f32, [1024, 1024]>, w2: Tensor<f32, [1024, 1024]>, w3: Tensor<f32, [1024, 64]>) -> Tensor<f32, [512, 64]> {
-            let h1 = std::tensor::relu(std::tensor::matmul(x, w1));
-            let h2 = std::tensor::relu(std::tensor::matmul(h1, w2));
-            std::tensor::softmax(std::tensor::matmul(h2, w3))
-        }";
+    let src = r#"
+def chained(x: Tensor[float32, [512, 1024]], w1: Tensor[float32, [1024, 1024]], w2: Tensor[float32, [1024, 1024]], w3: Tensor[float32, [1024, 64]]) -> Tensor[float32, [512, 64]]:
+    return std.tensor.softmax(std.tensor.matmul(std.tensor.relu(std.tensor.matmul(std.tensor.relu(std.tensor.matmul(x, w1)), w2)), w3))
+
+def split(x: Tensor[float32, [512, 1024]], w1: Tensor[float32, [1024, 1024]], w2: Tensor[float32, [1024, 1024]], w3: Tensor[float32, [1024, 64]]) -> Tensor[float32, [512, 64]]:
+    h1 = std.tensor.relu(std.tensor.matmul(x, w1))
+    h2 = std.tensor.relu(std.tensor.matmul(h1, w2))
+    return std.tensor.softmax(std.tensor.matmul(h2, w3))
+"#;
     let args = || {
         vec![
             tensor(&[512, 1024], 13),

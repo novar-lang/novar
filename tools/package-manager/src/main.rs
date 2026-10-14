@@ -233,13 +233,10 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
     let (file, body) = if lib {
         (
             "lib.tvx",
-            "pub fn hello() -> String {\n    \"hello from a library\"\n}\n",
+            "def hello() -> str:\n    return \"hello from a library\"\n",
         )
     } else {
-        (
-            "main.tvx",
-            "fn main() -> i32 {\n    std::io::println(\"hello, world\");\n    0\n}\n",
-        )
+        ("main.tvx", "def main():\n    print(\"hello, world\")\n")
     };
     let path = dir.join("src").join(file);
     if !path.exists() {

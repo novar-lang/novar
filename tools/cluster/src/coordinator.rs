@@ -1,4 +1,4 @@
-//! The coordinator side: spreads `std::dist::map` over a set of workers.
+//! The coordinator side: spreads `std.dist.map` over a set of workers.
 //!
 //! Each worker is driven by as many threads as it has CPUs; threads pull items from one shared
 //! queue, so fast workers take more work. A task that fails because a worker is unreachable (or

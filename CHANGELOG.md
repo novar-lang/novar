@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.1.0
+
+**Breaking: Telvax now reads like Python.** The Rust-style syntax is gone. Blocks are made by
+indentation, and a program written for 0.0.x must be rewritten (see "Moving a program" below).
+The design is in `docs/design/sintaxe-pythonica.md`; the compiler after the parser is unchanged.
+
+### Language
+* **Blocks:** a line that ends with `:` opens an indented block. No `{ }`, no `;`. Comments start
+  with `#`, strings can use `'` or `"`.
+* **Functions and variables:** `def name(a: int) -> int:` with an explicit `return`. `x = 1`
+  creates a variable the first time and changes it afterwards; `let`, `let mut` and `mut` are gone.
+  A function can contain a `def` (a closure bound to a name); `lambda x: x + 1` is the one-line form.
+* **Types:** `int`, `float`, `str`, `bool`, `list[T]`, `dict[K, V]`, `T | None`, `Result[T, E]`,
+  `Tensor[float32, [2, 3]]`, `Table[Row]`; sized numbers are `int8`..`int64`, `uint8`..`uint64`,
+  `float32`, `float64`. Error messages use the same names.
+* **Operators and control flow:** `and`, `or`, `not`, `True`, `False`, `None`, `in` / `not in`,
+  `elif`, `a if cond else b`, `for i in range(n)`, `for i, x in items`, `pass`. `x is Some(v)`
+  replaces `if let` and `while let`: `if x is Some(v):` and `while x is Some(v):`.
+* **Types of your own:** `class Point:` with fields and methods in one block, `class Circle(Shape)`
+  to implement a trait, `extend Point:` to add methods later, `enum Shape:` with one variant per line,
+  `trait Shape:` (`def area(self) -> float: ...` is a required method), and `class Stack[T]:` for
+  generics. A class is built with `Point(x=1.0, y=2.0)`.
+* **Modules:** `.` replaces `::` (`std.text.trim(s)`, `Shape.Circle(2.0)`); `from util import clamp`
+  and `import util.clamp`. A name that starts with `_` is private; there is no `pub`.
+* `print` ends the line, as in Python (`std.io.print` does not); `println` is gone.
+* Kept: `|>` (a line may start with it), `?`, `@endpoint(path="/x", method="POST")`, `Some`, `Ok`, `Err`.
+
+### Tools
+* `telvax fmt` is rebuilt for indentation: it keeps every line break and block, and sets four spaces
+  per level, spacing, continuation lines and blank lines.
+* `telvax lint` no longer reports "needless `mut`" (there is no `mut`); an unused private function is
+  one whose name starts with `_`.
+* The language server, the VS Code grammar and the playground understand the new syntax; hover shows
+  `def norm(p: Point) -> float` and `origin: Point`.
+* `telvax-migrate` (in `tools/migrate`) converts a file from the old syntax to the new one and keeps its
+  comments: `cargo run -p telvax_migrate -- file.tvx`. It will be removed in a later release.
+* Values print the Python way: `True`, `None`, `Point(x=1, y=2)`, `Shape.Circle(2.0)`.
+
+### Moving a program
+Run `telvax-migrate` on each file. What it cannot carry over: `let mut` versus `let` (every variable
+can change now), `pub` (use a leading `_` for private names), an `if` or `match` used as a value (write
+a conditional expression, or assign inside the branches), blocks used as expressions, and typed closure
+parameters.
+
 ## 0.0.5
 
 The project is now called **Telvax** (it was Novar). Everything was renamed: the binaries are `telvax`

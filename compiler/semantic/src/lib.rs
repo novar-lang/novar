@@ -7,7 +7,7 @@ pub mod ty;
 
 pub use ty::{Dim, Prim, Ty};
 
-/// Numeric precision used for `std::tensor::matmul` on `f32` tensors.
+/// Numeric precision used for `std.tensor.matmul` on `f32` tensors.
 ///
 /// `Int8` is symmetric per-tensor dynamic quantization: both operands are scaled by
 /// `max|x| / 127`, rounded to `i8` (ties away from zero), multiplied with `i32` accumulation and

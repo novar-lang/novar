@@ -1,0 +1,19 @@
+[package]
+name = "telvax_migrate"
+description = "Telvax: converts source files from the old Rust-style syntax to the Python-style syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+chumsky = "0.13.0"
+logos = "0.16.1"
+telvax_ast = { path = "../../compiler/ast" }
+telvax_diagnostics = { path = "../../compiler/diagnostics" }
+telvax_parser = { path = "../../compiler/parser" }

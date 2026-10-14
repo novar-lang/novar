@@ -175,7 +175,7 @@ fn check(kind: &Kind, v: &Value, path: &str, errors: &mut Vec<String>) {
         Kind::Tensor { elem, shape } => check_tensor(elem, shape, v, path, errors),
         Kind::Object(schema) => check_object(schema, v, path, errors),
         Kind::Bool => errors.push(format!("{path}: expected bool, found {}", describe(v))),
-        Kind::Str => errors.push(format!("{path}: expected String, found {}", describe(v))),
+        Kind::Str => errors.push(format!("{path}: expected str, found {}", describe(v))),
         Kind::Float => errors.push(format!("{path}: expected a number, found {}", describe(v))),
     }
 }
@@ -425,18 +425,34 @@ mod tests {
     }
 
     const SRC: &str = r#"
-        struct QueryPayload { query: String, top_k: i32 }
-        struct Embed { v: Tensor<f32, [3]>, tags: Vec<String>, small: u8 }
-        @endpoint(path = "/v1/rag/query", method = "POST")
-        pub fn handle_rag(p: QueryPayload) -> Result<QueryPayload, String> { Ok(p) }
-        @endpoint(path = "/v1/embed", method = "PUT")
-        fn embed(p: Embed) -> Result<Embed, String> { Ok(p) }
-        @endpoint(path = "/v1/search")
-        fn search(p: QueryPayload) -> Result<QueryPayload, String> { Ok(p) }
-        @endpoint(path = "/v1/ping")
-        fn ping() -> Result<String, String> { Ok("pong") }
-        fn helper() {}
-    "#;
+class QueryPayload:
+    query: str
+    top_k: int32
+
+class Embed:
+    v: Tensor[float32, [3]]
+    tags: list[str]
+    small: uint8
+
+@endpoint(path="/v1/rag/query", method="POST")
+def handle_rag(p: QueryPayload) -> Result[QueryPayload, str]:
+    return Ok(p)
+
+@endpoint(path="/v1/embed", method="PUT")
+def embed(p: Embed) -> Result[Embed, str]:
+    return Ok(p)
+
+@endpoint(path="/v1/search")
+def search(p: QueryPayload) -> Result[QueryPayload, str]:
+    return Ok(p)
+
+@endpoint(path="/v1/ping")
+def ping() -> Result[str, str]:
+    return Ok("pong")
+
+def helper():
+    pass
+"#;
 
     fn app() -> Router {
         let hir = program(SRC);
@@ -517,10 +533,7 @@ mod tests {
         let (s, v) = call(&a, "POST", "/v1/rag/query", r#"{"query":1,"extra":true}"#).await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
         let details = v["details"].to_string();
-        assert!(
-            details.contains("payload.query: expected String"),
-            "{details}"
-        );
+        assert!(details.contains("payload.query: expected str"), "{details}");
         assert!(
             details.contains("payload.top_k: missing required field"),
             "{details}"
@@ -564,8 +577,8 @@ mod tests {
             d.contains("payload.v: expected 3 element(s), found 2"),
             "{d}"
         );
-        assert!(d.contains("payload.tags[0]: expected String"), "{d}");
-        assert!(d.contains("256 is out of range for u8"), "{d}");
+        assert!(d.contains("payload.tags[0]: expected str"), "{d}");
+        assert!(d.contains("256 is out of range for uint8"), "{d}");
     }
 
     #[tokio::test]

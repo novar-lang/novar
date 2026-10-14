@@ -1,7 +1,7 @@
 # Sintaxe do Telvax: didática, no estilo do Python
 
-> Decisões tomadas: blocos por **indentação** e `:`; a sintaxe antiga (estilo Rust) é **substituída**, não mantida.
-> Referência de motivação: `telvax-rumo-ao-1.0.md` (§1: "o alvo é o código de aplicação em Python"; §5.1 L1–L14).
+> **Implementada na 0.1.0.** Decisões: blocos por **indentação** e `:`; a sintaxe antiga (estilo Rust) foi
+> **substituída**, não mantida. A seção 7 lista onde o resultado difere da proposta original.
 
 ## 1. Princípios
 
@@ -45,7 +45,7 @@
 | `@endpoint(path = "/x")` | `@endpoint(path="/x")` | igual ao decorador do Python |
 | `println(...)` | `print(...)` | `print` sempre termina a linha |
 | `x \|> f(a)` | `x \|> f(a)` | **fica**: é do Telvax |
-| `expr?` | `expr?` | **fica** por enquanto (ver §6) |
+| `expr?` | `expr?` | **fica** por enquanto (ver §7) |
 
 ## 3. Exemplos
 
@@ -185,32 +185,53 @@ Um pipeline longo quebra a linha com `|>` no começo da linha seguinte:
 
 ## 4. Regras do lexer e do parser
 
-* **Indentação**: cada nível são 4 espaços (qualquer quantidade fixa por bloco é aceita; misturar tabs é erro). Linhas em branco e só com comentário não contam.
+* **Indentação**: cada nível são 4 espaços (o lexer aceita qualquer quantidade fixa por bloco, mas o `telvax fmt` normaliza para 4). Tabs na indentação são erro, e também voltar a um nível que nunca foi aberto. Linhas em branco e só com comentário não contam.
 * Dentro de `()`, `[]`, `{}` as quebras de linha são ignoradas. Uma linha que **começa** com `|>` continua a anterior.
-* Um corpo de uma linha só é permitido para `lambda` (`lambda x: x + 1`) e `case`/`if` simples não: **o corpo sempre vai na linha seguinte, indentado** (uma forma só).
-* `return` no fim do corpo vira o valor do bloco; `if`/`elif`/`else`/`match` no fim propagam isso para cada ramo. Por isso a semântica (que trabalha com "expressão final") não muda.
-* Declaração vs reatribuição: o parser guarda os nomes já atribuídos em cada função. `x = …` de um nome novo é declaração (mutável); de um nome existente é reatribuição. `x: T = …` sempre declara.
-* Caminhos: `std.text.trim`, `Shape.Circle`, `util.clamp` e `modulo.Tipo.novo` são caminhos quando o primeiro nome é `std`, um nome importado ou começa com maiúscula; caso contrário `a.b` é acesso a campo/método.
-* `P(x=1, y=2)` com argumentos nomeados constrói um struct; `Shape.Circle(2.0)` chama uma variante.
+* **O corpo sempre vai na linha seguinte, indentado** (uma forma só). A exceção é `lambda x: x + 1`, que é uma expressão, e `def f(self) -> float: ...` num `trait`, que marca um método obrigatório.
+* `return` no fim do corpo vira o valor do bloco; `if`/`elif`/`else`/`match` no fim propagam isso para cada ramo. Por isso a semântica (que trabalha com "expressão final") não mudou. Um `return` sem valor, ou no meio do corpo, continua sendo um `return`.
+* Declaração vs reatribuição: o parser guarda os nomes já atribuídos em cada função, bloco a bloco. `x = …` de um nome novo é declaração (variável mutável); de um nome que já existe é reatribuição. `x: T = …` sempre declara. `x += 1` nunca declara.
+* Caminhos: `std.text.trim`, `Shape.Circle`, `util.clamp` e `Modulo.Tipo.novo` são caminhos quando o primeiro nome é `std`, um nome trazido por `import`/`from` ou começa com maiúscula; caso contrário `a.b` é acesso a campo/método. (`import a.b.C` traz só `C`; `from a.b import C, D` traz `C` e `D`.)
+* `P(x=1, y=2)` com argumentos nomeados constrói uma classe; `Shape.Circle(2.0)` chama uma variante.
 * `a in b` equivale a `b.contains(a)`; `a not in b` a `not b.contains(a)`.
 * `x if c else y` é a expressão condicional.
-* Palavras reservadas: `def class enum trait extend import from as return if elif else while for in is match case break continue pass lambda and or not True False None`.
+* Um `def` dentro de uma função é um fechamento ligado ao nome (`add = lambda …`, mas com várias linhas). Os parâmetros podem ter tipo; o retorno é inferido.
+* `x is Padrão` só existe como condição de `if`/`elif`/`while`; `while xs.pop() is Some(top):` repete enquanto o padrão casar.
+* Palavras reservadas: `def class enum trait extend import from return if elif else while for in is match case break continue pass lambda and or not True False`. `None`, `Some`, `Ok` e `Err` são nomes comuns (variantes de `Option`/`Result`).
+* Um nome que começa com `_` é privado do arquivo; os outros são públicos. Não existe `pub`.
 
-## 5. Plano de implementação
+## 5. Mensagens de erro
 
-1. **Lexer**: `#` como comentário; tokens `Newline`, `Indent`, `Dedent`; novas palavras reservadas; remoção de `::`, `{ }` em blocos (as chaves ficam só para o tipo-linha `Table[{…}]`), `;`, `&&`, `||`, `!`, `..`, `=>`.
-2. **Parser**: reescrita das regras de item, bloco e expressão sobre a mesma AST (`telvax-ast` não muda).
-3. **Migração mecânica**: o parser antigo fica por um tempo como `tools/migrate` (`telvax migrate arquivo.tvx`), que lê a sintaxe antiga e imprime a nova a partir da AST. Com ele convertem-se os 10 exemplos `.tvx`, os ~500 trechos de código embutidos nos testes em Rust e a documentação. Depois a ferramenta é apagada.
-4. **Formatador** (`telvax fmt`): refeito sobre os novos tokens (indentação é significativa, então ele só normaliza espaços e linhas em branco).
-5. **Linter**, **LSP** (hover, definição, renomear) e a **gramática do VS Code**: adaptados. O aviso "`mut` desnecessário" some (não há mais `mut`).
-6. **Docs**: `tour.md`, `use-cases.md`, `status.md`, README, CHANGELOG, playground.
+O parser reconhece o que quem vem de outras linguagens costuma escrever e diz o que escrever:
 
-Critério de saída: todos os testes existentes passam com os fontes migrados; `telvax fmt --check` limpo em `examples/`; os exemplos rodam com a mesma saída de antes.
+| Escrito | Mensagem |
+|---|---|
+| `def f()` sem `:` | ``expected `:` at the end of this line`` |
+| bloco sem indentação | `expected an indented block here` |
+| `x = 1;` | ``\`;\` is not used in Telvax`` (nota: termine a linha) |
+| `fn`, `let`, `mut`, `struct`, `impl`, `pub` no começo da linha | ``\`fn\` is not used in Telvax: write \`def name(...)\` `` e equivalentes |
+| `for i in 0..3` | ``\`..\` is not used in Telvax`` (nota: `range(start, end)`) |
+| `&&`, `!` | ``write \`and\``, ``write \`not\`` |
+| `true`, `false`, `null` | dica: ``did you mean \`True\`?`` |
+| tabs / indentação que não alinha | mensagens próprias |
 
-## 6. Pontos em aberto (segui o padrão; me diga se quer mudar)
+Os tipos aparecem nas mensagens como são escritos no programa (`expected int32, found str`, `list[int]`, `int | None`), e os caminhos com ponto (`cannot find util.double`).
+
+## 6. Ferramentas
+
+* **`telvax fmt`** foi refeito para indentação: mantém cada quebra de linha e cada bloco e normaliza espaços, continuações de linha, comentários e linhas em branco. Verifica que o resultado tem os mesmos tokens (inclusive `Indent`/`Dedent`) antes de devolvê-lo.
+* **`telvax lint`**: acabou o aviso "`mut` desnecessário"; uma função privada sem uso é a que começa com `_`.
+* **LSP**: hover (`def norm(p: Point) -> float`, `origin: Point`), dicas de tipo para `x = …` e `for x in …`, completação de `std.` e de membros, renomear com a nova sintaxe.
+* **VS Code**: gramática TextMate nova, regras de indentação (`:` abre bloco) e `#` como comentário. Playground e exemplos migrados.
+* **`telvax-migrate`** (`tools/migrate`): lê a sintaxe antiga com uma cópia do parser antigo e imprime a nova a partir da AST, preservando comentários. Foi usada para converter os exemplos e os ~500 trechos de código dos testes. Sai numa versão futura.
+
+## 7. Diferenças em relação à proposta e pontos em aberto
 
 * `Some(x)`, `Ok(x)`, `Err(e)` e o `?` **ficam** como estão: trocá-los por exceções (`raise`/`try`) é uma mudança de semântica, não de sintaxe, e pertence à 0.0.6 (L3 do documento "rumo ao 1.0").
+* **Intervalos fechados** (`0..=n`) deixaram de existir: use `range(0, n + 1)`. O custo é que um intervalo que termina no maior inteiro do tipo não é mais expressável (a AST ainda tem `inclusive`, sem uso).
+* **`if`/`match` como valor** não existem: use `a if c else b`, ou atribua dentro dos ramos. Blocos como expressão (`z = { … }`) também não.
+* **`mut`**: toda variável e todo parâmetro pode ser reatribuído. Continuam imutáveis a variável de `for`, os nomes de um padrão e os globais.
+* `lambda` com parâmetro anotado deixou de existir; use um `def` dentro da função.
 * `pair.0` para tuplas continua (o `pair[0]` do Python não distingue tupla de lista na AST atual).
 * Sem fatias (`xs[1:3]`), sem `**`, sem `//` (divisão inteira) e sem strings de várias linhas (`"""`) por enquanto; entram junto com L12.
-* `lambda` com parâmetro anotado deixa de existir; use `def`.
-* Modo script (arquivo sem `def main`) é o L13 e fica para depois; hoje o ponto de entrada continua sendo `main`.
+* Modo script (arquivo sem `def main`) é o L13 e fica para depois; o ponto de entrada continua sendo `main`. Um executável nativo ainda exige `def main() -> int32`.
+* Valores impressos seguem o Python (`True`, `None`, `Point(x=1, y=2)`); `print` termina a linha e `std.io.print` não.

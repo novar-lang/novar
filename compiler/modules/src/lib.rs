@@ -318,7 +318,7 @@ impl Loader<'_> {
         std::iter::once(self.package_name(key.pkg))
             .chain(key.path.iter().cloned())
             .collect::<Vec<_>>()
-            .join("::")
+            .join(".")
     }
 
     /// Resolves the `import`s of module `idx`, loading what they refer to.
@@ -357,7 +357,7 @@ impl Loader<'_> {
             if rest.is_empty() && imp.group.is_empty() {
                 self.diags.push(Diagnostic::error(
                     imp.span.clone(),
-                    "an import must name an item, e.g. `import util::helper;`",
+                    "an import must name an item, e.g. `from util import helper`",
                 ));
                 continue;
             }
@@ -373,7 +373,7 @@ impl Loader<'_> {
                     )
                     .with_note(match self.module_file(&key) {
                         Some(f) => format!("expected the file {}", f.display()),
-                        None => "no such file; module `a::b` lives in `a/b.tvx` or `a/b/mod.tvx`"
+                        None => "no such file; module `a.b` lives in `a/b.tvx` or `a/b/mod.tvx`"
                             .to_string(),
                     }),
                 );
@@ -394,14 +394,14 @@ impl Loader<'_> {
                     Some(false) => self.diags.push(
                         Diagnostic::error(ident.span.clone(), format!("`{name}` is private"))
                             .with_note(format!(
-                                "mark it `pub` in `{}` to import it",
+                                "names that start with `_` are private to `{}`",
                                 self.describe(&key)
                             )),
                     ),
                     None => self.diags.push(Diagnostic::error(
                         ident.span.clone(),
                         format!(
-                            "module `{}` has no function or struct `{name}`",
+                            "module `{}` has no function or class `{name}`",
                             self.describe(&key)
                         ),
                     )),
@@ -422,7 +422,7 @@ impl Loader<'_> {
         parts.join("__")
     }
 
-    /// The name as the user wrote it: `util::double`, `mathx::vec::dot`.
+    /// The name as the user wrote it: `util.double`, `mathx.vec.dot`.
     fn display(&self, idx: usize, item: &str) -> String {
         let key = &self.modules[idx].key;
         let mut parts = Vec::new();
@@ -431,7 +431,7 @@ impl Loader<'_> {
         }
         parts.extend(key.path.iter().cloned());
         parts.push(item.to_string());
-        parts.join("::")
+        parts.join(".")
     }
 
     fn link(mut self) -> Loaded {

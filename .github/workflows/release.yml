@@ -213,13 +213,18 @@ jobs:
       - name: Tables and CSV work everywhere; SQL and Parquet only in the full build
         run: |
           cat > tables.tvx <<'NV'
-          struct Row { id: i64, score: f32 }
-          fn count() -> u64 { let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]); t.len() }
-          fn query() -> u64 {
-              let t: Table<Row> = std::table::from_rows([Row { id: 1, score: 0.5 }]);
-              let u: Table<Row> = t.sql("SELECT * FROM t");
-              u.len()
-          }
+          class Row:
+              id: int
+              score: float32
+
+          def count() -> uint64:
+              t: Table[Row] = std.table.from_rows([Row(id=1, score=0.5)])
+              return t.len()
+
+          def query() -> uint64:
+              t: Table[Row] = std.table.from_rows([Row(id=1, score=0.5)])
+              u: Table[Row] = t.sql("SELECT * FROM t")
+              return u.len()
           NV
           [ "$(telvax run tables.tvx count)" = 1 ]
           if [ "${{ matrix.variant }}" = full ]; then

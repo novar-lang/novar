@@ -43,19 +43,44 @@ fn text(v: Value) -> String {
 
 #[test]
 fn arithmetic_and_recursion() {
-    let src = "fn fib(n: i32) -> i32 { if n < 2 { return n; } fib(n - 1) + fib(n - 2) }";
+    let src = r#"
+def fib(n: int32) -> int32:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+"#;
     assert_eq!(int(run(src, "fib", vec![Value::Int(15)])), 610);
     assert_eq!(
-        int(run("fn f() -> i32 { 2 + 3 * 4 - 10 / 5 % 3 }", "f", vec![])),
+        int(run(
+            r#"
+def f() -> int32:
+    return 2 + 3 * 4 - 10 / 5 % 3
+"#,
+            "f",
+            vec![]
+        )),
         12
     );
-    assert_eq!(int(run("fn f() -> i32 { -(3) }", "f", vec![])), -3);
+    assert_eq!(
+        int(run(
+            r#"
+def f() -> int32:
+    return -3
+"#,
+            "f",
+            vec![]
+        )),
+        -3
+    );
 }
 
 #[test]
 fn floats_and_literal_adaptation() {
     let v = run(
-        "fn f(a: f32) -> f32 { a * 2 + 0.5 }",
+        r#"
+def f(a: float32) -> float32:
+    return a * 2 + 0.5
+"#,
         "f",
         vec![Value::Float(1.25)],
     );
@@ -67,7 +92,14 @@ fn floats_and_literal_adaptation() {
 
 #[test]
 fn let_blocks_and_early_return() {
-    let src = "fn f(x: i32) -> i32 { let y = x + 1; if y > 5 { return 100; } let z = { let w = y * 2; w + 1 }; z }";
+    let src = r#"
+def f(x: int32) -> int32:
+    y = x + 1
+    if y > 5:
+        return 100
+    w = y * 2
+    return w + 1
+"#;
     assert_eq!(int(run(src, "f", vec![Value::Int(1)])), 5);
     assert_eq!(int(run(src, "f", vec![Value::Int(9)])), 100);
 }
@@ -75,11 +107,12 @@ fn let_blocks_and_early_return() {
 #[test]
 fn pipes_and_strings() {
     let src = r#"
-        fn shout(s: String) -> String { s + "!" }
-        fn f(s: String) -> String {
-            s |> std::text::clean_whitespace() |> std::text::truncate(11) |> shout() |> std::text::uppercase()
-        }
-    "#;
+def shout(s: str) -> str:
+    return s + "!"
+
+def f(s: str) -> str:
+    return s |> std.text.clean_whitespace() |> std.text.truncate(11) |> shout() |> std.text.uppercase()
+"#;
     assert_eq!(
         text(run(src, "f", vec![Value::str("  hello    big   world  ")])),
         "HELLO BIG W!"
@@ -88,7 +121,10 @@ fn pipes_and_strings() {
 
 #[test]
 fn fstrings() {
-    let src = r#"fn f(n: i32, s: String) -> String { f"{s}: {n + 1} \"ok\"" }"#;
+    let src = r#"
+def f(n: int32, s: str) -> str:
+    return f"{s}: {n + 1} \"ok\""
+"#;
     assert_eq!(
         text(run(src, "f", vec![Value::Int(1), Value::str("n")])),
         "n: 2 \"ok\""
@@ -98,23 +134,33 @@ fn fstrings() {
 #[test]
 fn iterators_and_closures() {
     let src = r#"
-        fn f(v: Vec<i32>, k: i32) -> String {
-            v |> std::iter::filter(|x| x > 1) |> std::iter::map(|x| f"{x * k}") |> std::string::join("-")
-        }
-    "#;
+def f(v: list[int32], k: int32) -> str:
+    return v |> std.iter.filter(lambda x: x > 1) |> std.iter.map(lambda x: f"{x * k}") |> std.string.join("-")
+"#;
     let v = Value::vec(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
     assert_eq!(text(run(src, "f", vec![v, Value::Int(10)])), "20-30");
 }
 
 #[test]
 fn structs_and_fields() {
-    let src = "struct P { x: i32, name: String } fn f() -> String { let p = P { name: \"a\", x: 4 }; f\"{p.name}{p.x}\" }";
+    let src = r#"
+class P:
+    x: int32
+    name: str
+
+def f() -> str:
+    p = P(name="a", x=4)
+    return f"{p.name}{p.x}"
+"#;
     assert_eq!(text(run(src, "f", vec![])), "a4");
 }
 
 #[test]
 fn short_circuit_avoids_errors() {
-    let src = "fn f(d: i32) -> bool { d != 0 && 10 / d > 1 }";
+    let src = r#"
+def f(d: int32) -> bool:
+    return d != 0 and 10 / d > 1
+"#;
     assert!(matches!(
         run(src, "f", vec![Value::Int(0)]),
         Value::Bool(false)
@@ -127,21 +173,36 @@ fn short_circuit_avoids_errors() {
 
 #[test]
 fn runtime_errors_are_reported_not_panics() {
-    let div = load("fn f(d: i32) -> i32 { 1 / d }");
+    let div = load(
+        r#"
+def f(d: int32) -> int32:
+    return 1 / d
+"#,
+    );
     assert!(
         div.call("f", vec![Value::Int(0)])
             .unwrap_err()
             .message
             .contains("division by zero")
     );
-    let ovf = load("fn f(a: i64) -> i64 { a * a }");
+    let ovf = load(
+        r#"
+def f(a: int) -> int:
+    return a * a
+"#,
+    );
     assert!(
         ovf.call("f", vec![Value::Int(i64::MAX)])
             .unwrap_err()
             .message
             .contains("overflow")
     );
-    let rec = load("fn f(n: i32) -> i32 { f(n + 1) }");
+    let rec = load(
+        r#"
+def f(n: int32) -> int32:
+    return f(n + 1)
+"#,
+    );
     assert!(
         rec.call("f", vec![Value::Int(0)])
             .unwrap_err()
@@ -153,22 +214,33 @@ fn runtime_errors_are_reported_not_panics() {
 
 #[test]
 fn globals_are_evaluated_once_in_order() {
-    let src = "let a = 2; let b = a * 21; fn f() -> i32 { b }";
+    let src = r#"
+a = 2
+b = a * 21
+
+def f() -> int32:
+    return b
+"#;
     assert_eq!(int(run(src, "f", vec![])), 42);
 }
 
 #[test]
 fn endpoint_results_and_errors() {
     let src = r#"
-        import std::http::Status;
-        struct In { n: i32 }
-        struct Out { double: i32 }
-        @endpoint(path = "/d", method = "POST")
-        pub fn d(p: In) -> Result<Out, Status> {
-            if p.n < 0 { return Err(Status::BadRequest("negative")); }
-            Ok(Out { double: p.n * 2 })
-        }
-    "#;
+import std.http.Status
+
+class In:
+    n: int32
+
+class Out:
+    double: int32
+
+@endpoint(path="/d", method="POST")
+def d(p: In) -> Result[Out, Status]:
+    if p.n < 0:
+        return Err(Status.BadRequest("negative"))
+    return Ok(Out(double=p.n * 2))
+"#;
     let i = load(src);
     assert_eq!(i.endpoint_names(), ["d"]);
     assert_eq!(
@@ -187,10 +259,13 @@ fn endpoint_results_and_errors() {
 #[test]
 fn tensors_round_trip_through_json() {
     let src = r#"
-        struct T { v: Tensor<f32, [2, 2]> }
-        @endpoint(path = "/t", method = "POST")
-        fn t(p: T) -> Result<T, String> { Ok(p) }
-    "#;
+class T:
+    v: Tensor[float32, [2, 2]]
+
+@endpoint(path="/t", method="POST")
+def t(p: T) -> Result[T, str]:
+    return Ok(p)
+"#;
     let i = load(src);
     let body = json!({"v": [[1.0, 2.0], [3.0, 4.0]]});
     assert_eq!(i.call_endpoint("t", &body).unwrap(), body);
@@ -278,7 +353,14 @@ fn print_goes_to_the_configured_output() {
         }
     }
     let buf = Arc::new(Mutex::new(Vec::new()));
-    let i = load(r#"fn main() -> i32 { std::io::print("a"); std::io::println("b"); 0 }"#);
+    let i = load(
+        r#"
+def main() -> int32:
+    std.io.print("a")
+    print("b")
+    return 0
+"#,
+    );
     i.set_output(Sink(buf.clone()));
     i.call("main", vec![]).unwrap();
     assert_eq!(
@@ -289,36 +371,89 @@ fn print_goes_to_the_configured_output() {
 
 #[test]
 fn mutation_and_while() {
-    let src =
-        "fn sum(n: i32) -> i32 { let mut i = 0; let mut s = 0; while i < n { s += i; i += 1; } s }";
+    let src = r#"
+def sum(n: int32) -> int32:
+    i = 0
+    s = 0
+    while i < n:
+        s += i
+        i += 1
+    return s
+"#;
     assert_eq!(int(run(src, "sum", vec![Value::Int(10)])), 45);
     assert_eq!(int(run(src, "sum", vec![Value::Int(0)])), 0);
-    let early =
-        "fn f() -> i32 { let mut i = 0; while true { if i == 7 { return i * 2; } i += 1; } 0 }";
+    let early = r#"
+def f() -> int32:
+    i = 0
+    while True:
+        if i == 7:
+            return i * 2
+        i += 1
+    return 0
+"#;
     assert_eq!(int(run(early, "f", vec![])), 14);
-    let strs = "fn f() -> String { let mut s = \"\"; let mut i = 0; while i < 3 { s = s + f\"{i},\"; i += 1; } s }";
+    let strs = r#"
+def f() -> str:
+    s = ""
+    i = 0
+    while i < 3:
+        s = s + f"{i},"
+        i += 1
+    return s
+"#;
     assert_eq!(text(run(strs, "f", vec![])), "0,1,2,");
 }
 
 #[test]
 fn for_loops_over_ranges_and_vectors() {
     let src = r#"
-        fn tri(n: i32) -> i32 { let mut s = 0; for i in 0..n { s += i; } s }
-        fn incl(n: i32) -> i32 { let mut s = 0; for i in 1..=n { s += i; } s }
-        fn dot(a: Vec<i32>, b: Vec<i32>) -> i32 {
-            let mut s = 0;
-            for i in 0..std::iter::count(a) { s += a[i] * b[i]; }
-            s
-        }
-        fn total(v: Vec<f64>) -> f64 { let mut s = 0.0; for x in v { s += x; } s }
-        fn find(v: Vec<i32>, t: i32) -> i32 {
-            let mut idx = 0;
-            for x in v { if x == t { return idx; } idx += 1; }
-            0 - 1
-        }
-        fn nested(n: i32) -> i32 { let mut c = 0; for i in 0..n { for j in 0..i { c += j; } } c }
-        fn empty(n: i32) -> i32 { let mut c = 0; for i in 5..n { c += 1; } c }
-    "#;
+def tri(n: int32) -> int32:
+    s = 0
+
+    for i in range(n):
+        s += i
+
+    return s
+
+def incl(n: int32) -> int32:
+    s = 0
+    for i in range(1, n + 1):
+        s += i
+    return s
+
+def dot(a: list[int32], b: list[int32]) -> int32:
+    s = 0
+    for i in range(std.iter.count(a)):
+        s += a[i] * b[i]
+    return s
+
+def total(v: list[float]) -> float:
+    s = 0.0
+    for x in v:
+        s += x
+    return s
+
+def find(v: list[int32], t: int32) -> int32:
+    idx = 0
+    for x in v:
+        if x == t:
+            return idx
+        idx += 1
+    return 0 - 1
+
+def nested(n: int32) -> int32:
+    c = 0
+    for i in range(n):
+        for j in range(i):
+            c += j
+    return c
+
+def empty(n: int32) -> int32:
+    c = 0
+    for i in range(5, n):
+        c += 1
+    return c
+"#;
     let ints = |v: &[i64]| Value::vec(v.iter().map(|&i| Value::Int(i)).collect());
     assert_eq!(int(run(src, "tri", vec![Value::Int(5)])), 10);
     assert_eq!(int(run(src, "incl", vec![Value::Int(5)])), 15);
@@ -342,7 +477,14 @@ fn for_loops_over_ranges_and_vectors() {
 
 #[test]
 fn arrays_indexing_and_bounds_errors() {
-    let src = "fn f(i: i32) -> i32 { let v = [10, 20, 30]; v[i] } fn g() -> i32 { [[1, 2], [3, 4]][1][0] }";
+    let src = r#"
+def f(i: int32) -> int32:
+    v = [10, 20, 30]
+    return v[i]
+
+def g() -> int32:
+    return [[1, 2], [3, 4]][1][0]
+"#;
     assert_eq!(int(run(src, "f", vec![Value::Int(2)])), 30);
     assert_eq!(int(run(src, "g", vec![])), 3);
     let i = load(src);
@@ -361,46 +503,92 @@ fn arrays_indexing_and_bounds_errors() {
 }
 
 #[test]
-fn inclusive_range_does_not_overflow() {
-    let src = "fn f() -> i64 { let hi: i64 = 9223372036854775807; let mut c: i64 = 0; for i in hi - 1..=hi { c += 1; } c }";
+fn a_range_ending_at_the_integer_limit_does_not_overflow() {
+    let src = r#"
+def f() -> int:
+    hi: int = 9223372036854775807
+    c: int = 0
+    for i in range(hi - 2, hi):
+        c += 1
+    return c
+"#;
     assert_eq!(int(run(src, "f", vec![])), 2);
 }
 
 #[test]
 fn assignment_to_vector_elements_and_struct_fields() {
     let src = r#"
-        struct P { x: i32, name: String, tags: Vec<i32> }
-        struct W { p: P, n: i32 }
-        fn elems() -> i32 { let mut v = [1, 2, 3]; v[0] = 10; v[2] += v[0]; v[1] *= 5; v[0] + v[1] + v[2] }
-        fn fields() -> String {
-            let mut p = P { x: 1, name: "a", tags: [7, 8] };
-            p.x = 5; p.x += 1; p.name = p.name + "!"; p.tags[1] = p.x;
-            f"{p.name}{p.x}{p.tags[0]}{p.tags[1]}"
-        }
-        fn nested() -> i32 {
-            let mut w = W { p: P { x: 1, name: "n", tags: [0, 0] }, n: 2 };
-            w.p.x = 40; w.p.tags[0] = 2; w.n = 7;
-            w.p.x + w.p.tags[0] + w.n
-        }
-        fn grid() -> i32 { let mut g = [[1, 2], [3, 4]]; g[1][0] = 9; g[0][1] += g[1][0]; g[1][0] * 100 + g[0][1] }
-        fn fill(mut v: Vec<i32>, x: i32) { v[0] = x; v[1] = x * 2; }
-        fn via_param() -> i32 { let v = [0, 0]; fill(v, 4); v[0] + v[1] }
-        fn value_semantics() -> i32 {
-            let mut a = P { x: 1, name: "a", tags: [] };
-            let b = a;
-            a.x = 99;
-            b.x
-        }
-        fn reference_semantics() -> i32 { let mut a = [1, 2]; let b = a; a[0] = 50; b[0] }
-        fn loop_writes() -> i32 {
-            let mut v = [0, 0, 0, 0];
-            for i in 0..4 { v[i] = i * i; }
-            let mut s = 0;
-            for x in v { s += x; }
-            s
-        }
-        fn mut_param_scalar(mut n: i32) -> i32 { n += 1; n * 2 }
-    "#;
+class P:
+    x: int32
+    name: str
+    tags: list[int32]
+
+class W:
+    p: P
+    n: int32
+
+def elems() -> int32:
+    v = [1, 2, 3]
+    v[0] = 10
+    v[2] += v[0]
+    v[1] *= 5
+    return v[0] + v[1] + v[2]
+
+def fields() -> str:
+    p = P(x=1, name="a", tags=[7, 8])
+    p.x = 5
+    p.x += 1
+    p.name = p.name + "!"
+    p.tags[1] = p.x
+    return f"{p.name}{p.x}{p.tags[0]}{p.tags[1]}"
+
+def nested() -> int32:
+    w = W(p=P(x=1, name="n", tags=[0, 0]), n=2)
+    w.p.x = 40
+    w.p.tags[0] = 2
+    w.n = 7
+    return w.p.x + w.p.tags[0] + w.n
+
+def grid() -> int32:
+    g = [[1, 2], [3, 4]]
+    g[1][0] = 9
+    g[0][1] += g[1][0]
+    return g[1][0] * 100 + g[0][1]
+
+def fill(v: list[int32], x: int32):
+    v[0] = x
+    v[1] = x * 2
+
+def via_param() -> int32:
+    v = [0, 0]
+    fill(v, 4)
+    return v[0] + v[1]
+
+def value_semantics() -> int32:
+    a = P(x=1, name="a", tags=[])
+    b = a
+    a.x = 99
+    return b.x
+
+def reference_semantics() -> int32:
+    a = [1, 2]
+    b = a
+    a[0] = 50
+    return b[0]
+
+def loop_writes() -> int32:
+    v = [0, 0, 0, 0]
+    for i in range(4):
+        v[i] = i * i
+    s = 0
+    for x in v:
+        s += x
+    return s
+
+def mut_param_scalar(n: int32) -> int32:
+    n += 1
+    return n * 2
+"#;
     assert_eq!(int(run(src, "elems", vec![])), 10 + 10 + 13);
     assert_eq!(
         text(run(src, "fields", vec![])),
@@ -430,7 +618,15 @@ fn assignment_to_vector_elements_and_struct_fields() {
 #[test]
 fn assignment_bounds_errors() {
     let i = load(
-        "fn f(k: i32) { let mut v = [1, 2]; v[k] = 5; } fn g() { let mut v = [[1], [2]]; v[1][3] = 0; }",
+        r#"
+def f(k: int32):
+    v = [1, 2]
+    v[k] = 5
+
+def g():
+    v = [[1], [2]]
+    v[1][3] = 0
+"#,
     );
     assert!(
         i.call("f", vec![Value::Int(2)])
@@ -451,7 +647,16 @@ fn assignment_bounds_errors() {
 #[test]
 fn a_step_limit_stops_runaway_programs() {
     let i = load(
-        "fn spin() -> i32 { let mut n = 0; while true { n += 1; } n } fn quick() -> i32 { 1 + 1 }",
+        r#"
+def spin() -> int32:
+    n = 0
+    while True:
+        n += 1
+    return n
+
+def quick() -> int32:
+    return 1 + 1
+"#,
     );
     i.set_step_limit(10_000);
     let e = i.call("spin", vec![]).unwrap_err();
@@ -466,7 +671,16 @@ fn a_step_limit_stops_runaway_programs() {
 
 #[test]
 fn deep_recursion_works_on_a_small_thread_stack_and_runaway_recursion_is_an_error() {
-    let src = "fn sum(n: i64) -> i64 { if n == 0 { 0 } else { n + sum(n - 1) } } fn forever(n: i64) -> i64 { forever(n + 1) }";
+    let src = r#"
+def sum(n: int) -> int:
+    if n == 0:
+        return 0
+    else:
+        return n + sum(n - 1)
+
+def forever(n: int) -> int:
+    return forever(n + 1)
+"#;
     let i = std::sync::Arc::new(load(src));
     let worker = i.clone();
     // A 256 KiB thread would overflow after a few hundred native frames without stack growth.
@@ -486,10 +700,18 @@ fn deep_recursion_works_on_a_small_thread_stack_and_runaway_recursion_is_an_erro
 #[test]
 fn top_level_functions_are_values() {
     let src = r#"
-        fn double(x: i64) -> i64 { x * 2 }
-        fn apply_all(v: Vec<i64>) -> Vec<i64> { std::iter::map(v, double) }
-        fn total(v: Vec<i64>) -> i64 { let mut s = 0; for x in apply_all(v) { s += x; } s }
-    "#;
+def double(x: int) -> int:
+    return x * 2
+
+def apply_all(v: list[int]) -> list[int]:
+    return std.iter.map(v, double)
+
+def total(v: list[int]) -> int:
+    s = 0
+    for x in apply_all(v):
+        s += x
+    return s
+"#;
     let v = Value::vec((1..=4).map(Value::Int).collect());
     assert_eq!(int(run(src, "total", vec![v])), 20);
 }
@@ -497,11 +719,18 @@ fn top_level_functions_are_values() {
 #[test]
 fn dist_map_spreads_work_over_threads_and_keeps_order() {
     let src = r#"
-        fn square(x: i64) -> i64 { x * x }
-        fn all(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, square) }
-        fn fails(x: i64) -> i64 { 10 / x }
-        fn bad(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, fails) }
-    "#;
+def square(x: int) -> int:
+    return x * x
+
+def all(v: list[int]) -> list[int]:
+    return std.dist.map(v, square)
+
+def fails(x: int) -> int:
+    return 10 / x
+
+def bad(v: list[int]) -> list[int]:
+    return std.dist.map(v, fails)
+"#;
     let i = load(src);
     let input = Value::vec((0..200).map(Value::Int).collect());
     let Value::Vec(out) = i.call("all", vec![input]).unwrap() else {
@@ -534,7 +763,13 @@ fn dist_map_can_use_a_custom_executor() {
         }
     }
     let i = load(
-        "fn work(x: i64) -> i64 { x } fn all(v: Vec<i64>) -> Vec<i64> { std::dist::map(v, work) }",
+        r#"
+def work(x: int) -> int:
+    return x
+
+def all(v: list[int]) -> list[int]:
+    return std.dist.map(v, work)
+"#,
     );
     let exec = std::sync::Arc::new(Counting(AtomicUsize::new(0)));
     i.set_executor(exec.clone());
@@ -552,7 +787,17 @@ fn dist_map_can_use_a_custom_executor() {
 #[test]
 fn call_json_converts_by_the_parameter_types() {
     let i = load(
-        "struct P { x: i64, y: i64 } fn add(p: P, k: i64) -> i64 { p.x + p.y + k } fn boom() -> Result<i64, String> { Err(\"no\") }",
+        r#"
+class P:
+    x: int
+    y: int
+
+def add(p: P, k: int) -> int:
+    return p.x + p.y + k
+
+def boom() -> Result[int, str]:
+    return Err("no")
+"#,
     );
     assert_eq!(
         i.call_json("add", &[json!({"x": 1, "y": 2}), json!(10)])
@@ -574,17 +819,53 @@ fn call_json_converts_by_the_parameter_types() {
 
 #[test]
 fn break_and_continue_in_every_kind_of_loop() {
-    let src = "
-        fn range_break(n: i64) -> i64 { let mut s = 0; for i in 0..n { if i == 5 { break; } s += i; } s }
-        fn range_continue(n: i64) -> i64 { let mut s = 0; for i in 0..n { if i % 2 == 0 { continue; } s += i; } s }
-        fn while_loop() -> i64 { let mut i = 0; let mut s = 0; while true { i += 1; if i > 10 { break; } if i % 3 == 0 { continue; } s += i; } s }
-        fn nested() -> i64 {
-            let mut c = 0;
-            for a in 0..5 { for b in 0..5 { if b > a { break; } c += 1; } }
-            c
-        }
-        fn return_inside(n: i64) -> i64 { for i in 0..n { if i == 3 { return i * 100; } } 0 - 1 }
-    ";
+    let src = r#"
+def range_break(n: int) -> int:
+    s = 0
+
+    for i in range(n):
+        if i == 5:
+            break
+
+        s += i
+
+    return s
+
+def range_continue(n: int) -> int:
+    s = 0
+    for i in range(n):
+        if i % 2 == 0:
+            continue
+        s += i
+    return s
+
+def while_loop() -> int:
+    i = 0
+    s = 0
+    while True:
+        i += 1
+        if i > 10:
+            break
+        if i % 3 == 0:
+            continue
+        s += i
+    return s
+
+def nested() -> int:
+    c = 0
+    for a in range(5):
+        for b in range(5):
+            if b > a:
+                break
+            c += 1
+    return c
+
+def return_inside(n: int) -> int:
+    for i in range(n):
+        if i == 3:
+            return i * 100
+    return 0 - 1
+"#;
     assert_eq!(int(run(src, "range_break", vec![Value::Int(100)])), 10);
     assert_eq!(int(run(src, "range_continue", vec![Value::Int(10)])), 25);
     assert_eq!(int(run(src, "while_loop", vec![])), 37);
@@ -594,27 +875,70 @@ fn break_and_continue_in_every_kind_of_loop() {
 
 #[test]
 fn enums_and_match() {
-    let src = "
-        enum Shape { Circle(f64), Rect(f64, f64), Empty }
-        fn area(s: Shape) -> f64 {
-            match s { Shape::Circle(r) => r * r * 3.0, Shape::Rect(w, h) => w * h, Shape::Empty => 0.0 }
-        }
-        fn total() -> f64 { area(Shape::Circle(2.0)) + area(Shape::Rect(2.0, 3.5)) + area(Shape::Empty) }
-        fn describe(n: i64) -> String { match n { 0 => \"zero\", 1 => \"one\", _ => \"many\" } }
-        fn safe_div(a: i64, b: i64) -> Result<i64, String> {
-            if b == 0 { return Err(\"divide by zero\"); }
-            Ok(a / b)
-        }
-        fn show(a: i64, b: i64) -> String {
-            match safe_div(a, b) { Ok(v) => f\"ok {v}\", Err(e) => f\"error: {e}\" }
-        }
-        fn same(a: Shape, b: Shape) -> bool { a == b }
-        fn pick(flag: bool) -> Shape { if flag { Shape::Rect(1.0, 2.0) } else { Shape::Empty } }
-        enum Op { Add(i64), Neg, Twice(Shape) }
-        fn nested(o: Op) -> f64 {
-            match o { Op::Add(n) => 1.0, Op::Neg => 2.0, Op::Twice(Shape::Circle(r)) => r, Op::Twice(_) => 9.0 }
-        }
-    ";
+    let src = r#"
+enum Shape:
+    Circle(float)
+    Rect(float, float)
+    Empty
+
+def area(s: Shape) -> float:
+    match s:
+        case Shape.Circle(r):
+            return r * r * 3.0
+        case Shape.Rect(w, h):
+            return w * h
+        case Shape.Empty:
+            return 0.0
+
+def total() -> float:
+    return area(Shape.Circle(2.0)) + area(Shape.Rect(2.0, 3.5)) + area(Shape.Empty)
+
+def describe(n: int) -> str:
+    match n:
+        case 0:
+            return "zero"
+        case 1:
+            return "one"
+        case _:
+            return "many"
+
+def safe_div(a: int, b: int) -> Result[int, str]:
+    if b == 0:
+        return Err("divide by zero")
+    return Ok(a / b)
+
+def show(a: int, b: int) -> str:
+    match safe_div(a, b):
+        case Ok(v):
+            return f"ok {v}"
+        case Err(e):
+            return f"error: {e}"
+
+def same(a: Shape, b: Shape) -> bool:
+    return a == b
+
+def pick(flag: bool) -> Shape:
+    if flag:
+        return Shape.Rect(1.0, 2.0)
+    else:
+        return Shape.Empty
+
+enum Op:
+    Add(int)
+    Neg
+    Twice(Shape)
+
+def nested(o: Op) -> float:
+    match o:
+        case Op.Add(n):
+            return 1.0
+        case Op.Neg:
+            return 2.0
+        case Op.Twice(Shape.Circle(r)):
+            return r
+        case Op.Twice(_):
+            return 9.0
+"#;
     assert_eq!(float(run(src, "total", vec![])), 12.0 + 7.0);
     assert_eq!(text(run(src, "describe", vec![Value::Int(1)])), "one");
     assert_eq!(text(run(src, "describe", vec![Value::Int(42)])), "many");
@@ -639,7 +963,7 @@ fn enums_and_match() {
         Ok(Value::Bool(false))
     ));
     assert_eq!(a.to_json(), json!({ "Rect": [1.0, 2.0] }));
-    assert_eq!(a.to_string(), "Shape::Rect(1, 2)");
+    assert_eq!(a.to_string(), "Shape.Rect(1, 2)");
     // JSON in, JSON out (this is how endpoints and workers talk).
     let area = interp
         .call_json("area", &[json!({ "Circle": 3.0 })])
@@ -660,19 +984,34 @@ fn enums_and_match() {
 
 #[test]
 fn string_and_vec_methods() {
-    let src = "
-        fn has(s: String, t: String) -> bool { s.contains(t) }
-        fn edges(s: String) -> bool { s.starts_with(\"ab\") && s.ends_with(\"yz\") }
-        fn fix(s: String) -> String { s.replace(\"cat\", \"dog\") }
-        fn words(s: String) -> u64 { s.split(\" \").len() }
-        fn second(s: String) -> String { let parts = s.split(\",\"); parts[1] }
-        fn collect(n: i64) -> u64 {
-            let mut v = [0];
-            for i in 1..n { v.push(i * i); }
-            v.len()
-        }
-        fn shares(n: i64) -> bool { let v = [1, 2]; v.push(n); v.contains(n) }
-    ";
+    let src = r#"
+def has(s: str, t: str) -> bool:
+    return s.contains(t)
+
+def edges(s: str) -> bool:
+    return s.starts_with("ab") and s.ends_with("yz")
+
+def fix(s: str) -> str:
+    return s.replace("cat", "dog")
+
+def words(s: str) -> uint64:
+    return s.split(" ").len()
+
+def second(s: str) -> str:
+    parts = s.split(",")
+    return parts[1]
+
+def collect(n: int) -> uint64:
+    v = [0]
+    for i in range(1, n):
+        v.push(i * i)
+    return v.len()
+
+def shares(n: int) -> bool:
+    v = [1, 2]
+    v.push(n)
+    return v.contains(n)
+"#;
     assert!(matches!(
         run(
             src,
@@ -708,20 +1047,61 @@ fn string_and_vec_methods() {
 
 #[test]
 fn option_values_and_matching() {
-    let src = "
-        fn parse(s: String) -> Option<i64> { s.to_int() }
-        fn describe(s: String) -> String {
-            match parse(s) { Some(n) => f\"number {n}\", None => \"not a number\" }
-        }
-        fn pick(flag: bool) -> Option<String> { if flag { Some(\"yes\") } else { None } }
-        fn first_or(v: Vec<i64>, d: i64) -> i64 { v.first().unwrap_or(d) }
-        fn last_plus(v: Vec<i64>) -> i64 { match v.last() { Some(x) => x + 1, None => 0 } }
-        fn counts(v: Vec<i64>) -> bool { v.get(1).is_some() && v.get(9).is_none() }
-        fn drain() -> i64 { let v = [1, 2, 3]; let mut total = 0; while v.len() > 0 { match v.pop() { Some(x) => { total += x; } None => { break; } } } total }
-        fn where_is(s: String) -> Option<u64> { s.find(\"lo\") }
-        fn sorted() -> Vec<i64> { let v = [3, 1, 2]; v.sort(); v }
-        fn reversed() -> Vec<String> { let v = \"c b a\".split(\" \"); v.sort(); v.reverse(); v }
-    ";
+    let src = r#"
+def parse(s: str) -> int | None:
+    return s.to_int()
+
+def describe(s: str) -> str:
+    match parse(s):
+        case Some(n):
+            return f"number {n}"
+        case None:
+            return "not a number"
+
+def pick(flag: bool) -> str | None:
+    if flag:
+        return Some("yes")
+    else:
+        return None
+
+def first_or(v: list[int], d: int) -> int:
+    return v.first().unwrap_or(d)
+
+def last_plus(v: list[int]) -> int:
+    match v.last():
+        case Some(x):
+            return x + 1
+        case None:
+            return 0
+
+def counts(v: list[int]) -> bool:
+    return v.get(1).is_some() and v.get(9).is_none()
+
+def drain() -> int:
+    v = [1, 2, 3]
+    total = 0
+    while v.len() > 0:
+        match v.pop():
+            case Some(x):
+                total += x
+            case None:
+                break
+    return total
+
+def where_is(s: str) -> uint64 | None:
+    return s.find("lo")
+
+def sorted() -> list[int]:
+    v = [3, 1, 2]
+    v.sort()
+    return v
+
+def reversed() -> list[str]:
+    v = "c b a".split(" ")
+    v.sort()
+    v.reverse()
+    return v
+"#;
     assert_eq!(
         text(run(src, "describe", vec![Value::str("42")])),
         "number 42"
@@ -773,29 +1153,37 @@ fn option_values_and_matching() {
 
 #[test]
 fn maps() {
-    let src = "
-        fn word_counts(text: String) -> Map<String, i64> {
-            let counts: Map<String, i64> = std::map::new();
-            for w in text.split(\" \") {
-                let n = counts.get(w).unwrap_or(0);
-                counts.insert(w, n + 1);
-            }
-            counts
-        }
-        fn lookup(text: String, w: String) -> i64 {
-            match word_counts(text).get(w) { Some(n) => n, None => 0 - 1 }
-        }
-        fn size(text: String) -> u64 { word_counts(text).len() }
-        fn keys_of(text: String) -> Vec<String> { word_counts(text).keys() }
-        fn ids() -> Map<i64, String> {
-            let m: Map<i64, String> = std::map::new();
-            m.insert(2, \"two\");
-            m.insert(1, \"one\");
-            m.remove(2);
-            m
-        }
-        fn has(k: i64, m: Map<i64, String>) -> bool { m.contains_key(k) }
-    ";
+    let src = r#"
+def word_counts(text: str) -> dict[str, int]:
+    counts: dict[str, int] = std.map.new()
+    for w in text.split(" "):
+        n = counts.get(w).unwrap_or(0)
+        counts.insert(w, n + 1)
+    return counts
+
+def lookup(text: str, w: str) -> int:
+    match word_counts(text).get(w):
+        case Some(n):
+            return n
+        case None:
+            return 0 - 1
+
+def size(text: str) -> uint64:
+    return word_counts(text).len()
+
+def keys_of(text: str) -> list[str]:
+    return word_counts(text).keys()
+
+def ids() -> dict[int, str]:
+    m: dict[int, str] = std.map.new()
+    m.insert(2, "two")
+    m.insert(1, "one")
+    m.remove(2)
+    return m
+
+def has(k: int, m: dict[int, str]) -> bool:
+    return m.contains_key(k)
+"#;
     let t = Value::str("a b a c a b");
     assert_eq!(int(run(src, "lookup", vec![t.clone(), Value::str("a")])), 3);
     assert_eq!(
@@ -829,13 +1217,30 @@ fn maps() {
 
 #[test]
 fn closures_capture_variables() {
-    let src = "
-        fn shifted(v: Vec<i64>, k: i64) -> Vec<i64> { v |> std::iter::map(|x| x + k) |> std::collect() }
-        fn named(k: i64) -> i64 { let add = |a: i64| a + k; add(2) + add(3) }
-        fn counter() -> i64 { let mut n = 0; let bump = |d: i64| d + 1; n = bump(n); n = bump(n); n }
-        fn nested(k: i64) -> i64 { let outer = |a: i64| { let inner = |b: i64| a + b + k; inner(1) }; outer(10) }
-        fn filtered(v: Vec<i64>, min: i64) -> Vec<i64> { v |> std::iter::filter(|x| x >= min) |> std::collect() }
-    ";
+    let src = r#"
+def shifted(v: list[int], k: int) -> list[int]:
+    return v |> std.iter.map(lambda x: x + k) |> std.collect()
+
+def named(k: int) -> int:
+    add = lambda a: a + k
+    return add(2) + add(3)
+
+def counter() -> int:
+    n = 0
+    bump = lambda d: d + 1
+    n = bump(n)
+    n = bump(n)
+    return n
+
+def nested(k: int) -> int:
+    def outer(a: int):
+        inner = lambda b: a + b + k
+        return inner(1)
+    return outer(10)
+
+def filtered(v: list[int], min: int) -> list[int]:
+    return v |> std.iter.filter(lambda x: x >= min) |> std.collect()
+"#;
     let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
     assert_eq!(
         run(src, "shifted", vec![ints(&[1, 2]), Value::Int(10)]).to_json(),
@@ -852,20 +1257,35 @@ fn closures_capture_variables() {
 
 #[test]
 fn question_mark_propagates_errors_and_none() {
-    let src = "
-        fn parse(s: String) -> Result<i64, String> {
-            match s.to_int() { Some(n) => Ok(n), None => Err(f\"not a number: {s}\") }
-        }
-        fn double(s: String) -> Result<i64, String> { let n = parse(s)?; Ok(n * 2) }
-        fn sum(a: String, b: String) -> Result<i64, String> { Ok(parse(a)? + parse(b)?) }
-        fn first_even(v: Vec<i64>) -> Option<i64> {
-            let first = v.first()?;
-            if first % 2 == 0 { Some(first) } else { None }
-        }
-        fn describe(s: String) -> String {
-            match double(s) { Ok(n) => f\"ok {n}\", Err(e) => f\"error: {e}\" }
-        }
-    ";
+    let src = r#"
+def parse(s: str) -> Result[int, str]:
+    match s.to_int():
+        case Some(n):
+            return Ok(n)
+        case None:
+            return Err(f"not a number: {s}")
+
+def double(s: str) -> Result[int, str]:
+    n = parse(s)?
+    return Ok(n * 2)
+
+def sum(a: str, b: str) -> Result[int, str]:
+    return Ok(parse(a)? + parse(b)?)
+
+def first_even(v: list[int]) -> int | None:
+    first = v.first()?
+    if first % 2 == 0:
+        return Some(first)
+    else:
+        return None
+
+def describe(s: str) -> str:
+    match double(s):
+        case Ok(n):
+            return f"ok {n}"
+        case Err(e):
+            return f"error: {e}"
+"#;
     assert_eq!(text(run(src, "describe", vec![Value::str("21")])), "ok 42");
     assert_eq!(
         text(run(src, "describe", vec![Value::str("x")])),
@@ -892,33 +1312,44 @@ fn question_mark_propagates_errors_and_none() {
 
 #[test]
 fn if_let_and_while_let() {
-    let src = "
-        fn describe(v: Vec<i64>) -> String {
-            if let Some(x) = v.first() { f\"first {x}\" } else { \"empty\" }
-        }
-        fn chained(a: Option<i64>, b: Option<i64>) -> i64 {
-            if let Some(x) = a { x } else if let Some(y) = b { y * 10 } else { 0 }
-        }
-        fn drain(v: Vec<i64>) -> i64 {
-            let mut total = 0;
-            while let Some(x) = v.pop() { total += x; }
-            total
-        }
-        fn until_big(v: Vec<i64>) -> i64 {
-            let mut total = 0;
-            while let Some(x) = v.pop() {
-                if x > 100 { break; }
-                if x % 2 == 1 { continue; }
-                total += x;
-            }
-            total
-        }
-        fn set_only(r: Result<i64, String>) -> i64 {
-            let mut out = 0;
-            if let Ok(n) = r { out = n; }
-            out
-        }
-    ";
+    let src = r#"
+def describe(v: list[int]) -> str:
+    if v.first() is Some(x):
+        return f"first {x}"
+    else:
+        return "empty"
+
+def chained(a: int | None, b: int | None) -> int:
+    if a is Some(x):
+        return x
+    else:
+        if b is Some(y):
+            return y * 10
+        else:
+            return 0
+
+def drain(v: list[int]) -> int:
+    total = 0
+    while v.pop() is Some(x):
+        total += x
+    return total
+
+def until_big(v: list[int]) -> int:
+    total = 0
+    while v.pop() is Some(x):
+        if x > 100:
+            break
+        if x % 2 == 1:
+            continue
+        total += x
+    return total
+
+def set_only(r: Result[int, str]) -> int:
+    out = 0
+    if r is Ok(n):
+        out = n
+    return out
+"#;
     let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
     assert_eq!(text(run(src, "describe", vec![ints(&[7, 8])])), "first 7");
     assert_eq!(text(run(src, "describe", vec![ints(&[])])), "empty");
@@ -954,32 +1385,61 @@ fn if_let_and_while_let() {
 
 #[test]
 fn tuples_and_iterator_methods() {
-    let src = "
-        fn swap(p: (i64, String)) -> (String, i64) { (p.1, p.0) }
-        fn destructure(a: i64) -> i64 { let (x, y) = (a, a * 2); let (_, z, w) = (1, 2, 3); x + y + z + w }
-        fn labelled(v: Vec<String>) -> Vec<String> {
-            v.enumerate().map(|(i, s)| f\"{i}:{s}\")
-        }
-        fn pairs() -> Vec<(i64, String)> { [1, 2].zip([\"a\", \"b\"]) }
-        fn total_len(v: Vec<String>) -> u64 { v.map(|s| s.len()).fold(0, |acc, n| acc + n) }
-        fn evens(v: Vec<i64>) -> Vec<i64> { v.filter(|x| x % 2 == 0) }
-        fn stats(v: Vec<i64>) -> (i64, Option<i64>, Option<i64>) { (v.sum(), v.min(), v.max()) }
-        fn has_big(v: Vec<i64>) -> bool { v.any(|x| x > 10) && !v.all(|x| x > 10) }
-        fn first_big(v: Vec<i64>) -> Option<i64> { v.find(|x| x > 10) }
-        fn counts(text: String) -> Vec<String> {
-            let m: Map<String, i64> = std::map::new();
-            for w in text.split(\" \") { m.insert(w, m.get(w).unwrap_or(0) + 1); }
-            let mut out = [\"\"];
-            out.pop();
-            for (word, n) in m.entries() { out.push(f\"{word}={n}\"); }
-            out
-        }
-        fn joined(v: Vec<String>) -> String { v.join(\"+\") }
-        fn skipped(v: Vec<i64>) -> Vec<i64> { v.skip(2) }
-        fn tuple_match(p: (bool, i64)) -> String {
-            match p { (true, n) => f\"yes {n}\", (false, 0) => \"zero\", (false, n) => f\"no {n}\" }
-        }
-    ";
+    let src = r#"
+def swap(p: (int, str)) -> (str, int):
+    return (p.1, p.0)
+
+def destructure(a: int) -> int:
+    x, y = (a, a * 2)
+    _, z, w = (1, 2, 3)
+    return x + y + z + w
+
+def labelled(v: list[str]) -> list[str]:
+    return v.enumerate().map(lambda (i, s): f"{i}:{s}")
+
+def pairs() -> list[(int, str)]:
+    return [1, 2].zip(["a", "b"])
+
+def total_len(v: list[str]) -> uint64:
+    return v.map(lambda s: s.len()).fold(0, lambda acc, n: acc + n)
+
+def evens(v: list[int]) -> list[int]:
+    return v.filter(lambda x: x % 2 == 0)
+
+def stats(v: list[int]) -> (int, int | None, int | None):
+    return (v.sum(), v.min(), v.max())
+
+def has_big(v: list[int]) -> bool:
+    return v.any(lambda x: x > 10) and not v.all(lambda x: x > 10)
+
+def first_big(v: list[int]) -> int | None:
+    return v.find(lambda x: x > 10)
+
+def counts(text: str) -> list[str]:
+    m: dict[str, int] = std.map.new()
+    for w in text.split(" "):
+        m.insert(w, m.get(w).unwrap_or(0) + 1)
+    out = [""]
+    out.pop()
+    for word, n in m.entries():
+        out.push(f"{word}={n}")
+    return out
+
+def joined(v: list[str]) -> str:
+    return v.join("+")
+
+def skipped(v: list[int]) -> list[int]:
+    return v.skip(2)
+
+def tuple_match(p: (bool, int)) -> str:
+    match p:
+        case (True, n):
+            return f"yes {n}"
+        case (False, 0):
+            return "zero"
+        case (False, n):
+            return f"no {n}"
+"#;
     let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
     let strs = |xs: &[&str]| Value::vec(xs.iter().map(|x| Value::str(*x)).collect());
     let pair = Value::Tuple(Arc::new(vec![Value::Int(7), Value::str("seven")]));
@@ -1043,29 +1503,55 @@ fn tuples_and_iterator_methods() {
 
 #[test]
 fn impl_methods_and_associated_functions() {
-    let src = "
-        struct Point { x: f64, y: f64 }
-        impl Point {
-            fn new(x: f64, y: f64) -> Point { Point { x: x, y: y } }
-            fn origin() -> Self { Self { x: 0.0, y: 0.0 } }
-            fn norm2(self) -> f64 { self.x * self.x + self.y * self.y }
-            fn plus(self, other: Point) -> Point { Point::new(self.x + other.x, self.y + other.y) }
-            fn scaled(self, k: f64) -> Self { Self::new(self.x * k, self.y * k) }
-        }
-        enum Shape { Circle(f64), Square(f64) }
-        impl Shape {
-            fn area(self) -> f64 { match self { Shape::Circle(r) => r * r * 3.0, Shape::Square(s) => s * s } }
-            fn unit_square() -> Shape { Self::Square(1.0) }
-            fn describe(self) -> String { f\"area {self.area()}\" }
-        }
-        fn run() -> f64 {
-            let p = Point::new(3.0, 4.0);
-            let q = p.plus(Point::origin()).scaled(2.0);
-            q.norm2() + Shape::unit_square().area() + Shape::Circle(1.0).area()
-        }
-        fn text() -> String { Shape::Square(2.0).describe() }
-        fn chain() -> f64 { Point::new(1.0, 1.0).plus(Point::new(2.0, 3.0)).norm2() }
-    ";
+    let src = r#"
+class Point:
+    x: float
+    y: float
+
+    def new(x: float, y: float) -> Point:
+        return Point(x=x, y=y)
+
+    def origin() -> Self:
+        return Self(x=0.0, y=0.0)
+
+    def norm2(self) -> float:
+        return self.x * self.x + self.y * self.y
+
+    def plus(self, other: Point) -> Point:
+        return Point.new(self.x + other.x, self.y + other.y)
+
+    def scaled(self, k: float) -> Self:
+        return Self.new(self.x * k, self.y * k)
+
+enum Shape:
+    Circle(float)
+    Square(float)
+
+extend Shape:
+    def area(self) -> float:
+        match self:
+            case Shape.Circle(r):
+                return r * r * 3.0
+            case Shape.Square(s):
+                return s * s
+
+    def unit_square() -> Shape:
+        return Self.Square(1.0)
+
+    def describe(self) -> str:
+        return f"area {self.area()}"
+
+def run() -> float:
+    p = Point.new(3.0, 4.0)
+    q = p.plus(Point.origin()).scaled(2.0)
+    return q.norm2() + Shape.unit_square().area() + Shape.Circle(1.0).area()
+
+def text() -> str:
+    return Shape.Square(2.0).describe()
+
+def chain() -> float:
+    return Point.new(1.0, 1.0).plus(Point.new(2.0, 3.0)).norm2()
+"#;
     assert_eq!(float(run(src, "run", vec![])), 100.0 + 1.0 + 3.0);
     assert_eq!(text(run(src, "text", vec![])), "area 4");
     assert_eq!(float(run(src, "chain", vec![])), 9.0 + 16.0);
@@ -1073,50 +1559,83 @@ fn impl_methods_and_associated_functions() {
 
 #[test]
 fn traits_with_dynamic_dispatch_and_dependency_injection() {
-    let src = "
-        trait Shape {
-            fn area(self) -> f64;
-            fn name(self) -> String;
-            fn describe(self) -> String { f\"{self.name()} with area {self.area()}\" }
-        }
-        struct Circle { r: f64 }
-        struct Square { s: f64 }
-        impl Shape for Circle {
-            fn area(self) -> f64 { self.r * self.r * 3.0 }
-            fn name(self) -> String { \"circle\" }
-        }
-        impl Shape for Square {
-            fn area(self) -> f64 { self.s * self.s }
-            fn name(self) -> String { \"square\" }
-            fn describe(self) -> String { \"a square!\" }
-        }
-        fn total(shapes: Vec<Shape>) -> f64 { shapes.map(|s| s.area()).sum() }
-        fn labels(shapes: Vec<Shape>) -> Vec<String> { shapes.map(|s| s.describe()) }
-        fn mixed() -> Vec<Shape> { [Circle { r: 1.0 }, Square { s: 2.0 }] }
-        fn direct() -> String { Circle { r: 2.0 }.describe() }
+    let src = r#"
+trait Shape:
+    def area(self) -> float: ...
 
-        // An injected dependency: the service does not know which store it talks to.
-        trait Store { fn load(self, key: String) -> Option<String>; fn save(self, key: String, value: String); }
-        struct MemoryStore { data: Map<String, String> }
-        impl Store for MemoryStore {
-            fn load(self, key: String) -> Option<String> { self.data.get(key) }
-            fn save(self, key: String, value: String) { self.data.insert(key, value); }
-        }
-        struct Greeter { store: Store }
-        impl Greeter {
-            fn new(store: Store) -> Greeter { Greeter { store: store } }
-            fn greet(self, name: String) -> String {
-                match self.store.load(name) {
-                    Some(g) => g,
-                    None => { self.store.save(name, f\"hello, {name}\"); f\"first time, {name}\" }
-                }
-            }
-        }
-        fn visits() -> Vec<String> {
-            let g = Greeter::new(MemoryStore { data: std::map::new() });
-            [g.greet(\"ana\"), g.greet(\"ana\"), g.greet(\"bo\")]
-        }
-    ";
+    def name(self) -> str: ...
+
+    def describe(self) -> str:
+        return f"{self.name()} with area {self.area()}"
+
+class Circle:
+    r: float
+
+class Square:
+    s: float
+
+extend Circle(Shape):
+    def area(self) -> float:
+        return self.r * self.r * 3.0
+
+    def name(self) -> str:
+        return "circle"
+
+extend Square(Shape):
+    def area(self) -> float:
+        return self.s * self.s
+
+    def name(self) -> str:
+        return "square"
+
+    def describe(self) -> str:
+        return "a square!"
+
+def total(shapes: list[Shape]) -> float:
+    return shapes.map(lambda s: s.area()).sum()
+
+def labels(shapes: list[Shape]) -> list[str]:
+    return shapes.map(lambda s: s.describe())
+
+def mixed() -> list[Shape]:
+    return [Circle(r=1.0), Square(s=2.0)]
+
+def direct() -> str:
+    return Circle(r=2.0).describe()
+
+# An injected dependency: the service does not know which store it talks to.
+trait Store:
+    def load(self, key: str) -> str | None: ...
+
+    def save(self, key: str, value: str): ...
+
+class MemoryStore(Store):
+    data: dict[str, str]
+
+    def load(self, key: str) -> str | None:
+        return self.data.get(key)
+
+    def save(self, key: str, value: str):
+        self.data.insert(key, value)
+
+class Greeter:
+    store: Store
+
+    def new(store: Store) -> Greeter:
+        return Greeter(store=store)
+
+    def greet(self, name: str) -> str:
+        match self.store.load(name):
+            case Some(g):
+                return g
+            case None:
+                self.store.save(name, f"hello, {name}")
+                return f"first time, {name}"
+
+def visits() -> list[str]:
+    g = Greeter.new(MemoryStore(data=std.map.new()))
+    return [g.greet("ana"), g.greet("ana"), g.greet("bo")]
+"#;
     assert_eq!(
         float(run(src, "total", vec![run(src, "mixed", vec![])])),
         3.0 + 4.0
@@ -1134,27 +1653,53 @@ fn traits_with_dynamic_dispatch_and_dependency_injection() {
 
 #[test]
 fn generic_functions_structs_and_impls_are_monomorphized() {
-    let src = "
-        trait Named { fn name(self) -> String; }
-        struct Dog { n: String }
-        impl Named for Dog { fn name(self) -> String { self.n } }
-        fn first<T>(xs: Vec<T>) -> T { xs[0] }
-        fn id<T>(x: T) -> T { x }
-        fn greet<T: Named>(x: T) -> String { f\"hi {x.name()}\" }
-        struct Pair<A, B> { a: A, b: B }
-        impl<A, B> Pair<A, B> {
-            fn new(a: A, b: B) -> Pair<A, B> { Pair { a: a, b: b } }
-            fn first(self) -> A { self.a }
-            fn second(self) -> B { self.b }
-        }
-        fn ints() -> i64 { let xs: Vec<i64> = [4, 5, 6]; let one: i64 = 1; first(xs) + id(one) }
-        fn texts() -> String { first([\"x\", \"y\"]) }
-        fn named() -> String { greet(Dog { n: \"rex\" }) }
-        fn pairs() -> String {
-            let p = Pair::new(7, \"seven\");
-            f\"{p.first()} {p.second()}\"
-        }
-    ";
+    let src = r#"
+trait Named:
+    def name(self) -> str: ...
+
+class Dog(Named):
+    n: str
+
+    def name(self) -> str:
+        return self.n
+
+def first[T](xs: list[T]) -> T:
+    return xs[0]
+
+def id[T](x: T) -> T:
+    return x
+
+def greet[T: Named](x: T) -> str:
+    return f"hi {x.name()}"
+
+class Pair[A, B]:
+    a: A
+    b: B
+
+    def new(a: A, b: B) -> Pair[A, B]:
+        return Pair(a=a, b=b)
+
+    def first(self) -> A:
+        return self.a
+
+    def second(self) -> B:
+        return self.b
+
+def ints() -> int:
+    xs: list[int] = [4, 5, 6]
+    one: int = 1
+    return first(xs) + id(one)
+
+def texts() -> str:
+    return first(["x", "y"])
+
+def named() -> str:
+    return greet(Dog(n="rex"))
+
+def pairs() -> str:
+    p = Pair.new(7, "seven")
+    return f"{p.first()} {p.second()}"
+"#;
     assert_eq!(run(src, "ints", vec![]).to_json(), json!(5));
     assert_eq!(text(run(src, "texts", vec![])), "x");
     assert_eq!(text(run(src, "named", vec![])), "hi rex");
@@ -1163,23 +1708,37 @@ fn generic_functions_structs_and_impls_are_monomorphized() {
 
 #[test]
 fn generic_enums_and_methods_are_monomorphized() {
-    let src = "
-        enum Tree<T> { Leaf, Node(T, Vec<T>) }
-        impl<T> Tree<T> {
-            fn size(self) -> u64 { match self { Tree::Leaf => 0, Tree::Node(_, rest) => 1 + rest.len() } }
-        }
-        struct Stack<T> { items: Vec<T> }
-        impl<T> Stack<T> {
-            fn new() -> Stack<T> { Stack { items: [] } }
-            fn count(self) -> u64 { self.items.len() }
-        }
-        fn sizes() -> u64 {
-            let t: Tree<i64> = Tree::Node(1, [2, 3]);
-            let e: Tree<String> = Tree::Leaf;
-            t.size() * 10 + e.size()
-        }
-        fn empty() -> u64 { let s: Stack<i64> = Stack::new(); s.count() }
-    ";
+    let src = r#"
+enum Tree[T]:
+    Leaf
+    Node(T, list[T])
+
+extend Tree[T]:
+    def size(self) -> uint64:
+        match self:
+            case Tree.Leaf:
+                return 0
+            case Tree.Node(_, rest):
+                return 1 + rest.len()
+
+class Stack[T]:
+    items: list[T]
+
+    def new() -> Stack[T]:
+        return Stack(items=[])
+
+    def count(self) -> uint64:
+        return self.items.len()
+
+def sizes() -> uint64:
+    t: Tree[int] = Tree.Node(1, [2, 3])
+    e: Tree[str] = Tree.Leaf
+    return t.size() * 10 + e.size()
+
+def empty() -> uint64:
+    s: Stack[int] = Stack.new()
+    return s.count()
+"#;
     assert_eq!(run(src, "sizes", vec![]).to_json(), json!(30));
     assert_eq!(run(src, "empty", vec![]).to_json(), json!(0));
 }

@@ -26,7 +26,7 @@ async function setCode(page, source) {
 test("loads with examples and the first one checks cleanly", async ({ page }) => {
   expect(await page.locator("#examples option").count()).toBeGreaterThan(2);
   await expect(page.locator("#problems")).toContainText("No problems");
-  await expect(page.locator("#code")).toHaveValue(/fn main/);
+  await expect(page.locator("#code")).toHaveValue(/def main/);
 });
 
 test("runs the default example", async ({ page }) => {
@@ -36,20 +36,20 @@ test("runs the default example", async ({ page }) => {
 });
 
 test("Ctrl+Enter runs the program", async ({ page }) => {
-  await setCode(page, 'fn main() -> i32 { std::io::println("from the keyboard"); 7 }');
+  await setCode(page, 'def main() -> int32:\n    print("from the keyboard")\n    return 7\n');
   await page.locator("#code").press("Control+Enter");
   await expect(page.locator("#output")).toContainText("from the keyboard");
   await expect(page.locator("#output")).toContainText("=> 7");
 });
 
 test("shows problems for a program with a type error", async ({ page }) => {
-  await setCode(page, 'fn main() -> i32 { "not a number" }');
+  await setCode(page, 'def main() -> int32:\n    return "not a number"\n');
   await expect(page.locator("#problems li.error").first()).toContainText("mismatched types");
   await expect(page.locator("#problem-count")).toContainText("(");
 });
 
 test("a runtime error is reported in the output", async ({ page }) => {
-  await setCode(page, "fn main() -> i32 { let d = 0; 10 / d }");
+  await setCode(page, "def main() -> int32:\n    d = 0\n    return 10 / d\n");
   await page.locator("#run").click();
   await expect(page.locator("#output .error")).toContainText("error:");
 });
@@ -57,15 +57,26 @@ test("a runtime error is reported in the output", async ({ page }) => {
 test("runs enums, match, Option and Map", async ({ page }) => {
   await setCode(
     page,
-    `enum Shape { Circle(f64), Empty }
-fn area(s: Shape) -> f64 { match s { Shape::Circle(r) => r * r * 3.0, Shape::Empty => 0.0 } }
-fn main() -> i32 {
-    let m: Map<String, i64> = std::map::new();
-    m.insert("a", 2);
-    let n = match m.get("a") { Some(v) => v, None => 0 };
-    std::io::println(f"area {area(Shape::Circle(2.0))} and {n}");
-    0
-}`,
+    `enum Shape:
+    Circle(float)
+    Empty
+
+def area(s: Shape) -> float:
+    match s:
+        case Shape.Circle(r):
+            return r * r * 3.0
+        case Shape.Empty:
+            return 0.0
+
+def main() -> int32:
+    m: dict[str, int] = std.map.new()
+    m.insert("a", 2)
+    n = 0
+    if m.get("a") is Some(v):
+        n = v
+    print(f"area {area(Shape.Circle(2.0))} and {n}")
+    return 0
+`,
   );
   await page.locator("#run").click();
   await expect(page.locator("#output")).toContainText("area 12 and 2");
@@ -80,12 +91,12 @@ test("picking another example loads and runs it", async ({ page }) => {
 
 test("the share link carries the program", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await setCode(page, "fn main() -> i32 { 99 }");
+  await setCode(page, "def main() -> int32:\n    return 99\n");
   await page.locator("#share").click();
   await expect(page.locator("#status")).toContainText(/Link copied|share/i);
   const url = page.url();
   expect(url).toContain("#");
   await page.goto(url);
   await page.reload();
-  await expect(page.locator("#code")).toHaveValue("fn main() -> i32 { 99 }");
+  await expect(page.locator("#code")).toHaveValue("def main() -> int32:\n    return 99\n");
 });

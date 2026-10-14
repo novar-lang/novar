@@ -1,4 +1,4 @@
-//! PTX kernels for the `std::tensor` operations, built as LLVM IR for the `nvptx64` target and
+//! PTX kernels for the `std.tensor` operations, built as LLVM IR for the `nvptx64` target and
 //! compiled by LLVM's NVPTX backend. One thread handles one output element (or one row for
 //! `softmax`); reductions accumulate with a global atomic add. The kernels are meant to be
 //! launched through the CUDA driver API (`cuModuleLoadData` + `cuLaunchKernel`).
@@ -224,7 +224,7 @@ fn kernel(op: &str) -> Option<String> {
     })
 }
 
-/// Kernel entry points that serve a `std::tensor` operation.
+/// Kernel entry points that serve a `std.tensor` operation.
 fn kernel_for(op: &str) -> Option<&'static str> {
     Some(match op {
         "add" => "add_f32",
@@ -242,7 +242,7 @@ fn kernel_for(op: &str) -> Option<&'static str> {
     })
 }
 
-/// The `std::tensor` operations in `program` that [`ptx`] has a kernel for.
+/// The `std.tensor` operations in `program` that [`ptx`] has a kernel for.
 pub fn used_ops(program: &telvax_hir::hir::Program) -> Vec<String> {
     crate::tensor_ops(program)
         .into_iter()
@@ -322,11 +322,12 @@ mod tests {
     fn every_kernel_verifies_and_lowers_to_ptx() {
         let program = {
             let src = "
-                fn f(a: Tensor<f32, [4, 4]>, b: Tensor<f32, [4, 4]>) -> Tensor<f32, [4, 4]> {
-                    std::tensor::softmax(std::tensor::sigmoid(std::tensor::relu(std::tensor::scale(
-                        std::tensor::matmul(std::tensor::sub(std::tensor::div(std::tensor::mul(std::tensor::add(a, b), b), b), a), b), 0.5))))
-                }
-                fn s(a: Tensor<f32, [16]>, b: Tensor<f32, [16]>) -> f32 { std::tensor::sum(a) + std::tensor::mean(a) + std::tensor::dot(a, b) }
+def f(a: Tensor[float32, [4, 4]], b: Tensor[float32, [4, 4]]) -> Tensor[float32, [4, 4]]:
+    return std.tensor.softmax(std.tensor.sigmoid(std.tensor.relu(std.tensor.scale(
+        std.tensor.matmul(std.tensor.sub(std.tensor.div(std.tensor.mul(std.tensor.add(a, b), b), b), a), b), 0.5))))
+
+def s(a: Tensor[float32, [16]], b: Tensor[float32, [16]]) -> float32:
+    return std.tensor.sum(a) + std.tensor.mean(a) + std.tensor.dot(a, b)
             ";
             let (ast, errs) = telvax_parser::parse(src);
             assert!(errs.is_empty(), "{errs:?}");

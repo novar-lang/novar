@@ -40,12 +40,12 @@ async function run() {
   );
   assert.deepStrictEqual(vscode.languages.getDiagnostics(ok.uri), [], "ok.tvx has no problems");
 
-  // Hover on `norm` in the call on line 5.
+  // Hover on `norm` in the call on line 10.
   const hovers = await until("a hover", async () => {
     const h = await vscode.commands.executeCommand(
       "vscode.executeHoverProvider",
       ok.uri,
-      new vscode.Position(4, 6),
+      new vscode.Position(9, 13),
     );
     return h && h.length ? h : null;
   });
@@ -53,31 +53,31 @@ async function run() {
     .flatMap((h) => h.contents)
     .map((c) => (typeof c === "string" ? c : c.value))
     .join("\n");
-  assert.ok(hoverText.includes("fn norm(p: Point) -> f64"), hoverText);
+  assert.ok(hoverText.includes("def norm(p: Point) -> float"), hoverText);
 
   // Go to definition jumps to the function.
   const defs = await vscode.commands.executeCommand(
     "vscode.executeDefinitionProvider",
     ok.uri,
-    new vscode.Position(4, 6),
+    new vscode.Position(9, 13),
   );
   assert.ok(defs && defs.length, "definition");
   const target = defs[0].targetRange ?? defs[0].range;
-  assert.strictEqual(target.start.line, 1);
+  assert.strictEqual(target.start.line, 4);
 
-  // Find all references: `origin` is declared on line 4 and used on line 5.
+  // Find all references: `origin` is declared on line 9 and used on line 10.
   const refs = await vscode.commands.executeCommand(
     "vscode.executeReferenceProvider",
     ok.uri,
-    new vscode.Position(4, 10),
+    new vscode.Position(9, 18),
   );
-  assert.deepStrictEqual(refs.map((r) => r.range.start.line).sort(), [3, 4]);
+  assert.deepStrictEqual(refs.map((r) => r.range.start.line).sort(), [8, 9]);
 
   // Rename the function `norm`: its definition and its call change together.
   const renamed = await vscode.commands.executeCommand(
     "vscode.executeDocumentRenameProvider",
     ok.uri,
-    new vscode.Position(4, 6),
+    new vscode.Position(9, 13),
     "length",
   );
   const changes = renamed.entries().flatMap(([, edits]) => edits);
@@ -88,7 +88,7 @@ async function run() {
   const completions = await vscode.commands.executeCommand(
     "vscode.executeCompletionItemProvider",
     ok.uri,
-    new vscode.Position(4, 9),
+    new vscode.Position(9, 13),
   );
   const labels = completions.items.map((i) => (typeof i.label === "string" ? i.label : i.label.label));
   assert.ok(labels.includes("norm") || labels.includes("origin"), `completions: ${labels.slice(0, 10)}`);
@@ -108,7 +108,7 @@ async function run() {
   const edit = new vscode.WorkspaceEdit();
   edit.set(messy.uri, edits);
   assert.ok(await vscode.workspace.applyEdit(edit), "the edits apply");
-  assert.strictEqual(messy.getText(), "fn main() -> i32 { let x = 1; x + 2 }\n");
+  assert.strictEqual(messy.getText(), "def main() -> int32:\n    x = 1\n    return x + 2\n");
 
 }
 

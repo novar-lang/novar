@@ -130,8 +130,26 @@ fn manifests_round_trip_and_validate() {
 #[test]
 fn publishing_writes_an_index_and_a_checksummed_archive() {
     let reg = Dir::new("reg");
-    publish(&reg, "mathx", "1.0.0", &[], "pub fn one() -> i32 { 1 }\n");
-    publish(&reg, "mathx", "1.1.0", &[], "pub fn one() -> i32 { 1 }\n");
+    publish(
+        &reg,
+        "mathx",
+        "1.0.0",
+        &[],
+        r#"
+def one() -> int32:
+    return 1
+"#,
+    );
+    publish(
+        &reg,
+        "mathx",
+        "1.1.0",
+        &[],
+        r#"
+def one() -> int32:
+    return 1
+"#,
+    );
     let r = DirRegistry::new(&reg.0);
     let v = r.versions("mathx").unwrap();
     assert_eq!(
@@ -147,13 +165,28 @@ fn publishing_writes_an_index_and_a_checksummed_archive() {
 #[test]
 fn publishing_rules() {
     let reg = Dir::new("rules");
-    publish(&reg, "a", "1.0.0", &[], "pub fn f() {}\n");
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[],
+        r#"
+def f():
+    pass
+"#,
+    );
     let work = Dir::new("again");
     work.write(
         "telvax.toml",
         "[package]\nname = \"a\"\nversion = \"1.0.0\"\n",
     )
-    .write("src/lib.tvx", "pub fn f() {}\n");
+    .write(
+        "src/lib.tvx",
+        r#"
+def f():
+    pass
+"#,
+    );
     assert!(
         registry::publish(&reg.0, &work.0)
             .unwrap_err()
@@ -161,7 +194,10 @@ fn publishing_rules() {
     );
 
     let local = Dir::new("pathdep");
-    local.write("telvax.toml", "[package]\nname = \"b\"\nversion = \"1.0.0\"\n[dependencies]\na = { path = \"../a\" }\n").write("src/lib.tvx", "pub fn g() {}\n");
+    local.write("telvax.toml", "[package]\nname = \"b\"\nversion = \"1.0.0\"\n[dependencies]\na = { path = \"../a\" }\n").write("src/lib.tvx", r#"
+def g():
+    pass
+"#);
     assert!(
         registry::publish(&reg.0, &local.0)
             .unwrap_err()
@@ -183,7 +219,16 @@ fn publishing_rules() {
 #[test]
 fn tampered_archives_are_rejected() {
     let reg = Dir::new("tamper");
-    publish(&reg, "a", "1.0.0", &[], "pub fn f() {}\n");
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[],
+        r#"
+def f():
+    pass
+"#,
+    );
     let r = DirRegistry::new(&reg.0);
     let entry = r.versions("a").unwrap().remove(0);
     let mut archive = r.download("a", &entry.vers).unwrap();
@@ -203,11 +248,56 @@ fn tampered_archives_are_rejected() {
 #[test]
 fn the_newest_compatible_version_wins_transitively() {
     let reg = Dir::new("newest");
-    publish(&reg, "c", "1.0.0", &[], "pub fn c() {}\n");
-    publish(&reg, "c", "1.4.0", &[], "pub fn c() {}\n");
-    publish(&reg, "c", "2.0.0", &[], "pub fn c() {}\n");
-    publish(&reg, "a", "1.0.0", &[("c", "^1")], "pub fn a() {}\n");
-    publish(&reg, "a", "1.2.0", &[("c", "^1")], "pub fn a() {}\n");
+    publish(
+        &reg,
+        "c",
+        "1.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "c",
+        "1.4.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "c",
+        "2.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[("c", "^1")],
+        r#"
+def a():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "a",
+        "1.2.0",
+        &[("c", "^1")],
+        r#"
+def a():
+    pass
+"#,
+    );
     assert_eq!(
         resolve(&[("a", "^1")], &reg).unwrap(),
         ["a 1.2.0", "c 1.4.0"]
@@ -221,12 +311,57 @@ fn the_newest_compatible_version_wins_transitively() {
 #[test]
 fn the_search_backs_up_when_a_newer_choice_conflicts() {
     let reg = Dir::new("backtrack");
-    publish(&reg, "c", "1.0.0", &[], "pub fn c() {}\n");
-    publish(&reg, "c", "2.0.0", &[], "pub fn c() {}\n");
+    publish(
+        &reg,
+        "c",
+        "1.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "c",
+        "2.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
     // The newest `a` wants c 2, but `b` needs c 1, so `a` must fall back to its older release.
-    publish(&reg, "a", "1.0.0", &[("c", "^1")], "pub fn a() {}\n");
-    publish(&reg, "a", "1.1.0", &[("c", "^2")], "pub fn a() {}\n");
-    publish(&reg, "b", "1.0.0", &[("c", "^1")], "pub fn b() {}\n");
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[("c", "^1")],
+        r#"
+def a():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "a",
+        "1.1.0",
+        &[("c", "^2")],
+        r#"
+def a():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "b",
+        "1.0.0",
+        &[("c", "^1")],
+        r#"
+def b():
+    pass
+"#,
+    );
     let got = resolve(&[("a", "^1"), ("b", "^1")], &reg).unwrap();
     assert_eq!(got, ["a 1.0.0", "b 1.0.0", "c 1.0.0"]);
 }
@@ -234,8 +369,26 @@ fn the_search_backs_up_when_a_newer_choice_conflicts() {
 #[test]
 fn unsatisfiable_graphs_explain_themselves() {
     let reg = Dir::new("unsat");
-    publish(&reg, "c", "1.0.0", &[], "pub fn c() {}\n");
-    publish(&reg, "a", "1.0.0", &[("c", "^2")], "pub fn a() {}\n");
+    publish(
+        &reg,
+        "c",
+        "1.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[("c", "^2")],
+        r#"
+def a():
+    pass
+"#,
+    );
     let e = resolve(&[("a", "^1")], &reg).unwrap_err();
     assert!(
         e.contains("no version of `c` matches ^2")
@@ -255,8 +408,26 @@ fn unsatisfiable_graphs_explain_themselves() {
 #[test]
 fn yanked_versions_are_skipped_by_new_resolutions() {
     let reg = Dir::new("yank");
-    publish(&reg, "a", "1.0.0", &[], "pub fn a() {}\n");
-    publish(&reg, "a", "1.1.0", &[], "pub fn a() {}\n");
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[],
+        r#"
+def a():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "a",
+        "1.1.0",
+        &[],
+        r#"
+def a():
+    pass
+"#,
+    );
     registry::yank(&reg.0, "a", &Version::new(1, 1, 0), true).unwrap();
     assert_eq!(resolve(&[("a", "^1")], &reg).unwrap(), ["a 1.0.0"]);
     registry::yank(&reg.0, "a", &Version::new(1, 1, 0), false).unwrap();
@@ -266,14 +437,38 @@ fn yanked_versions_are_skipped_by_new_resolutions() {
 #[test]
 fn path_dependencies_are_fixed_and_can_have_registry_dependencies() {
     let reg = Dir::new("pathreg");
-    publish(&reg, "c", "1.0.0", &[], "pub fn c() {}\n");
-    publish(&reg, "c", "1.5.0", &[], "pub fn c() {}\n");
+    publish(
+        &reg,
+        "c",
+        "1.0.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
+    publish(
+        &reg,
+        "c",
+        "1.5.0",
+        &[],
+        r#"
+def c():
+    pass
+"#,
+    );
     let ws = Dir::new("ws");
     ws.write(
         "shared/telvax.toml",
         "[package]\nname = \"shared\"\nversion = \"0.3.0\"\n[dependencies]\nc = \"^1\"\n",
     )
-    .write("shared/src/lib.tvx", "pub fn s() {}\n");
+    .write(
+        "shared/src/lib.tvx",
+        r#"
+def s():
+    pass
+"#,
+    );
     let m = Manifest::parse("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nshared = { path = \"shared\" }\n").unwrap();
     let r = DirRegistry::new(&reg.0);
     let res = telvax_pkg::resolver::resolve(&ws.0, &m, Some(&r)).unwrap();
@@ -310,14 +505,22 @@ fn locking_installing_and_compiling_against_dependencies() {
         "mathx",
         "1.2.0",
         &[],
-        "pub fn double(x: i32) -> i32 { x * 2 }\n",
+        r#"
+def double(x: int32) -> int32:
+    return x * 2
+"#,
     );
     publish(
         &reg,
         "calc",
         "0.5.0",
         &[("mathx", "^1")],
-        "import mathx::double;\npub fn quad(x: i32) -> i32 { double(double(x)) }\n",
+        r#"
+import mathx.double
+
+def quad(x: int32) -> int32:
+    return double(double(x))
+"#,
     );
 
     let proj = Dir::new("proj");
@@ -327,7 +530,12 @@ fn locking_installing_and_compiling_against_dependencies() {
     )
     .write(
         "src/main.tvx",
-        "import calc::quad;\nfn main() -> i32 { quad(5) }\n",
+        r#"
+import calc.quad
+
+def main() -> int32:
+    return quad(5)
+"#,
     );
     let project = Project::open(&proj.0).unwrap();
     assert!(!project.lock_is_fresh());
@@ -398,13 +606,28 @@ fn a_stale_lock_is_detected_and_checksums_are_enforced() {
     let home = Dir::new("home2");
     unsafe { std::env::set_var("TVPM_HOME", &home.0) };
     let reg = Dir::new("stale");
-    publish(&reg, "a", "1.0.0", &[], "pub fn a() {}\n");
+    publish(
+        &reg,
+        "a",
+        "1.0.0",
+        &[],
+        r#"
+def a():
+    pass
+"#,
+    );
     let proj = Dir::new("proj2");
     proj.write(
         "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\na = \"^1\"\n",
     )
-    .write("src/main.tvx", "fn main() {}\n");
+    .write(
+        "src/main.tvx",
+        r#"
+def main():
+    pass
+"#,
+    );
     let project = Project::open(&proj.0).unwrap();
     let r = DirRegistry::new(&reg.0);
     project.lock(Some(&r)).unwrap();
@@ -443,8 +666,20 @@ fn discovery_walks_up_to_the_manifest() {
         "telvax.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
     )
-    .write("src/deep/x.tvx", "fn f() {}\n")
-    .write("src/main.tvx", "fn main() {}\n");
+    .write(
+        "src/deep/x.tvx",
+        r#"
+def f():
+    pass
+"#,
+    )
+    .write(
+        "src/main.tvx",
+        r#"
+def main():
+    pass
+"#,
+    );
     let found = Project::discover(&proj.p("src/deep/x.tvx"))
         .unwrap()
         .unwrap();
@@ -496,7 +731,16 @@ fn registries_work_over_http() {
     let home = Dir::new("home3");
     unsafe { std::env::set_var("TVPM_HOME", &home.0) };
     let reg = Dir::new("http");
-    publish(&reg, "webdep", "2.1.0", &[], "pub fn w() -> i32 { 7 }\n");
+    publish(
+        &reg,
+        "webdep",
+        "2.1.0",
+        &[],
+        r#"
+def w() -> int32:
+    return 7
+"#,
+    );
     let url = serve_static(reg.0.clone());
     let remote = registry::open(&url);
     assert_eq!(remote.versions("webdep").unwrap().len(), 1);
@@ -512,7 +756,12 @@ fn registries_work_over_http() {
     )
     .write(
         "src/main.tvx",
-        "import webdep::w;\nfn main() -> i32 { w() }\n",
+        r#"
+import webdep.w
+
+def main() -> int32:
+    return w()
+"#,
     );
     let project = Project::open(&proj.0).unwrap();
     project.lock(Some(remote.as_ref())).unwrap();

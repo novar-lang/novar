@@ -93,7 +93,7 @@ pub fn py_to_value(interp: &Interp, obj: &Bound<'_, PyAny>, ty: &Ty) -> PyResult
         Ty::Struct(name) => {
             let fields = interp
                 .struct_fields(name)
-                .ok_or_else(|| TelvaxError::new_err(format!("unknown struct `{name}`")))?;
+                .ok_or_else(|| TelvaxError::new_err(format!("unknown class `{name}`")))?;
             let mut out = Vec::with_capacity(fields.len());
             for (fname, fty) in fields {
                 let item = match obj.cast::<PyDict>() {
