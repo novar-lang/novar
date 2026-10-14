@@ -8,6 +8,15 @@ cargo build --release -p novar_cli -p novar_bench
 ./target/release/ingest --rows 1000000
 ```
 
+## In CI
+
+The `benchmark` job runs both programs on every pull request and fails on a regression:
+`rag_latency --check` (p99 under 15 ms for one connection, under 45 ms for 8 concurrent ones, which
+also queue behind each other on a 2-core runner, and RSS under 30 MB) and `benchmarks/speed.sh`
+(the interpreter must run `fib(27)` in under 2 s and a 3,000,000-iteration loop in under 6 s;
+a laptop does them in about 0.3 s and 0.65 s, a CI runner in 0.2 s and 1.5 s). Coverage has its own
+job and a floor in `scripts/coverage-floor.txt`.
+
 ## RAG serving overhead and footprint
 
 `rag_latency` bundles `examples/rag-service.nv` with `novar build --serve`, starts it, and times
