@@ -65,6 +65,25 @@ async function run() {
   const target = defs[0].targetRange ?? defs[0].range;
   assert.strictEqual(target.start.line, 1);
 
+  // Find all references: `origin` is declared on line 4 and used on line 5.
+  const refs = await vscode.commands.executeCommand(
+    "vscode.executeReferenceProvider",
+    ok.uri,
+    new vscode.Position(4, 10),
+  );
+  assert.deepStrictEqual(refs.map((r) => r.range.start.line).sort(), [3, 4]);
+
+  // Rename the function `norm`: its definition and its call change together.
+  const renamed = await vscode.commands.executeCommand(
+    "vscode.executeDocumentRenameProvider",
+    ok.uri,
+    new vscode.Position(4, 6),
+    "length",
+  );
+  const changes = renamed.entries().flatMap(([, edits]) => edits);
+  assert.strictEqual(changes.length, 2, `rename edits: ${JSON.stringify(changes)}`);
+  assert.ok(changes.every((e) => e.newText === "length"));
+
   // Completion offers the program's own names.
   const completions = await vscode.commands.executeCommand(
     "vscode.executeCompletionItemProvider",

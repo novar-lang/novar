@@ -54,6 +54,13 @@ pub struct Snapshot {
     pub stale: bool,
 }
 
+/// A name and every span where it appears in the document (see [`Snapshot::occurrences`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Occurrences {
+    pub name: String,
+    pub spans: Vec<Span>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
     Function,
@@ -305,6 +312,110 @@ impl Snapshot {
                 .map(|g| g.span.clone()),
             Target::Other => None,
         }
+    }
+
+    /// The name under `offset` and every place it appears in this document (its definition
+    /// included), for a local variable or a function. `Err` says why a symbol cannot be handled.
+    pub fn occurrences(&self, offset: usize) -> Result<Occurrences, String> {
+        if self.stale {
+            return Err("the document has errors that prevent analysing it".into());
+        }
+        let prog = self.program().ok_or("the document could not be analysed")?;
+        let target = self
+            .locals
+            .iter()
+            .find(|(_, l)| l.span.start <= offset && offset <= l.span.end)
+            .map(|(id, _)| Target::Local(*id))
+            .or_else(|| {
+                prog.fns
+                    .iter()
+                    .find(|f| f.name_span.start <= offset && offset <= f.name_span.end)
+                    .map(|f| Target::Fn(f.name.clone()))
+            })
+            .or_else(|| {
+                prog.structs
+                    .iter()
+                    .find(|s| s.name_span.start <= offset && offset <= s.name_span.end)
+                    .map(|s| Target::Struct(s.name.clone()))
+            })
+            .or_else(|| self.node_at(offset).map(|n| n.target.clone()))
+            .ok_or("there is no symbol here")?;
+        let (name, decl) = match &target {
+            Target::Local(id) => {
+                let l = self.locals.get(id).ok_or("unknown variable")?;
+                (l.name.clone(), l.span.clone())
+            }
+            Target::Fn(name) => {
+                let f = prog
+                    .fns
+                    .iter()
+                    .find(|f| &f.name == name)
+                    .ok_or("unknown function")?;
+                (f.name.clone(), f.name_span.clone())
+            }
+            Target::Global(_) | Target::Struct(_) => {
+                return Err(
+                    "only variables and functions can be renamed or searched for now".into(),
+                );
+            }
+            Target::Other => return Err("there is no symbol here".into()),
+        };
+        let in_document =
+            |s: &Span| s.end <= self.text.len() && self.text.get(s.clone()) == Some(name.as_str());
+        if !in_document(&decl) {
+            return Err(format!("`{name}` is defined in another file"));
+        }
+        let same = |t: &Target| match (t, &target) {
+            (Target::Local(a), Target::Local(b)) => a == b,
+            (Target::Fn(a), Target::Fn(b)) => a == b,
+            _ => false,
+        };
+        let mut spans: Vec<Span> = std::iter::once(decl)
+            .chain(
+                self.nodes
+                    .iter()
+                    .filter(|n| same(&n.target))
+                    .map(|n| n.span.clone()),
+            )
+            .filter(in_document)
+            .collect();
+        spans.sort_by_key(|s| s.start);
+        spans.dedup();
+        Ok(Occurrences { name, spans })
+    }
+
+    /// The edits that rename the symbol under `offset` to `new_name`. The result is checked: the
+    /// renamed program must analyse with no more errors than before, which catches a new name
+    /// that collides with another one in scope.
+    pub fn rename(&self, offset: usize, new_name: &str) -> Result<Vec<(Span, String)>, String> {
+        let valid = new_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && new_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !valid || KEYWORDS.contains(&new_name) || PRIMS.contains(&new_name) {
+            return Err(format!("`{new_name}` is not a valid name"));
+        }
+        let found = self.occurrences(offset)?;
+        if found.name == "main" {
+            return Err("`main` is the entry point and cannot be renamed".into());
+        }
+        let mut renamed = self.text.clone();
+        for span in found.spans.iter().rev() {
+            renamed.replace_range(span.clone(), new_name);
+        }
+        let errors = |s: &Snapshot| s.diagnostics.iter().filter(|d| d.is_error()).count();
+        let after = Snapshot::analyze(renamed);
+        if errors(&after) > errors(self) {
+            return Err(format!("`{new_name}` collides with another name in scope"));
+        }
+        Ok(found
+            .spans
+            .into_iter()
+            .map(|s| (s, new_name.to_string()))
+            .collect())
     }
 
     pub fn symbols(&self) -> Vec<Symbol> {

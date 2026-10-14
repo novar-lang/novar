@@ -10,7 +10,7 @@ use lsp_types::notification::{
 };
 use lsp_types::request::{
     Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest, InlayHintRequest,
-    Request as _,
+    PrepareRenameRequest, References, Rename, Request as _,
 };
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
@@ -34,6 +34,11 @@ pub fn capabilities() -> ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         inlay_hint_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(lsp_types::RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec![".".into(), ":".into(), "@".into()]),
             ..CompletionOptions::default()
@@ -190,6 +195,18 @@ fn reply<T: serde::Serialize>(id: RequestId, result: T) -> Response {
     }
 }
 
+/// An error response the editor shows to the user (for example "cannot rename `main`").
+fn failure(id: RequestId, message: String) -> Response {
+    Response {
+        id,
+        response_result: Err(lsp_server::ResponseError {
+            code: lsp_server::ErrorCode::InvalidRequest as i32,
+            message,
+            data: None,
+        }),
+    }
+}
+
 fn handle_request(state: &Documents, req: Request) -> Response {
     let id = req.id.clone();
     let unknown = |id: RequestId| Response {
@@ -298,6 +315,83 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 })
                 .collect();
             reply(id, DocumentSymbolResponse::Nested(symbols))
+        }
+        References::METHOD => {
+            let p = params!(lsp_types::ReferenceParams);
+            let pos = p.text_document_position;
+            let Some(snap) = state.docs.get(&pos.text_document.uri) else {
+                return unknown(id);
+            };
+            let found = snap.occurrences(snap.index.offset(pos.position));
+            let locations: Vec<Location> = found
+                .map(|o| {
+                    let declaration = o.spans.first().cloned();
+                    o.spans
+                        .into_iter()
+                        .filter(|s| {
+                            p.context.include_declaration || Some(s) != declaration.as_ref()
+                        })
+                        .map(|s| Location {
+                            uri: pos.text_document.uri.clone(),
+                            range: snap.index.range(&s),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            reply(id, locations)
+        }
+        PrepareRenameRequest::METHOD => {
+            let p = params!(lsp_types::TextDocumentPositionParams);
+            let Some(snap) = state.docs.get(&p.text_document.uri) else {
+                return unknown(id);
+            };
+            let offset = snap.index.offset(p.position);
+            match snap.occurrences(offset) {
+                Ok(o) => {
+                    let at = o
+                        .spans
+                        .iter()
+                        .find(|s| s.start <= offset && offset <= s.end)
+                        .or(o.spans.first())
+                        .cloned()
+                        .unwrap_or(0..0);
+                    reply(
+                        id,
+                        lsp_types::PrepareRenameResponse::RangeWithPlaceholder {
+                            range: snap.index.range(&at),
+                            placeholder: o.name,
+                        },
+                    )
+                }
+                Err(message) => failure(id, message),
+            }
+        }
+        Rename::METHOD => {
+            let p = params!(lsp_types::RenameParams);
+            let pos = p.text_document_position;
+            let Some(snap) = state.docs.get(&pos.text_document.uri) else {
+                return unknown(id);
+            };
+            match snap.rename(snap.index.offset(pos.position), &p.new_name) {
+                Ok(edits) => {
+                    let edits: Vec<TextEdit> = edits
+                        .into_iter()
+                        .map(|(span, new_text)| TextEdit {
+                            range: snap.index.range(&span),
+                            new_text,
+                        })
+                        .collect();
+                    let changes = std::collections::HashMap::from([(pos.text_document.uri, edits)]);
+                    reply(
+                        id,
+                        lsp_types::WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        },
+                    )
+                }
+                Err(message) => failure(id, message),
+            }
         }
         Formatting::METHOD => {
             let p = params!(lsp_types::DocumentFormattingParams);

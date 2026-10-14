@@ -116,6 +116,8 @@ fn advertises_its_capabilities() {
     assert_eq!(caps["definitionProvider"], true);
     assert_eq!(caps["inlayHintProvider"], true);
     assert_eq!(caps["documentFormattingProvider"], true);
+    assert_eq!(caps["referencesProvider"], true);
+    assert_eq!(caps["renameProvider"]["prepareProvider"], true);
     assert_eq!(caps["textDocumentSync"], 1);
     assert!(
         caps["completionProvider"]["triggerCharacters"]
@@ -242,7 +244,7 @@ fn completes_members_while_typing() {
 fn unknown_requests_get_an_error_not_a_hang() {
     let mut c = Client::start();
     initialize(&mut c);
-    let r = c.request("textDocument/rename", json!({}));
+    let r = c.request("textDocument/codeLens", json!({}));
     assert_eq!(r["error"]["code"], -32601);
 }
 
@@ -260,6 +262,93 @@ fn formats_a_messy_document() {
     assert_eq!(
         edits[0]["newText"],
         "fn main() -> i32 { let x = 1; x + 2 }\n"
+    );
+    c.request("shutdown", json!(null));
+}
+
+fn rename_params(line: u32, character: u32, new_name: &str) -> Value {
+    json!({
+        "textDocument": {"uri": URI},
+        "position": {"line": line, "character": character},
+        "newName": new_name,
+    })
+}
+
+#[test]
+fn finds_references_and_renames_variables_and_functions() {
+    let mut c = Client::start();
+    initialize(&mut c);
+    open(&mut c, PROGRAM);
+    assert!(c.diagnostics(URI).is_empty());
+
+    // `origin` is declared on line 3 and used on line 4.
+    let refs = c.request(
+        "textDocument/references",
+        json!({"textDocument": {"uri": URI}, "position": {"line": 4, "character": 10},
+               "context": {"includeDeclaration": true}}),
+    );
+    let lines: Vec<_> = refs["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lines, [3, 4]);
+    let no_decl = c.request(
+        "textDocument/references",
+        json!({"textDocument": {"uri": URI}, "position": {"line": 4, "character": 10},
+               "context": {"includeDeclaration": false}}),
+    );
+    assert_eq!(no_decl["result"].as_array().unwrap().len(), 1);
+
+    // The editor asks first which text will be renamed.
+    let prep = c.request("textDocument/prepareRename", at(4, 6));
+    assert_eq!(prep["result"]["placeholder"], "norm");
+
+    // Renaming the function edits its definition and its call.
+    let r = c.request("textDocument/rename", rename_params(4, 6, "length"));
+    let edits = r["result"]["changes"][URI].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|e| e["newText"] == "length"));
+    let starts: Vec<_> = edits
+        .iter()
+        .map(|e| e["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(starts, [1, 4]);
+
+    // Things that must be refused, with a message the editor can show.
+    let keyword = c.request("textDocument/rename", rename_params(4, 6, "while"));
+    assert!(
+        keyword["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not a valid name"),
+        "{keyword}"
+    );
+    let main = c.request("textDocument/rename", rename_params(2, 4, "start"));
+    assert!(
+        main["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("entry point"),
+        "{main}"
+    );
+    // `p` is already a parameter of `norm`: renaming `origin` to it would change what the code means.
+    let clash = c.request("textDocument/rename", rename_params(3, 8, "norm"));
+    assert!(
+        clash["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("collides"),
+        "{clash}"
+    );
+    let on_struct = c.request("textDocument/prepareRename", at(0, 8));
+    assert!(
+        on_struct["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("only variables and functions"),
+        "{on_struct}"
     );
     c.request("shutdown", json!(null));
 }
