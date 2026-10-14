@@ -1,9 +1,9 @@
 name: Release
 
-# Every push to main (that is, every merged pull request) is released: the commit is tagged with the
-# next patch version after the latest tag and published with binaries. To choose a version yourself,
-# raise `version` in the root Cargo.toml above the latest tag (for 0.1.0, say); the next merge then
-# releases exactly that. Put `[skip release]` in the pull request title to merge without releasing.
+# A merge to main is released unless it is documentation, CI, tests, style or chore. The pull request
+# title (a Conventional Commit) picks the version, see scripts/next-version.sh: `feat!:` is major,
+# `feat:` minor, `fix:` and the rest patch. To choose a version yourself, raise `version` in the root
+# Cargo.toml above the latest tag. Put `[skip release]` in the title to merge without releasing.
 # Pushing a `v*` tag by hand (or running the workflow) releases that tag.
 on:
   push:
@@ -43,23 +43,15 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          case "$HEAD_MESSAGE" in
-            *"[skip release]"*)
-              echo "tag=none" >> "$GITHUB_OUTPUT"
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              exit 0 ;;
-          esac
           declared="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -n 1)"
           [ -n "$declared" ] || { echo "no workspace version found" >&2; exit 1; }
           latest="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)"
-          latest="${latest#v}"
-          if [ -z "$latest" ]; then
-            version="$declared"
-          elif [ "$(printf '%s\n%s\n' "$latest" "$declared" | sort -V | tail -n 1)" = "$declared" ] && [ "$declared" != "$latest" ]; then
-            version="$declared"
-          else
-            patch="${latest##*.}"
-            version="${latest%.*}.$((patch + 1))"
+          version="$(scripts/next-version.sh "${latest#v}" "$declared" "$HEAD_MESSAGE")"
+          if [ "$version" = none ]; then
+            echo "this change is not released (documentation, CI, tests, style or chore, or [skip release])"
+            echo "tag=none" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           tag="v$version"
           git config user.name "github-actions[bot]"

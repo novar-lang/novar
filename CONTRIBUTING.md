@@ -77,12 +77,20 @@ See the table in the README. A quick map for the language itself: `compiler/lexe
 
 ## Releases
 
-Every pull request merged into `main` is released: CI tags the merge commit with the next patch
-version after the latest tag and publishes a pre-release with binaries, so no file has to be edited.
-The release notes are the `CHANGELOG.md` section for that version, if you wrote one, followed by
-the list of merged pull requests. To pick a version yourself, raise `version` in the root
-`Cargo.toml` above the latest tag. Put `[skip release]` in the pull request title to merge without
-releasing.
+A pull request merged into `main` is released automatically, and its **title** (a
+[Conventional Commit](https://www.conventionalcommits.org)) picks the version, so no file has to be
+edited:
+
+| Title | Version | Example |
+|---|---|---|
+| `feat!: ...` or a `BREAKING CHANGE:` line in the body | major (`1.2.3` to `2.0.0`; while the major is 0, minor) | `feat!: rename the pipe operator` |
+| `feat: ...` | minor (`0.1.2` to `0.2.0`) | `feat: add traits` |
+| `fix:`, `perf:`, `refactor:`, `build:`, `revert:` or no prefix | patch (`0.1.2` to `0.1.3`) | `fix: empty table in sql` |
+| `docs:`, `ci:`, `test:`, `style:`, `chore:` | no release | `docs: add a use case` |
+
+Add `[skip release]` to any title to merge without releasing. To pick a version yourself, raise
+`version` in the root `Cargo.toml` above the latest tag. The release notes are the `CHANGELOG.md`
+section for that version, if you wrote one, followed by the list of merged pull requests.
 
 ## Security
 
