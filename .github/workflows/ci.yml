@@ -57,7 +57,6 @@ jobs:
   # runners do not have, so this job only builds and lints it.
   gpu:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -67,10 +66,9 @@ jobs:
       - run: cargo clippy -p novar_runtime -p novar_cli --features novar_cli/gpu --all-targets
       - run: cargo test -p novar_runtime --features gpu --no-run
 
-  # Windows runs the same tests as Linux. Not required yet: it has not been exercised much.
+  # Windows runs the same tests as Linux.
   windows:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly

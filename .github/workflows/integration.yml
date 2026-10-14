@@ -22,7 +22,6 @@ env:
 jobs:
   python:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -39,7 +38,6 @@ jobs:
 
   playground:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
@@ -71,7 +69,6 @@ jobs:
 
   pgvector:
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -94,7 +91,6 @@ jobs:
   # compiles Novar from the default branch, so this checks the template, not the pull request.
   docker:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
