@@ -653,7 +653,9 @@ fn function_types_and_typed_closure_parameters() {
         panic!("not a closure")
     };
     assert!(types[0].is_some() && types[1].is_none());
+}
 
+#[test]
 fn imports_can_be_renamed() {
     let p = ok_program("from a.b import C as D, e\nimport x.Y as Z\n");
     let Item::Import(i) = &p.items[0] else {
