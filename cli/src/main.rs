@@ -24,7 +24,22 @@ usage:
   telvax build <file.tvx> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
                                                     (all but stablehlo need --features llvm)";
 
+/// Stack for the thread that does the work. Checking and running recurse once per level of a
+/// program's nesting (a sum of a few hundred terms, calls inside calls), and the 8 MB of a main
+/// thread is not enough for the deepest programs. Only the pages that are used are ever mapped.
+const STACK_BYTES: usize = 512 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .stack_size(STACK_BYTES)
+        .spawn(real_main)
+    {
+        Ok(worker) => worker.join().unwrap_or(ExitCode::FAILURE),
+        Err(_) => real_main(),
+    }
+}
+
+fn real_main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match bundle::embedded() {
         Some(bundle) => run_bundled(&bundle, &args),

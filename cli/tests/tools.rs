@@ -88,3 +88,56 @@ fn test_runs_the_test_functions() {
     assert!(ok && out.contains("1 passed, 0 failed"), "{out}");
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }
+
+#[test]
+fn deeply_nested_programs_are_checked_not_crashed() {
+    // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
+    // recurses once per level and used to overflow the 8 MB stack of a main thread.
+    let calls = format!(
+        "fn f(x: Int) -> Int:\n    x\n\nfn main() -> i32:\n    let y = {}1{}\n    0\n",
+        "f(".repeat(190),
+        ")".repeat(190)
+    );
+    let sum = format!(
+        "fn main() -> i32:\n    let y = {}1\n    0\n",
+        "1 + ".repeat(5_000)
+    );
+    for (name, src) in [("calls", calls), ("sum", sum)] {
+        let file = scratch(&format!("deep-{name}"), &src);
+        let (ok, _, err) = run(&["check", file.to_str().unwrap()]);
+        assert!(ok, "{name}: {err}");
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+}
+
+#[test]
+fn nesting_past_the_limit_is_an_error_not_a_crash() {
+    let blocks = {
+        let mut s = String::from("fn f():\n");
+        for level in 0..5000 {
+            s.push_str(&format!("{}if True:\n", "    ".repeat(level + 1)));
+        }
+        s.push_str(&format!("{}pass\n", "    ".repeat(5001)));
+        s
+    };
+    let brackets = format!("let x = {}1{}\n", "(".repeat(5000), ")".repeat(5000));
+    for (name, src, needle) in [
+        ("blocks", blocks, "blocks are nested too deeply"),
+        ("brackets", brackets, "brackets are nested too deeply"),
+    ] {
+        let file = scratch(&format!("limit-{name}"), &src);
+        let out = Command::new(TELVAX)
+            .args(["check", file.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "{name}: it must fail, not crash"
+        );
+        let shown = String::from_utf8_lossy(&out.stderr).into_owned()
+            + &String::from_utf8_lossy(&out.stdout);
+        assert!(shown.contains(needle), "{name}: {shown}");
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+}

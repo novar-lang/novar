@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Deeply nested code no longer hangs or crashes the compiler:** parentheses inside parentheses were
+  read twice per level, so twenty levels took seconds and forty never finished; they now take linear
+  time. Blocks nested past 64 levels and brackets past 200 are an error that says so, and the parser and
+  the checker run on a stack of their own, so a long sum or calls inside calls are checked instead of
+  overflowing the stack and ending the process.
 * **Type arguments in a call:** `empty[Text]()`, `pair[Int, Text](1, "a")`. It makes a generic function
   that cannot infer its types from the arguments usable, and the "cannot infer" error now says so.
 * **Built-in limits for type parameters:** `T: Num`, `T: Ord` and `T: Eq` (and `T: (Num, Ord)`) without
