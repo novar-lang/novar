@@ -5,6 +5,10 @@
 * **Built-in limits for type parameters:** `T: Num`, `T: Ord` and `T: Eq` (and `T: (Num, Ord)`) without
   declaring a trait. A call with a type that does not meet a limit is reported once, at the call, instead
   of again inside the generic function's body.
+* **Function types:** `(Int, Int) -> Int` is a type, so a function can be a parameter, a field, a list
+  element or a return value (`fn adder(n: Int) -> (Int) -> Int: x => x + n`). `() -> ()` stands for no
+  value. A field that holds a function can be called (`handler.run(5)`), and a closure parameter can
+  carry its type: `(x: Int) => x + 1`.
 * **Imports can be renamed:** `from util import clamp as limit`, `import util.clamp as limit`. Importing
   a module as a whole (`import util`) is an error that says to write `from util import name`, and the
   messages for the modules of your own project no longer say `crate`.

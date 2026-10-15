@@ -947,6 +947,12 @@ impl Interp {
             ExprKind::Field { base, name } => {
                 let receiver = self.eval(base, ctx)?;
                 let args = eval_args(self, ctx)?;
+                // A field that holds a function: `handler.run(5)`.
+                if let Value::Struct(s) = &receiver
+                    && let Some((_, f)) = s.fields.iter().find(|(n, _)| n == name)
+                {
+                    return self.apply_at(f, args, ctx.depth);
+                }
                 Ok(std_impl::call_method(&receiver, name, args)?)
             }
             _ => {

@@ -1896,3 +1896,38 @@ fn option_and_result_methods() {
         .to_string();
     assert!(e.contains("port: bad: x"), "{e}");
 }
+
+#[test]
+fn functions_are_values() {
+    let src = r#"
+type Handler:
+    run: (Int) -> Int
+
+fn twice(x: Int) -> Int:
+    x * 2
+
+fn apply(f: (Int) -> Int, x: Int) -> Int:
+    f(x)
+
+fn adder(n: Int) -> (Int) -> Int:
+    x => x + n
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int:
+    x => g(f(x))
+
+fn pick(flag: Bool) -> (Int) -> Int:
+    if flag:
+        twice
+    else:
+        adder(100)
+
+fn field() -> Int:
+    let h = Handler(run: x => x + 7)
+    h.run(1)
+
+fn sum() -> Int:
+    apply(twice, 3) + adder(5)(1) + compose(twice, adder(1))(4) + pick(True)(2) + pick(False)(2) + field()
+"#;
+    // 6 + 6 + 9 + 4 + 102 + 8
+    assert_eq!(int(run(src, "sum", vec![])), 135);
+}
