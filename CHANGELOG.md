@@ -5,6 +5,8 @@
 * **Inferred return type:** a top-level function without `->` returns the type of its last expression
   (`fn double(x: Int): x * 2` returns an `Int`). `main`, tests, endpoints, generic functions and
   methods still need the `->`.
+* **Generic calls and literals:** `let a = id(3)` no longer fixes `a` to `i32` at the call; a later use
+  such as `let n: Int = a` decides the type, and the default applies only if nothing does.
 
 ## 0.1.0
 
