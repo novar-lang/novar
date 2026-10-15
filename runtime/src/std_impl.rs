@@ -190,6 +190,93 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
                 want_vec(&args[0])?.iter().take(n).cloned().collect(),
             ))
         }
+        "std::map::from_entries" => {
+            let mut entries = Vec::new();
+            for item in want_vec(&args[0])? {
+                let Value::Tuple(pair) = &item else {
+                    return err("a Map is built from (key, value) pairs");
+                };
+                let [k, v] = pair.as_slice() else {
+                    return err("a Map is built from (key, value) pairs");
+                };
+                entries.push((MapKey::from_value(k).map_err(RuntimeError::new)?, v.clone()));
+            }
+            Ok(Value::map(entries))
+        }
+        "std::iter::slice" => {
+            let items = want_vec(&args[0])?;
+            let (from, to) = slice_bounds(items.len(), &args[1], &args[2])?;
+            Ok(Value::vec(items[from..to].to_vec()))
+        }
+        "std::iter::concat" => {
+            let mut items = want_vec(&args[0])?;
+            items.extend(want_vec(&args[1])?);
+            Ok(Value::vec(items))
+        }
+        "std::iter::range" => {
+            let (start, end) = match args.as_slice() {
+                [end] => (0, want_i64(end)?),
+                [start, end] => (want_i64(start)?, want_i64(end)?),
+                _ => return err("`range` takes one or two integers"),
+            };
+            Ok(Value::vec((start..end).map(Value::Int).collect()))
+        }
+        "std::string::slice" => {
+            let chars: Vec<char> = want_str(&args[0])?.chars().collect();
+            let (from, to) = slice_bounds(chars.len(), &args[1], &args[2])?;
+            Ok(Value::str(chars[from..to].iter().collect::<String>()))
+        }
+        "std::string::repeat" => {
+            let n = want_i64(&args[1])?;
+            if n < 0 {
+                return err("a Text is repeated a number of times that is not negative");
+            }
+            Ok(Value::str(want_str(&args[0])?.repeat(n as usize)))
+        }
+        "std::text::to_text" => Ok(Value::str(args[0].to_string())),
+        "std::text::format" => Ok(Value::str(format_value(&args[0], &want_str(&args[1])?)?)),
+        "std::math::pow" => math_pow(&args[0], &args[1]),
+        "std::math::floor_div" => math_floor_div(&args[0], &args[1]),
+        "std::math::abs" => match &args[0] {
+            Value::Int(i) => i
+                .checked_abs()
+                .map(Value::Int)
+                .ok_or_else(|| RuntimeError::new("integer overflow")),
+            Value::Float(x) => Ok(Value::Float(x.abs())),
+            other => err(format!("`abs` needs a number, found {}", other.type_name())),
+        },
+        "std::math::min" | "std::math::max" => {
+            let want_max = path.ends_with("max");
+            let ordering = match (&args[0], &args[1]) {
+                (Value::Int(a), Value::Int(b)) => a.cmp(b),
+                (Value::Str(a), Value::Str(b)) => a.cmp(b),
+                (a, b) => want_f64(a)?
+                    .partial_cmp(&want_f64(b)?)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            };
+            let first = (ordering == std::cmp::Ordering::Less) != want_max;
+            let pick = if ordering == std::cmp::Ordering::Equal || first {
+                &args[0]
+            } else {
+                &args[1]
+            };
+            // Two numbers of different kinds compare as floats and give a float.
+            Ok(match (&args[0], &args[1], pick) {
+                (Value::Int(_), Value::Float(_), Value::Int(i)) => Value::Float(*i as f64),
+                (Value::Float(_), Value::Int(_), Value::Int(i)) => Value::Float(*i as f64),
+                _ => pick.clone(),
+            })
+        }
+        "std::math::sqrt" => Ok(Value::Float(want_f64(&args[0])?.sqrt())),
+        "std::math::floor" => Ok(Value::Float(want_f64(&args[0])?.floor())),
+        "std::math::ceil" => Ok(Value::Float(want_f64(&args[0])?.ceil())),
+        "std::math::round" => Ok(Value::Float(want_f64(&args[0])?.round())),
+        "std::math::to_float" => Ok(Value::Float(want_f64(&args[0])?)),
+        "std::math::to_int" => match &args[0] {
+            Value::Int(i) => Ok(Value::Int(*i)),
+            Value::Float(x) if x.is_finite() => Ok(Value::Int(*x as i64)),
+            other => err(format!("cannot turn {other} into an Int")),
+        },
         "std::map::new" => Ok(Value::map(Vec::new())),
         "std::iter::any" | "std::iter::all" | "std::iter::find" => {
             let items = want_vec(&args[0])?;
@@ -417,6 +504,180 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             "std function `{other}` is not implemented by the runtime"
         )),
     }
+}
+
+fn want_i64(v: &Value) -> Result<i64, RuntimeError> {
+    match v {
+        Value::Int(i) => Ok(*i),
+        other => err(format!("expected an Int, found {}", other.type_name())),
+    }
+}
+
+fn want_f64(v: &Value) -> Result<f64, RuntimeError> {
+    match v {
+        Value::Int(i) => Ok(*i as f64),
+        Value::Float(x) => Ok(*x),
+        other => err(format!("expected a number, found {}", other.type_name())),
+    }
+}
+
+/// The part of a sequence of `len` items that `xs[from:to]` selects. A negative bound counts from
+/// the end, and a bound past either end stops at it.
+pub(crate) fn slice_bounds(
+    len: usize,
+    from: &Value,
+    to: &Value,
+) -> Result<(usize, usize), RuntimeError> {
+    let at = |i: i64| -> usize {
+        if i < 0 {
+            (len as i64).saturating_add(i).max(0) as usize
+        } else {
+            (i as usize).min(len)
+        }
+    };
+    let (from, to) = (at(want_i64(from)?), at(want_i64(to)?));
+    Ok((from.min(to), to))
+}
+
+fn math_pow(base: &Value, exp: &Value) -> Res {
+    match (base, exp) {
+        (Value::Int(b), Value::Int(e)) => {
+            let e = u32::try_from(*e).map_err(|_| {
+                RuntimeError::new("a negative exponent needs a Float: write `2.0 ** -1`")
+            })?;
+            b.checked_pow(e)
+                .map(Value::Int)
+                .ok_or_else(|| RuntimeError::new("integer overflow"))
+        }
+        (b, e) => Ok(Value::Float(want_f64(b)?.powf(want_f64(e)?))),
+    }
+}
+
+fn math_floor_div(a: &Value, b: &Value) -> Res {
+    match (a, b) {
+        (Value::Int(_), Value::Int(0)) => err("division by zero"),
+        (Value::Int(a), Value::Int(b)) => {
+            let q = a
+                .checked_div(*b)
+                .ok_or_else(|| RuntimeError::new("integer overflow"))?;
+            Ok(Value::Int(if a % b != 0 && ((*a < 0) != (*b < 0)) {
+                q - 1
+            } else {
+                q
+            }))
+        }
+        (a, b) => {
+            let (a, b) = (want_f64(a)?, want_f64(b)?);
+            if b == 0.0 {
+                return err("division by zero");
+            }
+            Ok(Value::Float((a / b).floor()))
+        }
+    }
+}
+
+/// `{value:spec}` in an f-string: `[[fill]align][0][width][,][.precision][type]`, with the
+/// alignments `<`, `>` and `^` and the types `f`, `d`, `s`, `x`, `X`, `b` and `%`.
+fn format_value(v: &Value, spec: &str) -> Result<String, RuntimeError> {
+    let bad = || {
+        RuntimeError::new(format!(
+            "`{spec}` is not a format; write for example `.2f`, `>8` or `05d`"
+        ))
+    };
+    let chars: Vec<char> = spec.chars().collect();
+    let mut i = 0;
+    let (mut fill, mut align) = (' ', None);
+    if chars.len() >= 2 && matches!(chars[1], '<' | '>' | '^') {
+        (fill, align) = (chars[0], Some(chars[1]));
+        i = 2;
+    } else if chars.first().is_some_and(|c| matches!(c, '<' | '>' | '^')) {
+        align = Some(chars[0]);
+        i = 1;
+    }
+    let zero = chars.get(i) == Some(&'0');
+    if zero {
+        i += 1;
+    }
+    let number = |i: &mut usize| -> Option<usize> {
+        let start = *i;
+        while chars.get(*i).is_some_and(char::is_ascii_digit) {
+            *i += 1;
+        }
+        chars[start..*i].iter().collect::<String>().parse().ok()
+    };
+    let width = number(&mut i).unwrap_or(0);
+    let group = chars.get(i) == Some(&',');
+    if group {
+        i += 1;
+    }
+    let precision = if chars.get(i) == Some(&'.') {
+        i += 1;
+        Some(number(&mut i).ok_or_else(bad)?)
+    } else {
+        None
+    };
+    let kind = chars.get(i).copied();
+    if i + usize::from(kind.is_some()) != chars.len() {
+        return Err(bad());
+    }
+    let numeric = matches!(v, Value::Int(_) | Value::Float(_));
+    let mut body = match (kind, v) {
+        (Some('f'), v) => format!("{:.*}", precision.unwrap_or(6), want_f64(v)?),
+        (Some('%'), v) => format!("{:.*}%", precision.unwrap_or(0), want_f64(v)? * 100.0),
+        (Some('d'), Value::Int(i)) => i.to_string(),
+        (Some('x'), Value::Int(i)) => format!("{i:x}"),
+        (Some('X'), Value::Int(i)) => format!("{i:X}"),
+        (Some('b'), Value::Int(i)) => format!("{i:b}"),
+        (Some('d' | 'x' | 'X' | 'b'), _) => {
+            return err(format!("`{spec}` needs an Int, found {}", v.type_name()));
+        }
+        (None | Some('s'), Value::Float(x)) if precision.is_some() => {
+            format!("{:.*}", precision.unwrap_or(0), x)
+        }
+        (None | Some('s'), Value::Str(s)) if precision.is_some() => {
+            s.chars().take(precision.unwrap_or(0)).collect()
+        }
+        (None | Some('s'), v) => v.to_string(),
+        _ => return Err(bad()),
+    };
+    if group && numeric {
+        let (sign, rest) = body
+            .strip_prefix('-')
+            .map_or(("", body.as_str()), |r| ("-", r));
+        let (whole, tail) = rest.split_once('.').map_or((rest, ""), |(w, t)| (w, t));
+        let mut out = String::new();
+        for (n, c) in whole.chars().enumerate() {
+            if n > 0 && (whole.len() - n) % 3 == 0 {
+                out.push(',');
+            }
+            out.push(c);
+        }
+        body = format!(
+            "{sign}{out}{}{tail}",
+            if tail.is_empty() && !rest.contains('.') {
+                ""
+            } else {
+                "."
+            }
+        );
+    }
+    let len = body.chars().count();
+    if len >= width {
+        return Ok(body);
+    }
+    let pad = width - len;
+    if zero && numeric && align.is_none() {
+        let (sign, digits) = body
+            .strip_prefix('-')
+            .map_or(("", body.as_str()), |r| ("-", r));
+        return Ok(format!("{sign}{}{digits}", "0".repeat(pad)));
+    }
+    let make = |n: usize| fill.to_string().repeat(n);
+    Ok(match align.unwrap_or(if numeric { '>' } else { '<' }) {
+        '<' => format!("{body}{}", make(pad)),
+        '>' => format!("{}{body}", make(pad)),
+        _ => format!("{}{body}{}", make(pad / 2), make(pad - pad / 2)),
+    })
 }
 
 fn arg(args: &[Value], i: usize) -> Result<&Value, RuntimeError> {

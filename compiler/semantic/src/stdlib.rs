@@ -408,6 +408,177 @@ fn insert(args: &[Ty]) -> Result<Ty, String> {
     Ok(Ty::Unit)
 }
 
+// ---- numbers, slices and conversions -----------------------------------------------------
+
+fn is_float_ty(t: &Ty) -> bool {
+    matches!(t, Ty::Prim(p) if p.is_float()) || matches!(t, Ty::FloatVar(_))
+}
+
+fn want_number(args: &[Ty], i: usize) -> Result<(), String> {
+    match &args[i] {
+        Ty::Prim(p) if p.is_numeric() => Ok(()),
+        Ty::IntVar(_) | Ty::FloatVar(_) | Ty::Unknown | Ty::Never => Ok(()),
+        other => Err(format!(
+            "argument {} must be a number, found `{other}`",
+            i + 1
+        )),
+    }
+}
+
+/// The type of an operation on two numbers: a float if either is one, else the first.
+fn number_result(args: &[Ty]) -> Ty {
+    if is_float_ty(&args[0]) || args[1] == Ty::Unknown {
+        args[0].clone()
+    } else if is_float_ty(&args[1]) || args[0] == Ty::Unknown {
+        args[1].clone()
+    } else {
+        args[0].clone()
+    }
+}
+
+fn same_as_first_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(t)) if !matches!(t, Ty::Unknown | Ty::Never) => Some(t.clone()),
+        _ => None,
+    }
+}
+
+fn math_pow(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_number(args, 0)?;
+    want_number(args, 1)?;
+    Ok(number_result(args))
+}
+
+fn math_binary(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want_number(args, 0)?;
+    want_number(args, 1)?;
+    Ok(number_result(args))
+}
+
+fn math_min_max(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    if args[0] == s() && args[1] == s() {
+        return Ok(s());
+    }
+    math_binary(args)
+}
+
+fn math_abs(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_number(args, 0)?;
+    Ok(args[0].clone())
+}
+
+/// `sqrt`, `floor`, `ceil` and `round` give a float; an integer argument gives an `f64`.
+fn math_float_fn(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_number(args, 0)?;
+    Ok(if is_float_ty(&args[0]) || args[0] == Ty::Unknown {
+        args[0].clone()
+    } else {
+        Ty::Prim(Prim::F64)
+    })
+}
+
+fn math_to_float(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_number(args, 0)?;
+    Ok(Ty::Prim(Prim::F64))
+}
+
+fn math_to_int(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_number(args, 0)?;
+    Ok(Ty::Prim(Prim::I64))
+}
+
+fn text_to_text(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(s())
+}
+
+fn text_format(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 1, &s())?;
+    Ok(s())
+}
+
+fn string_slice(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 3)?;
+    want(args, 0, &s())?;
+    want_int(args, 1)?;
+    want_int(args, 2)?;
+    Ok(s())
+}
+
+fn string_repeat(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 0, &s())?;
+    want_int(args, 1)?;
+    Ok(s())
+}
+
+fn iter_slice(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 3)?;
+    want_int(args, 1)?;
+    want_int(args, 2)?;
+    Ok(vec_of(elem(args, 0)?))
+}
+
+fn iter_concat(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (a, b) = (elem(args, 0)?, elem(args, 1)?);
+    if a == Ty::Unknown {
+        return Ok(vec_of(b));
+    }
+    if !a.accepts(&b) {
+        return Err(format!("cannot join a `List[{a}]` and a `List[{b}]`"));
+    }
+    Ok(vec_of(a))
+}
+
+fn iter_range(args: &[Ty]) -> Result<Ty, String> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(format!("expected 1 or 2 arguments, found {}", args.len()));
+    }
+    for i in 0..args.len() {
+        want_int(args, i)?;
+    }
+    let ty = args
+        .iter()
+        .find(|t| !matches!(t, Ty::IntVar(_)))
+        .unwrap_or(&args[0]);
+    Ok(vec_of(ty.clone()))
+}
+
+fn map_key_ok(t: &Ty) -> bool {
+    match t {
+        Ty::Prim(p) => !p.is_float(),
+        Ty::IntVar(_) | Ty::Unknown | Ty::Never => true,
+        _ => false,
+    }
+}
+
+fn map_from_entries(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    match elem(args, 0)? {
+        Ty::Tuple(parts) if parts.len() == 2 && !map_key_ok(&parts[0]) => Err(format!(
+            "a `Map` key must be a `Text`, an integer or a `Bool`, found `{}`",
+            parts[0]
+        )),
+        Ty::Tuple(parts) if parts.len() == 2 => Ok(Ty::Map(
+            Box::new(parts[0].clone()),
+            Box::new(parts[1].clone()),
+        )),
+        Ty::Unknown => Ok(Ty::Unknown),
+        other => Err(format!(
+            "a `Map` is built from `(key, value)` pairs, found `{other}`"
+        )),
+    }
+}
+
 // ---- tensors -----------------------------------------------------------------------------
 
 fn tensor_of(t: &Ty) -> Option<(Ty, Vec<Dim>)> {
@@ -614,8 +785,8 @@ fn map_new_result(_: &[Ty], expected: &Ty) -> Result<Ty, String> {
     match expected {
         Ty::Map(..) | Ty::Unknown => Ok(expected.clone()),
         other => Err(format!(
-            "`std.map.new` makes a `Map<K, V>` but the context expects `{other}`; \
-             write `let m: Map<String, i64> = std::map::new();`"
+            "`std.map.new()` and `{{}}` make a `Map[K, V]` but the context expects `{other}`; \
+             write `let m: Map[Text, Int] = {{}}`"
         )),
     }
 }
@@ -1169,6 +1340,28 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::iter::skip", sig(skip)),
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
+    ("std::iter::slice", sig(iter_slice)),
+    ("std::iter::concat", sig(iter_concat)),
+    ("std::iter::range", sig(iter_range)),
+    ("std::string::slice", sig(string_slice)),
+    ("std::string::repeat", sig(string_repeat)),
+    ("std::text::to_text", sig(text_to_text)),
+    ("std::text::format", sig(text_format)),
+    ("std::math::pow", sig(math_pow)),
+    (
+        "std::math::floor_div",
+        hinted(math_binary, same_as_first_hint),
+    ),
+    ("std::math::min", hinted(math_min_max, same_as_first_hint)),
+    ("std::math::max", hinted(math_min_max, same_as_first_hint)),
+    ("std::math::abs", sig(math_abs)),
+    ("std::math::sqrt", sig(math_float_fn)),
+    ("std::math::floor", sig(math_float_fn)),
+    ("std::math::ceil", sig(math_float_fn)),
+    ("std::math::round", sig(math_float_fn)),
+    ("std::math::to_float", sig(math_to_float)),
+    ("std::math::to_int", sig(math_to_int)),
+    ("std::map::from_entries", sig(map_from_entries)),
     ("std::collect", sig(collect)),
     ("std::map::new", sig_expected(zeros_check, map_new_result)),
     (

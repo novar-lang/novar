@@ -495,11 +495,13 @@ fn g() -> i32:
         "{e}"
     );
     assert!(
-        i.call("f", vec![Value::Int(-1)])
+        i.call("f", vec![Value::Int(-4)])
             .unwrap_err()
             .message
             .contains("out of bounds")
     );
+    // A negative index counts from the end.
+    assert_eq!(int(i.call("f", vec![Value::Int(-1)]).unwrap()), 30);
 }
 
 #[test]
@@ -634,7 +636,7 @@ fn g():
             .message
             .contains("out of bounds: the length is 2 but the index is 2")
     );
-    assert!(i.call("f", vec![Value::Int(-1)]).is_err());
+    assert!(i.call("f", vec![Value::Int(-3)]).is_err());
     assert!(
         i.call("g", vec![])
             .unwrap_err()
@@ -2004,4 +2006,178 @@ fn run() -> Int:
 "#;
     // 9 + 8 + 12 + 10
     assert_eq!(int(run(src, "run", vec![])), 39);
+}
+
+fn shown(src: &str) -> String {
+    text(run(src, "f", vec![]))
+}
+
+#[test]
+fn slices_and_negative_indices() {
+    let src = r#"
+fn f() -> Text:
+    let xs = [1, 2, 3, 4, 5]
+    let s = "hello"
+    f"{xs[1:3]} {xs[:2]} {xs[3:]} {xs[-2:]} {xs[-1]} {xs[:]} {xs[4:2]} {xs[9:]} {xs[-9:2]}|{s[1:3]} {s[0]} {s[-1]} {s[:2]} {s[2:]}"
+"#;
+    assert_eq!(
+        shown(src),
+        "[2, 3] [1, 2] [4, 5] [4, 5] 5 [1, 2, 3, 4, 5] [] [] [1, 2]|el h o he llo"
+    );
+    // Slices count characters, not bytes.
+    let src = "fn f() -> Text:\n    let s = \"añb\"\n    f\"{s[1:2]}{s[-1]}\"\n";
+    assert_eq!(shown(src), "ñb");
+    let src = "fn f() -> Text:\n    let s = \"ab\"\n    s[2]\n";
+    let e = load(src).call("f", vec![]).unwrap_err();
+    assert!(e.message.contains("index out of bounds"), "{e}");
+}
+
+#[test]
+fn maps_are_indexed_assigned_and_iterated() {
+    let src = r#"
+fn f() -> Text:
+    var m = {"a": 1, "b": 2}
+    m["c"] = 3
+    m["a"] = m["a"] + 10
+    var keys = ""
+    for k in m:
+        keys = keys + k
+    let n: Map[Int, Text] = {}
+    var names = {1: "one"}
+    names[2] = "two"
+    f"{keys} {m["a"]} {m.len()} {n.len()} {names[2]}"
+"#;
+    assert_eq!(shown(src), "abc 11 3 0 two");
+    let src = r#"
+fn f() -> Int:
+    let m = {"a": 1}
+    m["zzz"]
+"#;
+    let e = load(src).call("f", vec![]).unwrap_err();
+    assert!(e.message.contains("key not found: zzz"), "{e}");
+    // An entry that holds a list is updated through the map.
+    let src = r#"
+fn f() -> Int:
+    var m = {"a": [1, 2]}
+    m["a"][0] = 9
+    m["a"][0] + m["a"][1]
+"#;
+    assert_eq!(int(run(src, "f", vec![])), 11);
+}
+
+#[test]
+fn comprehensions() {
+    let src = r#"
+fn f() -> Text:
+    let xs = [1, 2, 3, 4, 5]
+    let a = [x * 2 for x in xs if x > 2]
+    let b = [i * i for i in range(4)]
+    let c = [f"{i}:{x}" for i, x in xs.enumerate() if i < 2]
+    let d = [x for x in xs if x % 2 == 0]
+    let e = [1 for _ in xs]
+    f"{a} {b} {c} {d} {e.len()}"
+"#;
+    assert_eq!(shown(src), "[6, 8, 10] [0, 1, 4, 9] [0:1, 1:2] [2, 4] 5");
+}
+
+#[test]
+fn power_floor_division_and_chained_comparisons() {
+    let src = r#"
+fn f() -> Text:
+    let z = 0
+    f"{2 ** 10} {2 ** 3 ** 2} {-2 ** 2} {2.0 ** -1} {7 // 2} {-7 // 2} {7 // -2} {7.5 // 2} {1 < 2 < 3} {3 < 2 < 5} {1 < 2 <= 2} {z < 1 < 2}"
+"#;
+    assert_eq!(shown(src), "1024 512 -4 0.5 3 -4 -4 3 True False True True");
+    for (body, message) in [
+        ("2 ** -1", "negative exponent"),
+        ("1 // z", "division by zero"),
+        ("9223372036854775807 ** 2", "overflow"),
+    ] {
+        let src = format!("fn f() -> Int:\n    let z = 0\n    {body}\n");
+        let e = load(&src).call("f", vec![]).unwrap_err();
+        assert!(e.message.contains(message), "{body}: {e}");
+    }
+    // The middle operand of a chain is computed once.
+    let src = r#"
+fn bump(c: List[Int]) -> u64:
+    c.push(1)
+    c.len()
+
+fn f() -> u64:
+    let c: List[Int] = []
+    let ok = 0 < bump(c) < 5
+    c.len()
+"#;
+    assert_eq!(int(run(src, "f", vec![])), 1);
+}
+
+#[test]
+fn a_missing_value_gets_a_default() {
+    let src = r#"
+fn boom() -> Int:
+    assert(False)
+    0
+
+fn f() -> Text:
+    let o: Int? = None
+    let p: Int? = Some(3)
+    let m = {"a": 1}
+    f"{o ?? 7} {p ?? boom()} {m.get("a") ?? 0} {m.get("b") ?? -1}"
+"#;
+    assert_eq!(shown(src), "7 3 1 -1");
+}
+
+#[test]
+fn texts_and_lists_with_operators() {
+    let src = r#"
+fn f() -> Text:
+    let t = """line one
+line two"""
+    f"{"ab" * 3}|{"x" * 0}|{[1, 2] + [3]}|{t.lines().len()}"
+"#;
+    assert_eq!(shown(src), "ababab||[1, 2, 3]|2");
+    let src = "fn f() -> Text:\n    \"ab\" * -1\n";
+    let e = load(src).call("f", vec![]).unwrap_err();
+    assert!(e.message.contains("not negative"), "{e}");
+}
+
+#[test]
+fn f_string_formats() {
+    let src = r#"
+fn f() -> Text:
+    let pi = 3.14159
+    let n = 42
+    let name = "bo"
+    f"{pi:.2f}|{pi=}|{n:05d}|{n:>6}|{n:<6}|{name:^6}|{name:*>5}|{1234567:,}|{0.256:.1%}|{255:x}|{255:X}|{5:b}|{-7:04d}|{name:.1}|{n=}|{n == 42}|{pi:8.3f}"
+"#;
+    assert_eq!(
+        shown(src),
+        "3.14|pi=3.14159|00042|    42|42    |  bo  |***bo|1,234,567|25.6%|ff|FF|101|-007|b|n=42|True|   3.142"
+    );
+    for spec in ["q", ".f", "d"] {
+        let src = format!("fn f() -> Text:\n    let s = \"a\"\n    f\"{{s:{spec}}}\"\n");
+        assert!(load(&src).call("f", vec![]).is_err(), "{spec}");
+    }
+}
+
+#[test]
+fn numbers_and_conversions() {
+    let src = r#"
+fn f() -> Text:
+    let x = -3
+    f"{abs(x)} {abs(-2.5)} {max(2, 9)} {min(2, 9)} {max(1.5, 2)} {min("b", "a")} {int(3.9)} {int(-3.9)} {int(4)} {float(3) + 0.5} {str(12) + "!"} {std.math.sqrt(16.0)} {std.math.floor(2.7)} {std.math.ceil(2.1)} {std.math.round(2.5)} {range(3)} {range(2, 5)}"
+"#;
+    assert_eq!(
+        shown(src),
+        "3 2.5 9 2 2 a 3 -3 4 3.5 12! 4 2 3 3 [0, 1, 2] [2, 3, 4]"
+    );
+    // A name of the program wins over the short names.
+    let src = r#"
+fn max(a: Int, b: Int) -> Int:
+    a - b
+
+fn f() -> Int:
+    max(5, 2)
+"#;
+    assert_eq!(int(run(src, "f", vec![])), 3);
 }

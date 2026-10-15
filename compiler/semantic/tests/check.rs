@@ -1085,8 +1085,8 @@ fn f(v: List[i32]) -> i32:
     );
     assert_err(
         r#"
-fn f(s: Text) -> i32:
-    s[0]
+fn f(n: i32) -> i32:
+    n[0]
 "#,
         "cannot index into",
     );
@@ -3481,4 +3481,102 @@ fn main() -> i32:
     let (hir, errs) = check("type P:\n    n: Int\n\n    fn show(self):\n        print(\"x\")\n");
     assert!(errs.is_empty(), "{errs:?}");
     assert!(hir.fns.iter().all(|f| f.ret == Ty::Unit));
+}
+
+#[test]
+fn short_forms_are_checked() {
+    // Slices, indexing a text, and the maps' index and literal.
+    assert_clean(
+        r#"
+fn f(xs: List[Int], s: Text) -> Text:
+    let a: List[Int] = xs[1:]
+    let b: Text = s[:2]
+    let c: Text = s[0]
+    c + b
+"#,
+    );
+    assert_clean(
+        r#"
+fn f() -> Int:
+    var m = {"a": 1}
+    m["b"] = 2
+    for k in m:
+        let s: Text = k
+        m[s] = 0
+    m["a"]
+"#,
+    );
+    assert_err(
+        "fn f():\n    let m = {\"a\": 1}\n    let v = m[1]\n",
+        "this `Map` has `Text` keys",
+    );
+    assert_err(
+        "fn f():\n    var m = {\"a\": 1}\n    m[\"a\"] = \"x\"\n",
+        "mismatched types",
+    );
+    assert_err(
+        "fn f():\n    let v = {\"a\": 1, \"b\": \"x\"}\n",
+        "mismatched types",
+    );
+    assert_err(
+        "fn f():\n    let v = {[1]: 2}\n",
+        "a `Map` key must be a `Text`, an integer or a `Bool`",
+    );
+    assert_err(
+        "fn f():\n    let v = {1.5: 2}\n",
+        "a `Map` key must be a `Text`, an integer or a `Bool`",
+    );
+    // Slices, comprehensions and `??` need a value that has them.
+    assert_err(
+        "fn f(n: i32):\n    let v = n[1:2]\n",
+        "no method `slice` on type `i32`",
+    );
+    assert_err("fn f():\n    let v = [x for x in 5]\n", "no method `map`");
+    assert_err(
+        "fn f():\n    let v = 5 ?? 3\n",
+        "no method `unwrap_or_else`",
+    );
+}
+
+#[test]
+fn operators_on_texts_lists_and_numbers() {
+    assert_clean(
+        r#"
+fn f(s: Text, xs: List[Int], x: f32) -> f32:
+    let a: Text = s * 3
+    let b: List[Int] = xs + [1]
+    let c: Int = 7 // 2
+    let d: f32 = x ** 2
+    let e: f32 = max(x, 1)
+    let g: Int = int(x) + abs(-2)
+    let h: Float = float(g)
+    d + e
+"#,
+    );
+    assert_err(
+        "fn f(s: Text):\n    let v = s * s\n",
+        "cannot apply arithmetic to `Text`",
+    );
+    assert_err(
+        "fn f(xs: List[Int]):\n    let v = xs + [\"a\"]\n",
+        "mismatched types",
+    );
+    assert_err(
+        "fn f():\n    let v = 2 ** \"a\"\n",
+        "argument 2 must be a number",
+    );
+    assert_err(
+        "fn f():\n    let v = abs(\"a\")\n",
+        "argument 1 must be a number",
+    );
+    assert_err(
+        "fn f():\n    let v = 1 < 2 < \"a\"\n",
+        "mismatched operand types",
+    );
+    assert_err(
+        "fn f():\n    let o: Int? = None\n    let v: Text = o ?? 7\n",
+        "mismatched types",
+    );
+    // `"a" in "abc"` and chains over texts keep working.
+    assert_clean("fn f(s: Text) -> Bool:\n    \"a\" < s < \"c\" and \"b\" in s\n");
 }

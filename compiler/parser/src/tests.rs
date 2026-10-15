@@ -770,3 +770,126 @@ fn parentheses_still_mean_group_tuple_and_function_type() {
     let (_, errs) = parse("fn f(a: (Int)):\n    pass\n");
     assert!(!errs.is_empty());
 }
+
+#[test]
+fn slices_are_calls_of_slice() {
+    assert_eq!(sexp("xs[1:3]"), "xs.slice(1, 3)");
+    assert_eq!(sexp("xs[:2]"), "xs.slice(0, 2)");
+    assert_eq!(sexp("xs[1:]"), format!("xs.slice(1, {})", i64::MAX));
+    assert_eq!(sexp("xs[-2:]"), format!("xs.slice((Neg 2), {})", i64::MAX));
+    assert_eq!(sexp("xs[:]"), format!("xs.slice(0, {})", i64::MAX));
+    // An index and the types of a generic call are not slices.
+    assert!(matches!(ok_expr("xs[1]"), ExprKind::Index { .. }));
+    assert!(matches!(ok_expr("f[Int, Text]"), ExprKind::Index { .. }));
+    assert!(
+        parse_expr("xs[]")
+            .1
+            .iter()
+            .any(|e| e.message.contains("index or a slice"))
+    );
+}
+
+#[test]
+fn power_and_floor_division() {
+    assert_eq!(sexp("2 ** 3"), "std.math.pow(2, 3)");
+    assert_eq!(sexp("2 ** 3 ** 2"), "std.math.pow(2, std.math.pow(3, 2))");
+    assert_eq!(sexp("-2 ** 2"), "(Neg std.math.pow(2, 2))");
+    assert_eq!(sexp("2 ** -1"), "std.math.pow(2, (Neg 1))");
+    assert_eq!(sexp("7 // 2"), "std.math.floor_div(7, 2)");
+    assert_eq!(sexp("a * b // c"), "std.math.floor_div((Mul a b), c)");
+    assert_eq!(sexp("a + b ** 2"), "(Add a std.math.pow(b, 2))");
+}
+
+#[test]
+fn comparisons_chain() {
+    assert_eq!(sexp("a < b < c"), "(And (Lt a b) (Lt b c))");
+    assert_eq!(
+        sexp("a < b <= c < d"),
+        "(And (And (Lt a b) (LtEq b c)) (Lt c d))"
+    );
+    assert_eq!(sexp("a < b"), "(Lt a b)");
+    // An operand that is not a name or a literal is computed once.
+    assert!(matches!(ok_expr("a < f() < c"), ExprKind::Block(_)));
+}
+
+#[test]
+fn a_missing_value_can_be_replaced() {
+    let ExprKind::Call { callee, args } = ok_expr("m.get(k) ?? 0") else {
+        panic!()
+    };
+    assert!(matches!(&callee.node, ExprKind::Field { name, .. } if name.node == "unwrap_or_else"));
+    assert!(matches!(&args[0].node, ExprKind::Closure { params, .. } if params.is_empty()));
+    // `??` binds looser than `or` and tighter than `|>`.
+    assert!(matches!(ok_expr("a or b ?? c |> f"), ExprKind::Pipe { .. }));
+}
+
+#[test]
+fn comprehensions_are_filter_and_map() {
+    let map_of = |src: &str| {
+        let ExprKind::Call { callee, args } = ok_expr(src) else {
+            panic!("{src}")
+        };
+        let ExprKind::Field { base, name } = callee.node else {
+            panic!("{src}")
+        };
+        (base, name.node, args)
+    };
+    let (base, name, args) = map_of("[x * 2 for x in xs]");
+    assert_eq!(
+        (show(&base).as_str(), name.as_str(), args.len()),
+        ("xs", "map", 1)
+    );
+    let (base, name, _) = map_of("[x for x in xs if x > 1]");
+    assert_eq!(name, "map");
+    let ExprKind::Call { callee, .. } = base.node else {
+        panic!()
+    };
+    assert!(matches!(&callee.node, ExprKind::Field { name, .. } if name.node == "filter"));
+    // Two names take a pair apart, and the list forms keep working.
+    let (_, _, args) = map_of("[a + b for a, b in pairs]");
+    assert!(
+        matches!(&args[0].node, ExprKind::Closure { body, .. } if matches!(body.node, ExprKind::Block(_)))
+    );
+    assert!(matches!(ok_expr("[1, 2, 3]"), ExprKind::Array(items) if items.len() == 3));
+    assert!(matches!(ok_expr("[1]"), ExprKind::Array(items) if items.len() == 1));
+    assert!(matches!(ok_expr("[]"), ExprKind::Array(items) if items.is_empty()));
+    assert!(matches!(ok_expr("[1, 2,]"), ExprKind::Array(items) if items.len() == 2));
+}
+
+#[test]
+fn map_literals() {
+    assert_eq!(sexp("{}"), "std.map.new()");
+    let ExprKind::Call { callee, args } = ok_expr(r#"{"a": 1, "b": 2,}"#) else {
+        panic!()
+    };
+    assert_eq!(show(&callee), "std.map.from_entries");
+    assert!(matches!(&args[0].node, ExprKind::Array(entries) if entries.len() == 2));
+}
+
+#[test]
+fn fstring_formats_and_debug_form() {
+    let ExprKind::FString(parts) =
+        ok_expr(r#"f"{x:.2f}|{y=}|{z=:>5}|{a == b}|{m["k"]}|{xs[1:2]}""#)
+    else {
+        panic!()
+    };
+    let FPart::Expr(first) = &parts[0] else {
+        panic!()
+    };
+    assert_eq!(show(first), r#"std.text.format(x, Lit(Str(".2f")))"#);
+    assert!(matches!(&parts[2], FPart::Text(t) if t == "y="));
+    assert!(matches!(&parts[3], FPart::Expr(_)));
+    assert!(matches!(&parts[5], FPart::Text(t) if t == "z="));
+    // `==` is a comparison, not the `=` form.
+    assert!(
+        parts
+            .iter()
+            .all(|p| !matches!(p, FPart::Text(t) if t == "a =="))
+    );
+    assert_eq!(parts.len(), 13);
+}
+
+#[test]
+fn triple_quoted_text() {
+    assert!(matches!(ok_expr("\"\"\"a\nb\"\"\""), ExprKind::Lit(Lit::Str(s)) if s == "a\nb"));
+}
