@@ -108,6 +108,10 @@ impl Builtin {
     }
 }
 
+/// How big, in parts, the types of one instance may be. A generic function that calls itself
+/// with a bigger type (`f([x])`, `f((x, x))`) would otherwise be instantiated forever.
+const MAX_TYPE_SIZE: usize = 200;
+
 /// A generic function (or method) instance waiting to have its body checked.
 #[derive(Clone)]
 struct Pending {
@@ -2284,6 +2288,9 @@ impl Checker {
             return Ty::Unknown;
         }
         let args: Vec<Ty> = args.iter().map(|a| self.finalize_ty(a)).collect();
+        if self.endless_instance(name, &args.iter().collect::<Vec<_>>(), span) {
+            return Ty::Unknown;
+        }
         let key = format!(
             "{name}<{}>",
             args.iter()
@@ -2575,7 +2582,11 @@ impl Checker {
             .map(|g| bind[&g.name.node].to_string())
             .collect();
         let full = format!("{key}::{name}<{}>", shown.join(", "));
-        if bounds_ok && !self.fn_sigs.contains_key(&full) {
+        let growing = {
+            let tys: Vec<&Ty> = bind.values().collect();
+            self.endless_instance(name, &tys, span)
+        };
+        if bounds_ok && !growing && !self.fn_sigs.contains_key(&full) {
             self.fn_sigs
                 .insert(full.clone(), (params.clone(), ret.clone()));
             self.methods.insert(full.clone(), key.clone());
@@ -2802,7 +2813,7 @@ impl Checker {
             // The body is not checked for types that do not meet the bounds: it would only
             // repeat the mistake.
             _ if !bounds_ok => format!("{name}<invalid>"),
-            _ => self.fn_instance(name, &decl, &generics, &bind, &params, &ret),
+            _ => self.fn_instance(name, &decl, &bind, &params, &ret, span),
         };
         let args: Vec<hir::Expr> = checked
             .into_iter()
@@ -2841,16 +2852,60 @@ impl Checker {
         }
     }
 
+    /// How many parts make up `ty`: `List[(Int, Text)]` has four. It stays small for every type a
+    /// person writes, and grows without bound for one that keeps being wrapped or doubled.
+    fn type_size(&self, ty: &Ty) -> usize {
+        let sum = |tys: &[&Ty]| tys.iter().map(|t| self.type_size(t)).sum::<usize>();
+        1 + match ty {
+            Ty::Vec(t) | Ty::Option(t) => self.type_size(t),
+            Ty::Tensor { elem, .. } => self.type_size(elem),
+            Ty::Result(a, b) | Ty::Map(a, b) => sum(&[a, b]),
+            Ty::Tuple(items) => items.iter().map(|t| self.type_size(t)).sum(),
+            Ty::Fn(params, ret) => {
+                params.iter().map(|t| self.type_size(t)).sum::<usize>() + self.type_size(ret)
+            }
+            Ty::Struct(key) | Ty::Enum(key) => self
+                .instance_args
+                .get(key)
+                .map_or(0, |(_, args)| args.iter().map(|t| self.type_size(t)).sum()),
+            _ => 0,
+        }
+    }
+
+    /// Reports (and says so) when the types an instance of `name` is made for are too big:
+    /// that is a generic function or type that keeps asking for a bigger version of itself.
+    fn endless_instance(&mut self, name: &str, tys: &[&Ty], span: &Span) -> bool {
+        let Some(deep) = tys.iter().find(|t| self.type_size(t) > MAX_TYPE_SIZE) else {
+            return false;
+        };
+        let mut shown = deep.to_string();
+        if shown.len() > 60 {
+            shown.truncate(57);
+            shown.push_str("...");
+        }
+        self.err_hint(
+            span.clone(),
+            format!("`{name}` is instantiated with types that keep growing: `{shown}`"),
+            Some("a generic function that calls itself with a bigger type never ends"),
+        );
+        true
+    }
+
     /// The instance of the generic function `name` for `bind`, queued for checking the first time.
     fn fn_instance(
         &mut self,
         name: &str,
         decl: &ast::Fn,
-        generics: &[ast::GenericParam],
         bind: &HashMap<String, Ty>,
         params: &[Ty],
         ret: &Ty,
+        span: &Span,
     ) -> String {
+        let generics = &decl.generics;
+        let tys: Vec<&Ty> = bind.values().collect();
+        if self.endless_instance(name, &tys, span) {
+            return format!("{name}<too deep>");
+        }
         let shown: Vec<String> = generics
             .iter()
             .map(|g| bind[&g.name.node].to_string())
@@ -2895,7 +2950,7 @@ impl Checker {
             .map(|p| self.subst_params(p, &bind))
             .collect();
         let ret = self.subst_params(&call.ret, &bind);
-        self.fn_instance(&call.name, &call.decl, &call.generics, &bind, &params, &ret)
+        self.fn_instance(&call.name, &call.decl, &bind, &params, &ret, &call.span)
     }
 
     /// The full name (`Point::norm`) of the method `name` of a struct or enum type, if there is one.
