@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **`telvax doctor`:** prints the version, the syntax editions it reads, which features this binary was
+  built with (tables, live services, GPU, native backend) and the environment variables that change
+  its behavior; keys are shown as set or not set, never their value. An unknown command now says
+  `unknown command `chek`; did you mean `check`?` instead of printing the whole usage.
 * **The syntax is stable from here on:** programs in `tests/editions/2026/` are frozen and must keep
   passing `check`, `fmt --check` and their tests; a test fails if one is edited. `telvax.toml` takes
   `edition = "2026"` (`tvpm new` writes it; an unknown edition is an error). A change that would break
