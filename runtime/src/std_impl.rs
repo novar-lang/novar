@@ -227,6 +227,81 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             }
             Ok(acc)
         }
+        "std::option::map" | "std::option::and_then" | "std::option::filter" => {
+            let which = path.rsplit("::").next().unwrap_or("");
+            let Some(inner) = option_value(&args[0]) else {
+                return Ok(args[0].clone());
+            };
+            let out = interp.apply(&args[1], vec![inner.clone()])?;
+            Ok(match which {
+                "map" => Value::some(out),
+                "and_then" => out,
+                _ => match out {
+                    Value::Bool(true) => args[0].clone(),
+                    Value::Bool(false) => Value::none(),
+                    other => {
+                        return err(format!("filter predicate returned {}", other.type_name()));
+                    }
+                },
+            })
+        }
+        "std::option::ok_or" => Ok(match option_value(&args[0]) {
+            Some(v) => Value::Ok(Box::new(v.clone())),
+            None => Value::Err(Box::new(args[1].clone())),
+        }),
+        "std::option::unwrap_or_else" => match option_value(&args[0]) {
+            Some(v) => Ok(v.clone()),
+            None => interp.apply(&args[1], vec![]),
+        },
+        "std::option::expect" => match option_value(&args[0]) {
+            Some(v) => Ok(v.clone()),
+            None => err(want_str(&args[1])?.to_string()),
+        },
+        "std::result::is_ok" => Ok(Value::Bool(matches!(args[0], Value::Ok(_)))),
+        "std::result::is_err" => Ok(Value::Bool(matches!(args[0], Value::Err(_)))),
+        "std::result::unwrap" => match &args[0] {
+            Value::Ok(v) => Ok((**v).clone()),
+            Value::Err(e) => err(format!("called `unwrap` on `Err`: {e}")),
+            other => err(format!("expected a Result, found {}", other.type_name())),
+        },
+        "std::result::expect" => match &args[0] {
+            Value::Ok(v) => Ok((**v).clone()),
+            Value::Err(e) => err(format!("{}: {e}", want_str(&args[1])?)),
+            other => err(format!("expected a Result, found {}", other.type_name())),
+        },
+        "std::result::unwrap_or" => match &args[0] {
+            Value::Ok(v) => Ok((**v).clone()),
+            _ => Ok(args[1].clone()),
+        },
+        "std::result::unwrap_or_else" => match &args[0] {
+            Value::Ok(v) => Ok((**v).clone()),
+            Value::Err(e) => interp.apply(&args[1], vec![(**e).clone()]),
+            other => err(format!("expected a Result, found {}", other.type_name())),
+        },
+        "std::result::map" => match &args[0] {
+            Value::Ok(v) => Ok(Value::Ok(Box::new(
+                interp.apply(&args[1], vec![(**v).clone()])?,
+            ))),
+            other => Ok(other.clone()),
+        },
+        "std::result::map_err" => match &args[0] {
+            Value::Err(e) => Ok(Value::Err(Box::new(
+                interp.apply(&args[1], vec![(**e).clone()])?,
+            ))),
+            other => Ok(other.clone()),
+        },
+        "std::result::and_then" => match &args[0] {
+            Value::Ok(v) => interp.apply(&args[1], vec![(**v).clone()]),
+            other => Ok(other.clone()),
+        },
+        "std::result::ok" => Ok(match &args[0] {
+            Value::Ok(v) => Value::some((**v).clone()),
+            _ => Value::none(),
+        }),
+        "std::result::err" => Ok(match &args[0] {
+            Value::Err(e) => Value::some((**e).clone()),
+            _ => Value::none(),
+        }),
         "std::iter::enumerate" => Ok(Value::vec(
             want_vec(&args[0])?
                 .into_iter()
@@ -678,4 +753,12 @@ fn dist_map(interp: &Interp, args: &[Value]) -> Res {
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Value::vec)
+}
+
+/// The value inside a `Some`, or `None` for `None`.
+fn option_value(v: &Value) -> Option<&Value> {
+    match v {
+        Value::Enum(e) if e.name == "Option" => e.fields.first(),
+        _ => None,
+    }
 }

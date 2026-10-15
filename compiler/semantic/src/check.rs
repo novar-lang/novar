@@ -145,6 +145,32 @@ fn method_module(ty: &Ty, name: &str) -> Option<&'static str> {
             Some("iter")
         }
         Ty::Vec(_) if name == "join" => Some("string"),
+        Ty::Option(_)
+            if matches!(
+                name,
+                "map" | "and_then" | "filter" | "ok_or" | "unwrap_or_else" | "expect"
+            ) =>
+        {
+            Some("option")
+        }
+        Ty::Result(..)
+            if matches!(
+                name,
+                "is_ok"
+                    | "is_err"
+                    | "unwrap"
+                    | "expect"
+                    | "unwrap_or"
+                    | "unwrap_or_else"
+                    | "map"
+                    | "map_err"
+                    | "and_then"
+                    | "ok"
+                    | "err"
+            ) =>
+        {
+            Some("result")
+        }
         _ => None,
     }
 }
@@ -3431,9 +3457,44 @@ impl Checker {
                 "unwrap_or" => Ty::Fn(vec![(**inner).clone()], inner.clone()),
                 _ => {
                     let shown = base.ty.to_string();
-                    self.no_method(name, &shown, &["is_some", "is_none", "unwrap", "unwrap_or"])
+                    self.no_method(
+                        name,
+                        &shown,
+                        &[
+                            "is_some",
+                            "is_none",
+                            "unwrap",
+                            "unwrap_or",
+                            "unwrap_or_else",
+                            "expect",
+                            "map",
+                            "and_then",
+                            "filter",
+                            "ok_or",
+                        ],
+                    )
                 }
             },
+            Ty::Result(..) => {
+                let shown = base.ty.to_string();
+                self.no_method(
+                    name,
+                    &shown,
+                    &[
+                        "is_ok",
+                        "is_err",
+                        "unwrap",
+                        "expect",
+                        "unwrap_or",
+                        "unwrap_or_else",
+                        "map",
+                        "map_err",
+                        "and_then",
+                        "ok",
+                        "err",
+                    ],
+                )
+            }
             Ty::Map(k, v) => match n {
                 "insert" => Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Unit)),
                 "get" | "remove" => Ty::Fn(vec![(**k).clone()], Box::new(Ty::Option(v.clone()))),
