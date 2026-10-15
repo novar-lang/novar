@@ -372,6 +372,9 @@ A `type` lists its fields, then its methods. `type Circle(Shape)` says the type 
 trait; a method without a body (`: ...`) is required, one with a body is a default. `extend Circle:`
 adds methods to a type declared elsewhere. Call a function that has no `self` as `Circle.new(1.0)`.
 `[T]` after a name declares a type parameter; `T: Shape` limits it to types that implement `Shape`.
+A generic function is called with its types inferred from the arguments. When they cannot be (a
+function that takes nothing), or to be explicit, write them before the parentheses:
+`empty[Text]()`, `pair[Int, Text](1, "a")`. The types are names such as `Int` or `List[Text]`.
 Three limits need no trait of your own: `T: Num` (`Int`, `Float` and the sized numbers), `T: Ord`
 (numbers and `Text`, the values `<` and `>` compare) and `T: Eq` (everything but functions). More than
 one: `T: (Num, Ord)`. A type that does not meet a limit is an error at the call that uses it, and a

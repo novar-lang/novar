@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* **Type arguments in a call:** `empty[Text]()`, `pair[Int, Text](1, "a")`. It makes a generic function
+  that cannot infer its types from the arguments usable, and the "cannot infer" error now says so.
 * **Built-in limits for type parameters:** `T: Num`, `T: Ord` and `T: Eq` (and `T: (Num, Ord)`) without
   declaring a trait. A call with a type that does not meet a limit is reported once, at the call, instead
   of again inside the generic function's body.

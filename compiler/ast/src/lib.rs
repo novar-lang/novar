@@ -357,3 +357,15 @@ impl Import {
         }
     }
 }
+
+/// The names of the types as written (`Int`, `Text`, `List`) and as the compiler knows them.
+pub fn canonical_type_name(name: &str) -> &str {
+    match name {
+        "Int" => "i64",
+        "Float" => "f64",
+        "Text" => "String",
+        "Bool" => "bool",
+        "List" => "Vec",
+        other => other,
+    }
+}
