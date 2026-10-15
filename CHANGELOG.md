@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* **Inferred return type:** a top-level function without `->` returns the type of its last expression
+  (`fn double(x: Int): x * 2` returns an `Int`). `main`, tests, endpoints, generic functions and
+  methods still need the `->`.
+
 ## 0.1.0
 
 **Breaking: a new syntax.** Telvax is now easy to read for anyone who knows Python (blocks by

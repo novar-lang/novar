@@ -31,6 +31,8 @@ fn main() -> i32:
   (64 bits), `Bool`, `Text`, `List[T]`, `Map[K, V]`, `T?` (a value or `None`), `Result[T, E]`,
   `Tensor[T, dims]` and `Table[Row]`. When the size matters: `i8`, `i16`, `i32`, `u8` to `u64`,
   `f32`, `f64`.
+* A top-level function without `->` returns the type of its last expression: `fn double(x: Int): x * 2`
+  returns an `Int`. Write the `->` for `main`, tests, endpoints, generic functions and methods.
 * A name that starts with `_` is private to its file; everything else can be imported.
 * Control flow: `if` / `elif` / `else`, `while`, `for x in items`, `for i in range(n)`,
   `for i in range(a, b)`, `break`, `continue`, `pass` and `return`. `a if cond else b` is an

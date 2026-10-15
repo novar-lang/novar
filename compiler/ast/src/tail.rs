@@ -1,10 +1,7 @@
-//! Rewrites that turn the surface into the tree the rest of the compiler expects.
-//!
-//! The last expression of a function that declares a return type is its value, with or without
-//! `return`; through `if` / `elif` / `else` and `match` it is the value of each branch. Early
-//! `return`s stay `return`s.
+//! The value of a function: its last expression, with or without `return`; through `if` / `elif` /
+//! `else` and `match` it is the value of each branch. Early `return`s stay `return`s.
 
-use telvax_ast::*;
+use crate::*;
 
 /// Gives `f` its value: the final `return value` or final expression of the body.
 pub fn finish_fn(f: &mut Fn) {
@@ -37,7 +34,7 @@ fn is_value(e: &Expr) -> bool {
 
 /// Moves a final `return value` or final expression into the block's value, looking through a
 /// final `if` / `match`.
-pub(crate) fn tailify_block(b: &mut Block) {
+pub fn tailify_block(b: &mut Block) {
     match b.stmts.last() {
         Some(Stmt::Expr(Spanned {
             node: ExprKind::Return(Some(_)),

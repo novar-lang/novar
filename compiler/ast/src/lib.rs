@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+pub mod tail;
+
 pub type Span = Range<usize>;
 
 /// A node together with its byte span in the source.
