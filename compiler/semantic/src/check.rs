@@ -227,6 +227,8 @@ fn method_module(ty: &Ty, name: &str) -> Option<&'static str> {
             Some("iter")
         }
         Ty::Vec(_) if name == "join" => Some("string"),
+        Ty::Vec(_) if name == "slice" => Some("iter"),
+        Ty::Prim(Prim::Str) if name == "slice" => Some("string"),
         Ty::Option(_)
             if matches!(
                 name,
@@ -266,9 +268,24 @@ fn prelude(name: &str) -> Option<Vec<String>> {
         "assert_eq" => &["std", "test", "assert_eq"],
         "read_csv" => &["std", "table", "read_csv"],
         "read_parquet" => &["std", "table", "read_parquet"],
+        "abs" => &["std", "math", "abs"],
+        "min" => &["std", "math", "min"],
+        "max" => &["std", "math", "max"],
+        "float" => &["std", "math", "to_float"],
+        "int" => &["std", "math", "to_int"],
+        "str" => &["std", "text", "to_text"],
+        "range" => &["std", "iter", "range"],
         _ => return None,
     };
     Some(path.iter().map(|s| (*s).to_string()).collect())
+}
+
+/// The expression a `for` loop goes over (the loop is known to have one).
+fn iter_source(iter: &ast::ForIter) -> ast::Expr {
+    match iter {
+        ast::ForIter::Expr(e) => (**e).clone(),
+        ast::ForIter::Range { start, .. } => (**start).clone(),
+    }
 }
 
 /// The candidate closest to `name` by edit distance (at most 2, and well under the name's length).
@@ -1584,20 +1601,40 @@ impl Checker {
             K::For { var, iter, body } => self.for_loop(var, iter, body, span),
             K::Index { base, index } => {
                 let base = self.expr(base, None);
-                let index = self.expr(index, None);
-                let index_ok = matches!(self.resolve(&index.ty), Ty::Prim(p) if p.is_int())
-                    || matches!(
-                        self.resolve(&index.ty),
-                        Ty::IntVar(_) | Ty::Unknown | Ty::Never
-                    );
-                if !index_ok {
-                    self.err(
-                        index.span.clone(),
-                        format!("indices must be integers, found `{}`", index.ty),
-                    );
+                // A `Map` is indexed by its key type; everything else by an integer.
+                let key_ty = match self.resolve(&base.ty) {
+                    Ty::Map(k, _) => Some(*k),
+                    _ => None,
+                };
+                let index = self.expr(index, key_ty.as_ref());
+                match &key_ty {
+                    Some(k) => {
+                        if !self.unify(k, &index.ty) {
+                            let found = self.resolve(&index.ty);
+                            self.err(
+                                index.span.clone(),
+                                format!("this `Map` has `{k}` keys, found `{found}`"),
+                            );
+                        }
+                    }
+                    None => {
+                        let index_ok = matches!(self.resolve(&index.ty), Ty::Prim(p) if p.is_int())
+                            || matches!(
+                                self.resolve(&index.ty),
+                                Ty::IntVar(_) | Ty::Unknown | Ty::Never
+                            );
+                        if !index_ok {
+                            self.err(
+                                index.span.clone(),
+                                format!("indices must be integers, found `{}`", index.ty),
+                            );
+                        }
+                    }
                 }
                 let ty = match &base.ty {
                     Ty::Vec(t) => (**t).clone(),
+                    Ty::Map(_, v) => (**v).clone(),
+                    Ty::Prim(Prim::Str) => Ty::str(),
                     Ty::Table(s) => Ty::Struct(s.clone()),
                     // Indexing peels the leading dimension: a row of a matrix is a vector.
                     Ty::Tensor { elem, shape } if shape.len() == 1 => (**elem).clone(),
@@ -2017,18 +2054,34 @@ impl Checker {
             }
             ast::ExprKind::Index { base, index } => {
                 let mut place = self.place(base)?;
-                let index = self.expr(index, None);
+                let key_ty = match self.resolve(&place.ty) {
+                    Ty::Map(k, _) => Some(*k),
+                    _ => None,
+                };
+                let index = self.expr(index, key_ty.as_ref());
                 let shown = self.resolve(&index.ty);
-                if !(matches!(shown, Ty::Prim(p) if p.is_int())
-                    || matches!(shown, Ty::IntVar(_) | Ty::Unknown | Ty::Never))
-                {
-                    self.err(
-                        index.span.clone(),
-                        format!("indices must be integers, found `{shown}`"),
-                    );
+                match &key_ty {
+                    Some(k) => {
+                        if !self.unify(k, &index.ty) {
+                            self.err(
+                                index.span.clone(),
+                                format!("this `Map` has `{k}` keys, found `{shown}`"),
+                            );
+                        }
+                    }
+                    None => {
+                        if !(matches!(shown, Ty::Prim(p) if p.is_int())
+                            || matches!(shown, Ty::IntVar(_) | Ty::Unknown | Ty::Never))
+                        {
+                            self.err(
+                                index.span.clone(),
+                                format!("indices must be integers, found `{shown}`"),
+                            );
+                        }
+                    }
                 }
                 match self.resolve(&place.ty) {
-                    Ty::Vec(elem) => {
+                    Ty::Vec(elem) | Ty::Map(_, elem) => {
                         place.projs.push(hir::Proj::Index(Box::new(index)));
                         place.ty = *elem;
                         place.span = target.span.clone();
@@ -2129,7 +2182,28 @@ impl Checker {
                 )
             }
             ast::ForIter::Expr(v) => {
-                let v = self.expr(v, None);
+                let diags_before = self.diags.len();
+                let mut v = self.expr(v, None);
+                // `for key in m` goes over the keys, as in Python.
+                if matches!(self.resolve(&v.ty), Ty::Map(..)) && self.diags.len() == diags_before {
+                    let keys = ast::Expr {
+                        node: ast::ExprKind::Call {
+                            callee: Box::new(ast::Expr {
+                                node: ast::ExprKind::Field {
+                                    base: Box::new(iter_source(iter)),
+                                    name: ast::Ident {
+                                        node: "keys".into(),
+                                        span: v.span.clone(),
+                                    },
+                                },
+                                span: v.span.clone(),
+                            }),
+                            args: Vec::new(),
+                        },
+                        span: v.span.clone(),
+                    };
+                    v = self.expr(&keys, None);
+                }
                 let ty = match &v.ty {
                     Ty::Vec(t) => (**t).clone(),
                     Ty::Table(s) => Ty::Struct(s.clone()),
@@ -4023,6 +4097,11 @@ impl Checker {
                     }
                 }
             },
+            // Numbers and booleans have no methods of their own.
+            Ty::Prim(_) | Ty::IntVar(_) | Ty::FloatVar(_) => {
+                let shown = self.resolve(&base.ty).to_string();
+                self.no_method(name, &shown, &[])
+            }
             _ => Ty::Unknown,
         }
     }
@@ -4430,6 +4509,35 @@ impl Checker {
     }
 
     /// `a + b` and friends when at least one side is a tensor.
+    /// A call of the std function `std.<module>.<name>` with arguments that are already checked.
+    fn std_call_expr(
+        &mut self,
+        module: &str,
+        name: &str,
+        args: Vec<hir::Expr>,
+        span: &Span,
+    ) -> hir::Expr {
+        let path: Vec<String> = ["std", module, name].map(String::from).to_vec();
+        let sig = stdlib::function(&path.join("::")).expect("std function exists");
+        let tys: Vec<Ty> = args.iter().map(|a| self.resolve(&a.ty)).collect();
+        let ty = match (sig.check)(&tys) {
+            Ok(t) => t,
+            Err(msg) => {
+                self.err(span.clone(), msg);
+                Ty::Unknown
+            }
+        };
+        let callee = Self::mk(hir::ExprKind::Extern(path), Ty::Unknown, span);
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            ty,
+            span,
+        )
+    }
+
     fn tensor_operator(
         &mut self,
         op: ast::BinOp,
@@ -4515,6 +4623,20 @@ impl Checker {
             let is_tensor = |t: &Ty| matches!(t, Ty::Tensor { .. });
             if is_tensor(&lt) || is_tensor(&rt) {
                 return self.tensor_operator(op, l, r, span);
+            }
+        }
+        // `"ab" * 3` repeats a text and `xs + ys` joins two lists.
+        {
+            let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
+            let is_int =
+                |t: &Ty| matches!(t, Ty::Prim(p) if p.is_int()) || matches!(t, Ty::IntVar(_));
+            let call = match op {
+                Mul if lt == Ty::str() && is_int(&rt) => Some(("string", "repeat")),
+                Add if matches!((&lt, &rt), (Ty::Vec(_), Ty::Vec(_))) => Some(("iter", "concat")),
+                _ => None,
+            };
+            if let Some((module, name)) = call {
+                return self.std_call_expr(module, name, vec![l, r], span);
             }
         }
         let compatible = self.unify(&l.ty, &r.ty);

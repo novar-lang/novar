@@ -320,6 +320,272 @@ fn parse_here(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
     (program, kept)
 }
 
+/// The path `std.a.b` as an expression.
+fn std_path(tail: &[&str], span: &Span) -> Expr {
+    let mut path = vec![Ident {
+        node: "std".into(),
+        span: span.clone(),
+    }];
+    path.extend(tail.iter().map(|part| Ident {
+        node: (*part).into(),
+        span: span.clone(),
+    }));
+    Spanned {
+        node: ExprKind::Path(path),
+        span: span.clone(),
+    }
+}
+
+/// A call of a std function: `std.math.pow(a, b)`.
+fn std_call(tail: &[&str], args: Vec<Expr>, span: Span) -> Expr {
+    Spanned {
+        node: ExprKind::Call {
+            callee: Box::new(std_path(tail, &span)),
+            args,
+        },
+        span,
+    }
+}
+
+/// `base.name(args)`
+fn method_call(base: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
+    let callee = Spanned {
+        node: ExprKind::Field {
+            base: Box::new(base),
+            name: Ident {
+                node: name.into(),
+                span: span.clone(),
+            },
+        },
+        span: span.clone(),
+    };
+    Spanned {
+        node: ExprKind::Call {
+            callee: Box::new(callee),
+            args,
+        },
+        span,
+    }
+}
+
+/// `xs[a:b]` is `xs.slice(a, b)`; a missing start is 0 and a missing end is the length.
+fn slice_call(base: Expr, lo: Option<Expr>, hi: Option<Expr>, span: Span) -> ExprKind {
+    let bound = |value: Option<Expr>, default: u64| {
+        value.unwrap_or(Spanned {
+            node: ExprKind::Lit(Lit::Int(default)),
+            span: span.clone(),
+        })
+    };
+    let (lo, hi) = (bound(lo, 0), bound(hi, i64::MAX as u64));
+    method_call(base, "slice", vec![lo, hi], span).node
+}
+
+/// `{k: v, ...}` is `std.map.from_entries([(k, v), ...])`, and `{}` is `std.map.new()`.
+fn map_literal(pairs: Vec<(Expr, Expr)>, span: Span) -> ExprKind {
+    if pairs.is_empty() {
+        return std_call(&["map", "new"], Vec::new(), span).node;
+    }
+    let entries = pairs
+        .into_iter()
+        .map(|(k, v)| Spanned {
+            span: k.span.start..v.span.end,
+            node: ExprKind::Tuple(vec![k, v]),
+        })
+        .collect();
+    let list = Spanned {
+        node: ExprKind::Array(entries),
+        span: span.clone(),
+    };
+    std_call(&["map", "from_entries"], vec![list], span).node
+}
+
+/// A closure from parsed parameters: a name, the names a tuple parameter is taken apart into, and
+/// an optional type. The parts of a tuple parameter are bound at the top of the body.
+fn closure_of(params: Vec<(Ident, Vec<Ident>, Option<Type>)>, body: Expr, span: Span) -> Expr {
+    let mut names = Vec::new();
+    let mut types = Vec::new();
+    let mut lets = Vec::new();
+    for (name, parts, ty) in params {
+        types.push(ty);
+        if !parts.is_empty() {
+            let at = name.span.clone();
+            lets.extend(tuple_lets(parts, name.clone(), None, false, at));
+        }
+        names.push(name);
+    }
+    let body = if lets.is_empty() {
+        body
+    } else {
+        Spanned {
+            node: ExprKind::Block(Block {
+                stmts: lets.into_iter().map(Stmt::Let).collect(),
+                tail: Some(Box::new(body)),
+                span: span.clone(),
+            }),
+            span: span.clone(),
+        }
+    };
+    Spanned {
+        node: ExprKind::Closure {
+            params: names,
+            types,
+            body: Box::new(body),
+        },
+        span,
+    }
+}
+
+/// Whether `name` appears anywhere in `expr`. It looks at the printed tree, so it can say yes for
+/// a field or an argument with the same name; that only costs an extra binding.
+fn mentions(expr: &Expr, name: &str) -> bool {
+    format!("{expr:?}").contains(&format!("node: {name:?}"))
+}
+
+/// `[e for x in xs if c]` is `xs.filter(x => c).map(x => e)`.
+fn comprehension_call(
+    element: Expr,
+    var: (Ident, Vec<Ident>, Option<Type>),
+    iterable: Expr,
+    cond: Option<Expr>,
+    span: Span,
+) -> ExprKind {
+    let mut source = iterable;
+    if let Some(cond) = cond {
+        // The test only binds the names it uses, so the others are not reported as unused.
+        let (name, parts, ty) = var.clone();
+        let parts = parts
+            .into_iter()
+            .map(|part| {
+                if mentions(&cond, &part.node) {
+                    part
+                } else {
+                    Ident {
+                        node: "_".into(),
+                        span: part.span,
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        let name = if parts.is_empty() && !mentions(&cond, &name.node) {
+            Ident {
+                node: format!("_{}", name.node),
+                span: name.span,
+            }
+        } else {
+            name
+        };
+        let keep = closure_of(vec![(name, parts, ty)], cond, span.clone());
+        source = method_call(source, "filter", vec![keep], span.clone());
+    }
+    let make = closure_of(vec![var], element, span.clone());
+    method_call(source, "map", vec![make], span).node
+}
+
+/// One of the operators that can sit in a comparison chain.
+#[derive(Clone, Copy)]
+enum Cmp {
+    Op(BinOp),
+    In,
+    NotIn,
+}
+
+fn compare(op: Cmp, lhs: Expr, rhs: Expr, span: Span) -> Expr {
+    let kind = match op {
+        Cmp::Op(op) => ExprKind::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+        Cmp::In | Cmp::NotIn => {
+            // `a in b` is `b.contains(a)`.
+            let contains = method_call(rhs, "contains", vec![lhs], span.clone());
+            if matches!(op, Cmp::NotIn) {
+                ExprKind::Unary {
+                    op: UnOp::Not,
+                    expr: Box::new(contains),
+                }
+            } else {
+                contains.node
+            }
+        }
+    };
+    Spanned { node: kind, span }
+}
+
+/// `a < b` and chains such as `a < b < c`, which mean `a < b and b < c` with each operand
+/// evaluated once: an operand that is not a name or a literal is bound to a temporary first.
+fn comparison(first: Expr, rest: Vec<(Cmp, Expr)>, span: Span) -> Expr {
+    if rest.len() <= 1 {
+        return match rest.into_iter().next() {
+            None => first,
+            Some((op, rhs)) => compare(op, first, rhs, span),
+        };
+    }
+    let mut ops = Vec::new();
+    let mut operands = vec![first];
+    for (op, operand) in rest {
+        ops.push(op);
+        operands.push(operand);
+    }
+    let mut lets = Vec::new();
+    for (i, operand) in operands.iter_mut().enumerate() {
+        let simple = matches!(&operand.node, ExprKind::Path(p) if p.len() == 1)
+            || matches!(operand.node, ExprKind::Lit(_));
+        if simple {
+            continue;
+        }
+        let name = Ident {
+            node: format!("__cmp{}_{i}", span.start),
+            span: operand.span.clone(),
+        };
+        let at = operand.span.clone();
+        let value = std::mem::replace(
+            operand,
+            Spanned {
+                node: ExprKind::Path(vec![name.clone()]),
+                span: at.clone(),
+            },
+        );
+        lets.push(Stmt::Let(Let {
+            mutable: false,
+            name,
+            ty: None,
+            init: value,
+            span: at,
+        }));
+    }
+    let mut tests = ops.into_iter().enumerate().map(|(i, op)| {
+        compare(
+            op,
+            operands[i].clone(),
+            operands[i + 1].clone(),
+            span.clone(),
+        )
+    });
+    let mut all = tests.next().expect("a chain has two comparisons");
+    for test in tests {
+        all = Spanned {
+            node: ExprKind::Binary {
+                op: BinOp::And,
+                lhs: Box::new(all),
+                rhs: Box::new(test),
+            },
+            span: span.clone(),
+        };
+    }
+    if lets.is_empty() {
+        return all;
+    }
+    Spanned {
+        node: ExprKind::Block(Block {
+            stmts: lets,
+            tail: Some(Box::new(all)),
+            span: span.clone(),
+        }),
+        span,
+    }
+}
+
 /// Parses a single expression (used for f-string interpolations and tests).
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Diagnostic>) {
     parse_expr_at(src, 0, &Rc::new(HashSet::from(["std".to_string()])))
@@ -561,8 +827,35 @@ fn fstring_parts(body: &str, offset: usize, heads: &Heads) -> Result<Vec<FPart>,
                     parts.push(FPart::Text(std::mem::take(&mut text)));
                 }
                 let inner = &body[start..j - 1];
-                match parse_expr_at(inner, offset + start, heads) {
-                    (Some(e), errs) if errs.is_empty() => parts.push(FPart::Expr(e)),
+                let (code, spec) = split_format_spec(inner);
+                // `{x=}` shows the source text, then the value.
+                let trimmed = code.trim_end();
+                let debug = trimmed.len() > 1
+                    && trimmed.ends_with('=')
+                    && !trimmed[..trimmed.len() - 1].ends_with(['=', '!', '<', '>']);
+                let expr_src = if debug {
+                    &trimmed[..trimmed.len() - 1]
+                } else {
+                    code
+                };
+                if debug {
+                    parts.push(FPart::Text(format!("{}=", expr_src.trim_start())));
+                }
+                match parse_expr_at(expr_src, offset + start, heads) {
+                    (Some(e), errs) if errs.is_empty() => {
+                        let e = match spec {
+                            Some(spec) => {
+                                let at = e.span.clone();
+                                let spec = Spanned {
+                                    node: ExprKind::Lit(Lit::Str(unescape(spec))),
+                                    span: at.clone(),
+                                };
+                                std_call(&["text", "format"], vec![e, spec], at)
+                            }
+                            None => e,
+                        };
+                        parts.push(FPart::Expr(e));
+                    }
                     (_, mut errs) => {
                         return Err(errs.drain(..).next().unwrap_or_else(|| {
                             err(start, j - 1, "invalid expression in f-string")
@@ -582,6 +875,25 @@ fn fstring_parts(body: &str, offset: usize, heads: &Heads) -> Result<Vec<FPart>,
         parts.push(FPart::Text(text));
     }
     Ok(parts)
+}
+
+/// Splits the inside of an f-string `{...}` at the first `:` that is not inside brackets or a
+/// string: `x:.2f` is the code `x` and the format `.2f`.
+fn split_format_spec(inner: &str) -> (&str, Option<&str>) {
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    for (i, c) in inner.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(' | '[' | '{') => depth += 1,
+            (None, ')' | ']' | '}') => depth = depth.saturating_sub(1),
+            (None, ':') if depth == 0 => return (&inner[..i], Some(&inner[i + 1..])),
+            _ => {}
+        }
+    }
+    (inner, None)
 }
 
 /// What one line of a block stands for.
@@ -794,6 +1106,8 @@ where
         });
         let string = select! { Token::Str(s) => s }
             .map(|s| ExprKind::Lit(Lit::Str(unescape(&s[1..s.len() - 1]))));
+        let triple = select! { Token::TStr(s) => s }
+            .map(|s| ExprKind::Lit(Lit::Str(unescape(&s[3..s.len() - 3]))));
         let boolean = select! { Token::True => true, Token::False => false }
             .map(|b| ExprKind::Lit(Lit::Bool(b)));
         let fstring_heads = heads.clone();
@@ -838,23 +1152,80 @@ where
                 |_| ExprKind::Error,
             )));
 
+        // `[a, b]` is a list and `[e for x in xs if c]` a comprehension, so what follows the first
+        // expression decides which.
+        let comp_var = tuple_names()
+            .or(ident()
+                .separated_by(just(Token::Comma))
+                .at_least(2)
+                .collect::<Vec<_>>())
+            .map_with(|names, e| {
+                let at = rng(e.span());
+                (
+                    Ident {
+                        node: format!("__arg{}", at.start),
+                        span: at,
+                    },
+                    names,
+                    None,
+                )
+            })
+            .or(ident().map(|v| (v, Vec::new(), None)));
+        let comprehension = just(Token::For)
+            .ignore_then(comp_var)
+            .then_ignore(just(Token::In))
+            .then(expr.clone())
+            .then(just(Token::If).ignore_then(expr.clone()).or_not());
         let array = expr
             .clone()
+            .then(
+                comprehension
+                    .map(Ok)
+                    .or(just(Token::Comma)
+                        .ignore_then(expr.clone())
+                        .repeated()
+                        .collect::<Vec<_>>()
+                        .then_ignore(just(Token::Comma).or_not())
+                        .map(Err))
+                    .or_not(),
+            )
+            .or_not()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map_with(|items, e| match items {
+                None => ExprKind::Array(Vec::new()),
+                Some((first, None)) => ExprKind::Array(vec![first]),
+                Some((first, Some(Err(rest)))) => {
+                    let mut all = vec![first];
+                    all.extend(rest);
+                    ExprKind::Array(all)
+                }
+                Some((element, Some(Ok(((var, iterable), cond))))) => {
+                    comprehension_call(element, var, iterable, cond, rng(e.span()))
+                }
+            });
+
+        // `{k: v, ...}` builds a `Map`; `{}` is an empty one.
+        let map_lit = expr
+            .clone()
+            .then_ignore(just(Token::Colon))
+            .then(expr.clone())
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
-            .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map(ExprKind::Array);
+            .delimited_by(just(Token::LBrace), just(Token::RBrace))
+            .map_with(|pairs, e| map_literal(pairs, rng(e.span())));
 
         let primary = choice((
             float,
             int,
+            triple,
             string,
             fstring,
             boolean,
             ident().map(|i| ExprKind::Path(vec![i])),
             paren,
             array,
+            map_lit,
         ))
         .map_with(|k, e| spanned(k, e.span()));
 
@@ -863,6 +1234,7 @@ where
             Call(Vec<Expr>),
             Field(Ident),
             Index(Expr),
+            Slice(Option<Expr>, Option<Expr>),
             Try,
             Parts(Vec<Ident>),
         }
@@ -914,18 +1286,34 @@ where
         let try_ = just(Token::Question).to(Postfix::Try);
         // `xs[i]`; with commas, `f[Int, Text]` names the types a generic function is called with
         // and the index is the tuple of them.
+        // `xs[a:b]`, `xs[a:]`, `xs[:b]` and `xs[:]` are slices; what follows the first expression
+        // (or its absence) decides which.
         let index = expr
             .clone()
-            .separated_by(just(Token::Comma))
-            .at_least(1)
-            .collect::<Vec<_>>()
+            .or_not()
+            .then(
+                just(Token::Colon)
+                    .ignore_then(expr.clone().or_not())
+                    .map(Ok)
+                    .or(just(Token::Comma)
+                        .ignore_then(expr.clone())
+                        .repeated()
+                        .collect::<Vec<_>>()
+                        .map(Err)),
+            )
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map_with(|mut items, e| {
-                Postfix::Index(if items.len() == 1 {
-                    items.remove(0)
-                } else {
-                    spanned(ExprKind::Tuple(items), e.span())
-                })
+            .try_map(|(first, rest), span| match (first, rest) {
+                (lo, Ok(hi)) => Ok(Postfix::Slice(lo, hi)),
+                (Some(first), Err(more)) => {
+                    let mut items = vec![first];
+                    items.extend(more);
+                    Ok(Postfix::Index(if items.len() == 1 {
+                        items.remove(0)
+                    } else {
+                        spanned(ExprKind::Tuple(items), span)
+                    }))
+                }
+                (None, Err(_)) => Err(Rich::custom(span, "expected an index or a slice here")),
             });
         let path_heads = heads.clone();
         let postfix = primary.foldl_with(
@@ -936,6 +1324,7 @@ where
                         base: Box::new(base),
                         index: Box::new(index),
                     },
+                    Postfix::Slice(lo, hi) => slice_call(base, lo, hi, rng(e.span())),
                     Postfix::Call(args) => {
                         // `Point(x: 1, y: 2)`: a capitalized name with every argument named builds
                         // a value of that type.
@@ -994,10 +1383,10 @@ where
             },
         );
 
-        let unary =
+        let negated = |operand: Boxed<'a, 'a, I, Expr, Extra<'a, 's>>| {
             select! { Token::Minus => UnOp::Neg }
                 .repeated()
-                .foldr_with(postfix, |op, rhs, e| {
+                .foldr_with(operand, |op, rhs, e| {
                     spanned(
                         ExprKind::Unary {
                             op,
@@ -1005,7 +1394,30 @@ where
                         },
                         e.span(),
                     )
-                });
+                })
+        };
+        // `a ** b` is `std.math.pow(a, b)`. It binds tighter than a minus on its left
+        // (`-2 ** 2` is `-4`), allows one on its right (`2 ** -1`) and groups to the right.
+        let postfix = postfix.boxed();
+        let exponent = negated(postfix.clone());
+        let power = postfix
+            .then(
+                just(Token::StarStar)
+                    .ignore_then(exponent)
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
+            .map_with(|(first, rest), e| {
+                let mut operands = vec![first];
+                operands.extend(rest);
+                let mut acc = operands.pop().expect("one operand");
+                while let Some(base) = operands.pop() {
+                    acc = std_call(&["math", "pow"], vec![base, acc], rng(e.span()));
+                }
+                acc
+            })
+            .boxed();
+        let unary = negated(power);
 
         let binary = |lower: Boxed<'a, 'a, I, Expr, Extra<'a, 's>>,
                       ops: Boxed<'a, 'a, I, BinOp, Extra<'a, 's>>| {
@@ -1024,23 +1436,36 @@ where
                 .boxed()
         };
 
-        let mul = binary(
-            unary.boxed(),
-            select! { Token::Star => BinOp::Mul, Token::Slash => BinOp::Div, Token::Percent => BinOp::Rem }
-                .boxed(),
-        );
+        // `a // b` is `std.math.floor_div(a, b)`.
+        let mul = unary
+            .clone()
+            .foldl_with(
+                select! {
+                    Token::Star => Some(BinOp::Mul), Token::Slash => Some(BinOp::Div),
+                    Token::Percent => Some(BinOp::Rem), Token::SlashSlash => None,
+                }
+                .then(unary)
+                .repeated(),
+                |lhs, (op, rhs), e| match op {
+                    Some(op) => spanned(
+                        ExprKind::Binary {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        e.span(),
+                    ),
+                    None => std_call(&["math", "floor_div"], vec![lhs, rhs], rng(e.span())),
+                },
+            )
+            .boxed();
         let add = binary(
             mul,
             select! { Token::Plus => BinOp::Add, Token::Minus => BinOp::Sub }.boxed(),
         );
 
-        // `<`, `<=`, `>`, `>=`, and the membership tests `in` / `not in`.
-        #[derive(Clone, Copy)]
-        enum Cmp {
-            Op(BinOp),
-            In,
-            NotIn,
-        }
+        // `<`, `<=`, `>`, `>=`, and the membership tests `in` / `not in`. A chain
+        // (`a < b < c`) means `a < b and b < c`, with each operand evaluated once.
         let cmp_op = select! {
             Token::Lt => Cmp::Op(BinOp::Lt), Token::LtEq => Cmp::Op(BinOp::LtEq),
             Token::Gt => Cmp::Op(BinOp::Gt), Token::GtEq => Cmp::Op(BinOp::GtEq),
@@ -1049,44 +1474,8 @@ where
         .or(just(Token::Not).ignore_then(just(Token::In)).to(Cmp::NotIn));
         let cmp = add
             .clone()
-            .foldl_with(cmp_op.then(add).repeated(), |lhs, (op, rhs), e| {
-                let kind = match op {
-                    Cmp::Op(op) => ExprKind::Binary {
-                        op,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                    Cmp::In | Cmp::NotIn => {
-                        // `a in b` is `b.contains(a)`.
-                        let at = rhs.span.clone();
-                        let contains = spanned(
-                            ExprKind::Call {
-                                callee: Box::new(Spanned {
-                                    node: ExprKind::Field {
-                                        base: Box::new(rhs),
-                                        name: Ident {
-                                            node: "contains".into(),
-                                            span: at.clone(),
-                                        },
-                                    },
-                                    span: at,
-                                }),
-                                args: vec![lhs],
-                            },
-                            e.span(),
-                        );
-                        if matches!(op, Cmp::NotIn) {
-                            ExprKind::Unary {
-                                op: UnOp::Not,
-                                expr: Box::new(contains),
-                            }
-                        } else {
-                            contains.node
-                        }
-                    }
-                };
-                spanned(kind, e.span())
-            })
+            .then(cmp_op.then(add).repeated().collect::<Vec<_>>())
+            .map_with(|(first, rest), e| comparison(first, rest, rng(e.span())))
             .boxed();
         let eq = binary(
             cmp,
@@ -1107,10 +1496,22 @@ where
         let and = binary(not, select! { Token::And => BinOp::And }.boxed());
         let or = binary(and, select! { Token::Or => BinOp::Or }.boxed());
 
-        let pipe = or
+        // `a ?? b` is `a.unwrap_or_else(() => b)`: `b` is only evaluated when `a` is `None`.
+        let coalesce = or
             .clone()
             .foldl_with(
-                just(Token::Pipe).ignore_then(or).repeated(),
+                just(Token::QuestionQuestion).ignore_then(or).repeated(),
+                |lhs, rhs, e| {
+                    let at = rng(e.span());
+                    let fallback = closure_of(Vec::new(), rhs, at.clone());
+                    method_call(lhs, "unwrap_or_else", vec![fallback], at)
+                },
+            )
+            .boxed();
+        let pipe = coalesce
+            .clone()
+            .foldl_with(
+                just(Token::Pipe).ignore_then(coalesce).repeated(),
                 |lhs, rhs, e| {
                     spanned(
                         ExprKind::Pipe {
@@ -1181,40 +1582,7 @@ where
         let lambda = arrow_params
             .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
-            .map_with(|(params, body), e| {
-                let mut names = Vec::new();
-                let mut types = Vec::new();
-                let mut lets = Vec::new();
-                for (name, parts, ty) in params {
-                    types.push(ty);
-                    if !parts.is_empty() {
-                        let span = name.span.clone();
-                        lets.extend(tuple_lets(parts, name.clone(), None, false, span));
-                    }
-                    names.push(name);
-                }
-                // The parts of tuple parameters are bound at the top of the body.
-                let body = if lets.is_empty() {
-                    body
-                } else {
-                    spanned(
-                        ExprKind::Block(Block {
-                            stmts: lets.into_iter().map(Stmt::Let).collect(),
-                            tail: Some(Box::new(body)),
-                            span: rng(e.span()),
-                        }),
-                        e.span(),
-                    )
-                };
-                spanned(
-                    ExprKind::Closure {
-                        params: names,
-                        types,
-                        body: Box::new(body),
-                    },
-                    e.span(),
-                )
-            });
+            .map_with(|(params, body), e| closure_of(params, body, rng(e.span())));
 
         lambda.or(ternary)
     })

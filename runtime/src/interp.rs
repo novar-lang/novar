@@ -12,7 +12,7 @@ use crate::std_impl;
 
 #[cfg(feature = "gpu")]
 mod gpu_chain;
-use crate::value::{Closure, Db, Env, StructVal, Value, from_json};
+use crate::value::{Closure, Db, Env, MapKey, MapVal, StructVal, Value, from_json};
 
 /// Where `std.tensor` operations on `f32` tensors run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -554,12 +554,10 @@ impl Interp {
                         hir::Proj::Field { name, .. } => Step::Field(name.as_str()),
                         hir::Proj::Index(i) => match self.eval(i, ctx)? {
                             Value::Int(i) => Step::Index(i),
-                            other => {
-                                return fail(format!(
-                                    "index is {}, not an integer",
-                                    other.type_name()
-                                ));
-                            }
+                            other => Step::Key(
+                                MapKey::from_value(&other)
+                                    .map_err(|e| Ctrl::Fail(RuntimeError::new(e)))?,
+                            ),
                         },
                     });
                 }
@@ -643,6 +641,13 @@ impl Interp {
             }
             ExprKind::Index { base, index } => {
                 let (base, i) = (self.eval(base, ctx)?, self.eval(index, ctx)?);
+                if let Value::Map(m) = &base {
+                    let key =
+                        MapKey::from_value(&i).map_err(|e| Ctrl::Fail(RuntimeError::new(e)))?;
+                    return m.get(&key).ok_or_else(|| {
+                        Ctrl::Fail(RuntimeError::new(format!("key not found: {i}")))
+                    });
+                }
                 let Value::Int(i) = i else {
                     return fail("indexing needs an integer index");
                 };
@@ -651,11 +656,25 @@ impl Interp {
                         "index out of bounds: the length is {len} but the index is {i}"
                     )))
                 };
+                // A negative index counts from the end: `xs[-1]` is the last item.
+                let from_end = |len: usize| {
+                    if i < 0 {
+                        usize::try_from(len as i64 + i).ok()
+                    } else {
+                        usize::try_from(i).ok()
+                    }
+                };
                 match base {
-                    Value::Vec(items) => usize::try_from(i)
-                        .ok()
+                    Value::Vec(items) => from_end(items.len())
                         .and_then(|i| items.get(i))
                         .ok_or_else(|| out_of_bounds(items.len())),
+                    Value::Str(s) => {
+                        let len = s.chars().count();
+                        from_end(len)
+                            .and_then(|i| s.chars().nth(i))
+                            .map(|c| Value::str(c.to_string()))
+                            .ok_or_else(|| out_of_bounds(len))
+                    }
                     Value::Table(t) => match usize::try_from(i) {
                         Ok(i) if i < t.rows() => Ok(t.row(i)?),
                         _ => Err(out_of_bounds(t.rows())),
@@ -665,7 +684,7 @@ impl Interp {
                         (_, Some((&n, _))) => Err(out_of_bounds(n)),
                         _ => fail("cannot index a scalar tensor"),
                     },
-                    _ => fail("indexing needs a Vec or a Table"),
+                    _ => fail("indexing needs a List, a Text, a Map or a Table"),
                 }
             }
             ExprKind::Array(items) => {
@@ -1007,6 +1026,9 @@ impl Interp {
 enum Step<'a> {
     Field(&'a str),
     Index(i64),
+    /// A key of a `Map` that is not an integer (an integer index also reaches a `Map` that is
+    /// keyed by integers: see `update_place`).
+    Key(MapKey),
 }
 
 /// Returns `current` with the place described by `steps` replaced by `new`. Structs are values
@@ -1038,14 +1060,38 @@ fn update_place(current: Value, steps: &[Step], new: Value) -> Result<Value, Ctr
                     items.len()
                 )))
             };
-            let idx = usize::try_from(*i).map_err(|_| out_of_bounds())?;
+            let idx = if *i < 0 {
+                usize::try_from(items.len() as i64 + *i)
+            } else {
+                usize::try_from(*i)
+            }
+            .map_err(|_| out_of_bounds())?;
             let old = items.get(idx).ok_or_else(out_of_bounds)?;
             let updated = update_place(old, rest, new)?;
             items.set(idx, updated);
             Ok(Value::Vec(items))
         }
+        (Step::Index(i), Value::Map(m)) => update_entry(m, MapKey::Int(*i), rest, new),
+        (Step::Key(k), Value::Map(m)) => update_entry(m, k.clone(), rest, new),
         (_, other) => fail(format!("cannot assign through a {}", other.type_name())),
     }
+}
+
+/// `m[key] = new`, or `m[key].field = new`: a `Map` is shared, so the entry is updated in place.
+fn update_entry(m: Arc<MapVal>, key: MapKey, rest: &[Step], new: Value) -> Result<Value, Ctrl> {
+    let updated = if rest.is_empty() {
+        new
+    } else {
+        let old = m.get(&key).ok_or_else(|| {
+            Ctrl::Fail(RuntimeError::new(format!(
+                "key not found: {}",
+                key.to_value()
+            )))
+        })?;
+        update_place(old, rest, new)?
+    };
+    m.insert(key, updated);
+    Ok(Value::Map(m))
 }
 
 /// `f32` values are stored as `f64`; rounding after every operation keeps `f32` arithmetic exactly

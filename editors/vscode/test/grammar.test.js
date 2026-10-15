@@ -92,6 +92,23 @@ test("single-quoted strings and f-strings", async () => {
   has(t, "b", "meta.interpolation");
 });
 
+test("triple-quoted strings, short operators and slices", async () => {
+  const t = await tokenize('let s = """a\nb"""\nlet n = 2 ** 3 // 2\nlet v = m ?? xs[1:2]');
+  has(t, '"""', "string.quoted.triple");
+  has(t, "**", "keyword.operator.arithmetic");
+  has(t, "//", "keyword.operator.arithmetic");
+  has(t, "??", "keyword.operator.coalesce");
+  has(t, "1", "constant.numeric.integer");
+});
+
+test("f-strings take quotes and formats inside their braces", async () => {
+  const t = await tokenize('let s = f"{m["a"]:>8} and {x=}"');
+  has(t, "m[", "meta.interpolation");
+  has(t, "a", "string.quoted.double");
+  has(t, "8", "constant.numeric.integer");
+  has(t, "x", "meta.interpolation");
+});
+
 test("numbers, constants, comments and control flow", async () => {
   const t = await tokenize("for i in range(10_000):\n    if x >= 2.5e-3 and ok or not done:\n        return True  # done");
   has(t, "for", "keyword.control");

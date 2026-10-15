@@ -64,6 +64,16 @@
     "string": {
       "patterns": [
         {
+          "name": "string.quoted.triple.telvax",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
           "name": "string.quoted.double.telvax",
           "begin": "\"",
           "end": "\"",
@@ -245,7 +255,11 @@
         },
         {
           "name": "keyword.operator.arithmetic.telvax",
-          "match": "[-+*/%]"
+          "match": "\\*\\*|//|[-+*/%]"
+        },
+        {
+          "name": "keyword.operator.coalesce.telvax",
+          "match": "\\?\\?"
         },
         {
           "name": "keyword.operator.try.telvax",

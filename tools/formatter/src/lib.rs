@@ -66,7 +66,7 @@ fn kind(t: &Token) -> Kind {
         | Continue | Pass | If | Elif | Else | For | In | Is | While | And | Or | Not => {
             Kind::Keyword
         }
-        True | False | Int(_) | Float(_) | Str(_) | FStr(_) | Ellipsis => Kind::Literal,
+        True | False | Int(_) | Float(_) | Str(_) | TStr(_) | FStr(_) | Ellipsis => Kind::Literal,
         Ident(_) => Kind::Word,
         LParen => Kind::Open('('),
         LBracket => Kind::Open('['),
@@ -106,6 +106,8 @@ struct Piece<'a> {
     layout: Vec<Token<'a>>,
     /// Column of this token in the source.
     col: usize,
+    /// No space or line break between this token and the one before it in the source.
+    tight: bool,
 }
 
 fn column(src: &str, at: usize) -> usize {
@@ -134,6 +136,7 @@ fn layout(src: &str, tokens: &[(Token<'_>, std::ops::Range<usize>)]) -> String {
             newlines_before,
             layout: std::mem::take(&mut pending_layout),
             col: column(src, span.start),
+            tight: gap.is_empty(),
         });
         prev_end = span.end;
     }
@@ -356,7 +359,7 @@ fn space_between(
     prev: &Piece,
     next: &Piece,
     before_prev: Option<Kind>,
-    _innermost: Option<char>,
+    innermost: Option<char>,
 ) -> bool {
     use Kind::*;
     match (prev.kind, next.kind) {
@@ -365,6 +368,8 @@ fn space_between(
         (_, Close(_)) => false,
         (Open(_), _) => false,
         (Dot | At, _) => false,
+        // A slice written without spaces (`xs[1:3]`) stays that way.
+        (Colon, _) if innermost == Some('[') && next.tight => false,
         (Colon | Comma, _) => true,
         // Calls and indexing.
         (Word | Literal | Close(_) | Question, Open('(' | '[')) => false,
@@ -493,5 +498,34 @@ mod tests {
             out,
             "from std.http import Request, Status\nlet t: Table[{region: Text, revenue: Float}] = x\n"
         );
+    }
+
+    #[test]
+    fn slices_stay_tight_and_short_operators_get_spaces() {
+        let out = fmt(
+            "let a=xs[1:3]\nlet b=xs[:n-1]\nlet c=xs[-2:]\nlet d=2**3//2\nlet e=m??0\nlet f=2** -1\n",
+        );
+        assert_eq!(
+            out,
+            "let a = xs[1:3]\nlet b = xs[:n - 1]\nlet c = xs[-2:]\nlet d = 2 ** 3 // 2\nlet e = m ?? 0\nlet f = 2 ** -1\n"
+        );
+        // Spaces the author wrote around a slice colon are kept, and bounds in a type are not slices.
+        assert_eq!(fmt("let a = xs[1: 3]\n"), "let a = xs[1: 3]\n");
+        assert_eq!(
+            fmt("fn f[T: Num](x:T)->T:\n    x\n"),
+            "fn f[T: Num](x: T) -> T:\n    x\n"
+        );
+    }
+
+    #[test]
+    fn comprehensions_maps_and_triple_quoted_text() {
+        let src = "let a = [x*2 for x in xs if x>1]\nlet m = {\"a\":1,\"b\":2}\nlet t = \"\"\"one\n  two\"\"\"\nlet s = f\"{m[\"a\"]:>8}\"\n";
+        assert_eq!(
+            fmt(src),
+            "let a = [x * 2 for x in xs if x > 1]\nlet m = {\"a\": 1, \"b\": 2}\nlet t = \"\"\"one\n  two\"\"\"\nlet s = f\"{m[\"a\"]:>8}\"\n"
+        );
+        // Formatting twice changes nothing.
+        let once = fmt(src);
+        assert_eq!(fmt(&once), once);
     }
 }

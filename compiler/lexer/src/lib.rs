@@ -83,8 +83,14 @@ pub enum Token<'src> {
     Float(&'src str),
     #[regex(r#""([^"\\]|\\.)*"|'([^'\\]|\\.)*'"#)]
     Str(&'src str),
-    /// `f"..."`; interpolation is split by the parser.
-    #[regex(r#"f"([^"\\]|\\.)*"|f'([^'\\]|\\.)*'"#)]
+    /// `"""..."""`: a string that may span lines.
+    #[regex(r#""""([^"\\]|\\.|"[^"]|""[^"])*""""#)]
+    TStr(&'src str),
+    /// `f"..."`; interpolation is split by the parser. A `{...}` part may hold quotes of its own
+    /// (`f"{m["a"]}"`), and a lone `{` is kept so the parser can say it is not closed.
+    #[regex(
+        r#"f"([^"\\{]|\\.|\{([^{}]|\{[^{}]*\})*\}|\{)*"|f'([^'\\{]|\\.|\{([^{}]|\{[^{}]*\})*\}|\{)*'"#
+    )]
     FStr(&'src str),
 
     // Operators
@@ -92,6 +98,12 @@ pub enum Token<'src> {
     Pipe,
     #[token("...")]
     Ellipsis,
+    #[token("**")]
+    StarStar,
+    #[token("//")]
+    SlashSlash,
+    #[token("??")]
+    QuestionQuestion,
     #[token("+=")]
     PlusEq,
     #[token("-=")]
@@ -194,9 +206,12 @@ impl std::fmt::Display for Token<'_> {
             Not => "not",
             True => "True",
             False => "False",
-            Ident(s) | Int(s) | Float(s) | Str(s) | FStr(s) => s,
+            Ident(s) | Int(s) | Float(s) | Str(s) | TStr(s) | FStr(s) => s,
             Pipe => "|>",
             Ellipsis => "...",
+            StarStar => "**",
+            SlashSlash => "//",
+            QuestionQuestion => "??",
             PlusEq => "+=",
             MinusEq => "-=",
             StarEq => "*=",
@@ -578,5 +593,47 @@ mod tests {
         let (toks, errs) = tokenize(src);
         assert!(errs.is_empty(), "{errs:?}");
         assert!(toks.iter().any(|(t, _)| *t == Pipe));
+    }
+
+    #[test]
+    fn short_operators() {
+        assert_eq!(
+            flat("a ** b // c ?? d"),
+            [
+                Ident("a"),
+                StarStar,
+                Ident("b"),
+                SlashSlash,
+                Ident("c"),
+                QuestionQuestion,
+                Ident("d")
+            ]
+        );
+        assert_eq!(flat("a * b / c ? d"), flat("a * b / c ? d"));
+        assert_eq!(flat("x?"), [Ident("x"), Question]);
+    }
+
+    #[test]
+    fn triple_quoted_strings_span_lines() {
+        assert_eq!(flat("\"\"\"a\nb\"\"\""), [TStr("\"\"\"a\nb\"\"\"")]);
+        assert_eq!(
+            flat("\"\"\"say \"hi\" now\"\"\""),
+            [TStr("\"\"\"say \"hi\" now\"\"\"")]
+        );
+        // The empty string is still a plain string.
+        assert_eq!(flat("\"\""), [Str("\"\"")]);
+        // A line break inside one does not start a block.
+        assert_eq!(
+            kinds("let s = \"\"\"a\n  b\"\"\"\n"),
+            [Let, Ident("s"), Eq, TStr("\"\"\"a\n  b\"\"\""), Newline]
+        );
+    }
+
+    #[test]
+    fn fstrings_may_hold_quotes_inside_braces() {
+        assert_eq!(flat(r#"f"{m["a"]}""#), [FStr(r#"f"{m["a"]}""#)]);
+        assert_eq!(flat(r#"f"{x:.2f} and {y}" + z"#).len(), 3);
+        // A brace that is never closed is still one token, so the parser can say so.
+        assert_eq!(flat(r#"f"{x""#), [FStr(r#"f"{x""#)]);
     }
 }
