@@ -8,6 +8,11 @@
   wrong count lists the parameters, and an unknown function lists the ones the file has. The function
   name is optional: `telvax run app.tvx` runs `main`. Only `telvax check` prints "ok" now; `run`,
   `test` and `serve` no longer do.
+* **`telvax check` takes many files, a package and `--json`:** `telvax check a.tvx b.tvx` checks each
+  and says how many failed; `telvax check` with no file checks the entry of the package around the
+  current directory (`telvax.toml`); `telvax check --json` prints one JSON array on stdout with, for
+  each diagnostic, `file`, `line`, `column`, `end_line`, `end_column` (1-based), `severity`, `message`
+  and `notes`. The exit code is 1 when any file has an error, in both modes.
 * **`telvax doctor`:** prints the version, the syntax editions it reads, which features this binary was
   built with (tables, live services, GPU, native backend) and the environment variables that change
   its behavior; keys are shown as set or not set, never their value. An unknown command now says

@@ -216,6 +216,78 @@ fn run_defaults_to_main_and_reads_arguments_by_their_declared_type() {
 }
 
 #[test]
+fn check_takes_many_files_a_package_and_json() {
+    let good = scratch("check_good", "fn main() -> i32:\n    0\n");
+    let bad = scratch(
+        "check_bad",
+        "fn main() -> i32:\n    let x: Int = \"a\"\n    0\n",
+    );
+    let (good_path, bad_path) = (good.to_str().unwrap(), bad.to_str().unwrap());
+    let (ok, _, err) = run(&["check", good_path, bad_path]);
+    assert!(!ok);
+    assert!(
+        err.contains("2 file(s) checked, 1 with errors") && err.contains("check_good.tvx` ok"),
+        "{err}"
+    );
+    // JSON: one array on stdout, the places as line and column, and the exit code still says failed.
+    let (ok, out, _) = run(&["check", "--json", bad_path]);
+    assert!(!ok);
+    let records: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let first = &records[0];
+    assert_eq!(first["severity"], "error");
+    assert_eq!(
+        (first["line"].as_u64(), first["column"].as_u64()),
+        (Some(2), Some(18))
+    );
+    assert_eq!(first["end_column"].as_u64(), Some(21));
+    assert!(
+        first["message"]
+            .as_str()
+            .unwrap()
+            .contains("expected `Int`, found `Text`")
+    );
+    assert!(first["file"].as_str().unwrap().ends_with("check_bad.tvx"));
+    let (ok, out, _) = run(&["check", "--json", good_path]);
+    assert!(ok && out.trim() == "[]", "{out}");
+    let (ok, out, _) = run(&["check", "--json", "no-such-file.tvx"]);
+    assert!(
+        !ok && out.contains("cannot read `no-such-file.tvx`") && out.contains("\"line\":null"),
+        "{out}"
+    );
+    let (ok, _, err) = run(&["check", "--bogus"]);
+    assert!(!ok && err.contains("no option `--bogus`"), "{err}");
+    // Without a file, the package around the current directory.
+    let pkg = std::env::temp_dir().join(format!("telvax-tools-{}-checkpkg", std::process::id()));
+    std::fs::create_dir_all(pkg.join("src")).unwrap();
+    std::fs::write(
+        pkg.join("telvax.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(pkg.join("src/main.tvx"), "fn main() -> i32:\n    0\n").unwrap();
+    let out = Command::new(TELVAX)
+        .arg("check")
+        .current_dir(&pkg)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success() && err.contains("main.tvx` ok"),
+        "{err}"
+    );
+    let outside = Command::new(TELVAX)
+        .arg("check")
+        .current_dir(good.parent().unwrap())
+        .output()
+        .unwrap();
+    assert!(!outside.status.success());
+    assert!(String::from_utf8_lossy(&outside.stderr).contains("inside a package"));
+    let _ = std::fs::remove_dir_all(&pkg);
+    let _ = std::fs::remove_dir_all(good.parent().unwrap());
+    let _ = std::fs::remove_dir_all(bad.parent().unwrap());
+}
+
+#[test]
 fn deeply_nested_programs_are_checked_not_crashed() {
     // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
     // recurses once per level and used to overflow the 8 MB stack of a main thread.

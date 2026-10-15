@@ -1,4 +1,5 @@
 mod bundle;
+mod check;
 mod doctor;
 mod native;
 mod serve;
@@ -12,7 +13,7 @@ use telvax_runtime::{Interp, Value};
 
 const USAGE: &str = "\
 usage:
-  telvax check <file.tvx>
+  telvax check [--json] [file.tvx...]                       no file: the package in this directory
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
   telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
@@ -93,7 +94,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             print!("{}", doctor::report());
             Ok(())
         }
-        ["check", file] => check(file).map(|_| eprintln!("`{file}` ok")),
+        ["check", rest @ ..] => check::run(rest),
         // Without a function name, `main` runs: `telvax run app.tvx --allow fs`.
         ["run", file, rest @ ..] => match rest {
             [func, args @ ..] if !func.starts_with('-') => run(file, func, args),
