@@ -2,15 +2,15 @@
 //!
 //! A *package* is a directory of `.tvx` files. Its root module is the entry file (or `lib.tvx` for
 //! a dependency); `a/b.tvx` or `a/b/mod.tvx` is the module `a::b`. Other modules are used with
-//! `import`:
+//! `import` or `from ... import`:
 //!
 //! ```text
-//! import util::clamp;                 // ./util.tvx, relative to the package root
-//! import crate::geometry::{Point, norm};
-//! import mathx::vec::dot;             // package `mathx`, file vec.tvx
+//! from util import clamp              # ./util.tvx, relative to the package root
+//! from geometry import Point, norm as length
+//! from mathx.vec import dot           # package `mathx`, file vec.tvx
 //! ```
 //!
-//! Only `pub fn` and `pub struct` items can be imported. Loading merges every module into one
+//! Every item can be imported except those whose name starts with `_`. Loading merges every module into one
 //! [`telvax_ast::Program`], renaming items from other modules to unique names (`mathx__vec__dot`)
 //! and rewriting every reference, so the type checker and backends never see modules. All files
 //! share one offset space (see [`SourceMap`]) so diagnostics keep pointing at the right file.
@@ -314,8 +314,13 @@ impl Loader<'_> {
         out
     }
 
+    /// How a program writes the module: `util`, `mathx.vec` (the project's own modules have no
+    /// prefix).
     fn describe(&self, key: &ModKey) -> String {
-        std::iter::once(self.package_name(key.pkg))
+        let own = key.pkg == 0;
+        (!own)
+            .then(|| self.package_name(key.pkg))
+            .into_iter()
             .chain(key.path.iter().cloned())
             .collect::<Vec<_>>()
             .join(".")
@@ -361,6 +366,25 @@ impl Loader<'_> {
                 ));
                 continue;
             }
+            if imp.group.is_empty() {
+                let whole = ModKey {
+                    pkg,
+                    path: rest.to_vec(),
+                };
+                if self.module_file(&whole).is_some() {
+                    let name = self.describe(&whole);
+                    self.diags.push(
+                        Diagnostic::error(
+                            imp.span.clone(),
+                            format!("`{name}` is a module, not a function or type"),
+                        )
+                        .with_note(format!(
+                            "import the names you use from it: `from {name} import name`"
+                        )),
+                    );
+                    continue;
+                }
+            }
             let key = ModKey {
                 pkg,
                 path: module_path,
@@ -380,16 +404,21 @@ impl Loader<'_> {
                 continue;
             };
             let exports = self.exports(target);
-            for (name, ident) in items.iter().zip(if imp.group.is_empty() {
-                vec![imp.path.last().unwrap().clone()]
-            } else {
-                imp.group.clone()
-            }) {
+            for (i, (name, ident)) in items
+                .iter()
+                .zip(if imp.group.is_empty() {
+                    vec![imp.path.last().unwrap().clone()]
+                } else {
+                    imp.group.clone()
+                })
+                .enumerate()
+            {
                 match exports.get(name) {
                     Some(true) => {
+                        let local = imp.local_name(i, &ident).node;
                         self.modules[idx]
                             .imports
-                            .push((name.clone(), target, name.clone()))
+                            .push((local, target, name.clone()))
                     }
                     Some(false) => self.diags.push(
                         Diagnostic::error(ident.span.clone(), format!("`{name}` is private"))

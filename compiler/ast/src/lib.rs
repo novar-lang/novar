@@ -33,12 +33,15 @@ pub enum Item {
     Fn(Fn),
 }
 
-/// `import std::http::{Request, Response};` or `import a::b::C;`
+/// `import a.b.C` or `from std.http import Request, Response`, each name optionally `as other`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
     pub path: Vec<Ident>,
-    /// Empty for a plain import; names inside `{...}` otherwise.
+    /// Empty for a plain import; the names after `import` in `from a import b, c`.
     pub group: Vec<Ident>,
+    /// The `as` names, one per imported name (`group`, or the last part of `path` for a plain
+    /// import). May be empty or shorter than that list: a missing entry means no `as`.
+    pub aliases: Vec<Option<Ident>>,
     pub span: Span,
 }
 
@@ -342,4 +345,15 @@ pub enum BinOp {
     Mul,
     Div,
     Rem,
+}
+
+impl Import {
+    /// The name `i` (an index into `group`, or 0 for a plain import) is known by in the importing
+    /// file: its `as` name, or itself.
+    pub fn local_name(&self, i: usize, name: &Ident) -> Ident {
+        match self.aliases.get(i) {
+            Some(Some(alias)) => alias.clone(),
+            _ => name.clone(),
+        }
+    }
 }

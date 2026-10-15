@@ -1119,6 +1119,7 @@ where
             Item::Import(Import {
                 path,
                 group: group.unwrap_or_default(),
+                aliases: Vec::new(),
                 span: rng(e.span()),
             })
         });

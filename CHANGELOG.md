@@ -6,6 +6,12 @@
   element or a return value (`fn adder(n: Int) -> (Int) -> Int: x => x + n`). `() -> ()` stands for no
   value. A field that holds a function can be called (`handler.run(5)`), and a closure parameter can
   carry its type: `(x: Int) => x + 1`.
+* **Imports can be renamed:** `from util import clamp as limit`, `import util.clamp as limit`. Importing
+  a module as a whole (`import util`) is an error that says to write `from util import name`, and the
+  messages for the modules of your own project no longer say `crate`.
+* **Syntax errors say what to write:** a `{ }` body, a parameter without a type, `: Type` for a return
+  type, and `use`, `const` and `function` now get the same hint as `def` and `pub`. The extra
+  "unexpected `def`" that came before the hint is gone.
 * **Methods on `Result` and `Option`:** `Result` has `is_ok`, `is_err`, `unwrap`, `expect`,
   `unwrap_or`, `unwrap_or_else`, `map`, `map_err`, `and_then`, `ok` and `err`; `Option` gains `map`,
   `and_then`, `filter`, `ok_or`, `unwrap_or_else` and `expect`. They are checked: a method that does not

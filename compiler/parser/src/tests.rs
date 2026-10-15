@@ -653,4 +653,33 @@ fn function_types_and_typed_closure_parameters() {
         panic!("not a closure")
     };
     assert!(types[0].is_some() && types[1].is_none());
+
+fn imports_can_be_renamed() {
+    let p = ok_program("from a.b import C as D, e\nimport x.Y as Z\n");
+    let Item::Import(i) = &p.items[0] else {
+        panic!()
+    };
+    assert_eq!(i.group.len(), 2);
+    assert_eq!(i.local_name(0, &i.group[0]).node, "D");
+    assert_eq!(i.local_name(1, &i.group[1]).node, "e");
+    let Item::Import(i) = &p.items[1] else {
+        panic!()
+    };
+    assert_eq!(i.local_name(0, i.path.last().unwrap()).node, "Z");
+    // `as` is still a name everywhere else.
+    let (_, errs) = parse("fn f(as: Int) -> Int:\n    as\n");
+    assert!(errs.is_empty(), "{errs:?}");
+}
+
+#[test]
+fn mistakes_in_a_function_header_say_what_to_write() {
+    let message = |src: &str| first_message(src);
+    assert!(message("fn f(x: Int) -> Int {\n    x\n}\n").contains("not `{ }`"));
+    assert!(message("fn f(x) -> Int:\n    x\n").contains("needs a type"));
+    assert!(message("fn f(x: Int): Int:\n    x\n").contains("`-> Type`"));
+    // The word's own message replaces the generic one.
+    let (_, errs) = parse("def f():\n    pass\n");
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    let (_, errs) = parse("use util::clamp\n");
+    assert!(errs.iter().any(|e| e.message.contains("from a.b import C")));
 }
