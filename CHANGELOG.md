@@ -7,6 +7,10 @@
   "missing the argument" and "expected 2 argument(s)"), and a suffix after the stage applies to the
   result of the call (`s |> parse()?`, `n |> make().field`, `n |> items()[0]`; the first two were errors).
   `|>` binds looser than every operator, and the error for `x |> f == 1` says to write `(x |> f()) == 1`.
+* **Inferred return type, more places:** a method without `->` (in a `type`, an `extend`, or an
+  associated function) returns the type of its last expression; a method that implements a trait returns
+  what the trait declares for it; and a global can call a function that has no `->`. `main`, tests,
+  endpoints and generic functions still need it.
 * **A generic that grows forever is an error:** `fn f[T](x: T): f([x])` is instantiated for `T`, then
   `List[T]`, then `List[List[T]]`, and so on; the checker never finished and used all the memory. A type
   of more than 200 parts in an instance is now an error that says the types keep growing.

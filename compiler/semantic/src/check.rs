@@ -610,7 +610,10 @@ impl Checker {
             self.impl_ty = None;
             self.fn_sigs.insert(f.name.node.clone(), (params, ret));
         }
+        self.adopt_trait_returns(&mut fns);
         self.check_trait_impls(&fns);
+
+        self.infer_returns(&mut fns);
 
         // Globals, in source order.
         for item in &program.items {
@@ -672,23 +675,65 @@ impl Checker {
         out
     }
 
+    /// A method of a trait implementation that leaves out `->` returns what the trait declares for
+    /// it: `fn area(self):` in `type Circle(Shape)` is `fn area(self) -> Float:` when `Shape` says so.
+    /// The body is then checked against that type like any other.
+    fn adopt_trait_returns(&mut self, fns: &mut [(ast::Fn, Option<String>)]) {
+        for (f, impl_ty) in fns.iter_mut() {
+            let Some(ty) = impl_ty.as_deref() else {
+                continue;
+            };
+            let Some(trait_name) = self.impl_of_fn.get(&f.name.node).cloned() else {
+                continue;
+            };
+            let Some(method) = f.name.node.strip_prefix(&format!("{ty}::")) else {
+                continue;
+            };
+            let declared = self
+                .fn_sigs
+                .get(&format!("{trait_name}::{method}"))
+                .map(|(_, ret)| ret.clone());
+            let concrete = if self.enums.contains_key(ty) {
+                Ty::Enum(ty.to_string())
+            } else {
+                Ty::Struct(ty.to_string())
+            };
+            if f.ret.is_none()
+                && !f.required
+                && let Some(ret) = declared.filter(|r| *r != Ty::Unit)
+                && let Some(sig) = self.fn_sigs.get_mut(&f.name.node)
+            {
+                sig.1 = Self::with_self(&ret, &trait_name, &concrete);
+                telvax_ast::tail::tailify_block(&mut f.body);
+            }
+        }
+    }
+
     /// Gives a function that has no `->` the type of its final expression, so `fn double(x: Int):
     /// x * 2` returns an `Int`. Each body is checked in a copy of the checker; a function that
     /// calls another one without `->` waits for it, so this repeats until nothing changes.
-    /// Functions that need their signature written (`main`, tests, endpoints, generics, methods)
-    /// and bodies with errors keep returning nothing.
+    /// Functions whose signature is fixed elsewhere or must be written (`main`, tests, endpoints,
+    /// generics, and methods that implement a trait) and bodies with errors keep returning
+    /// nothing. It runs before the globals, which may call these functions, and again after them,
+    /// for the functions that read a global.
     fn infer_returns(&mut self, fns: &mut [(ast::Fn, Option<String>)]) {
         let mut open: Vec<usize> = (0..fns.len())
             .filter(|&i| {
                 let (f, impl_ty) = &fns[i];
-                impl_ty.is_none()
+                let own_method = impl_ty.as_ref().is_none_or(|t| {
+                    !self.traits.contains_key(t) && !self.impl_of_fn.contains_key(&f.name.node)
+                });
+                own_method
                     && f.ret.is_none()
                     && !f.required
                     && f.generics.is_empty()
                     && f.attrs.is_empty()
                     && f.name.node != "main"
                     && !f.name.node.starts_with("test_")
-                    && self.fn_sigs.contains_key(&f.name.node)
+                    && self
+                        .fn_sigs
+                        .get(&f.name.node)
+                        .is_some_and(|(_, ret)| *ret == Ty::Unit)
             })
             .collect();
         loop {
@@ -701,6 +746,7 @@ impl Checker {
                 if let Some(sig) = copy.fn_sigs.get_mut(&f.name.node) {
                     sig.1 = Ty::Unknown;
                 }
+                copy.impl_ty = fns[i].1.clone();
                 let ty = copy.lower_fn(&f).body.ty;
                 if copy.diags.len() > known || matches!(ty, Ty::Unit | Ty::Never | Ty::Unknown) {
                     return true;

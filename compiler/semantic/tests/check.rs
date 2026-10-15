@@ -3061,7 +3061,7 @@ fn main() -> i32:
 }
 
 #[test]
-fn main_tests_and_methods_keep_returning_nothing() {
+fn main_and_tests_keep_returning_nothing() {
     let (hir, errs) = check(
         r#"
 fn main():
@@ -3078,9 +3078,11 @@ type P:
 "#,
     );
     assert!(errs.is_empty(), "{errs:?}");
-    for f in &hir.fns {
-        assert_eq!(f.ret, Ty::Unit, "{}", f.name);
-    }
+    let ret = |name: &str| hir.fns.iter().find(|f| f.name == name).unwrap().ret.clone();
+    assert_eq!(ret("main"), Ty::Unit);
+    assert_eq!(ret("test_it"), Ty::Unit);
+    // A method has its type inferred like any other function.
+    assert_eq!(ret("P::get"), Ty::Prim(telvax_hir::Prim::I64));
 }
 
 #[test]
@@ -3421,4 +3423,62 @@ fn main() -> i32:
         "trait T:\n    fn go(self) -> Int: ...\n\ntype A(T):\n    x: Int\n\n    fn go[U](self) -> Int:\n        1\n",
         "cannot have type parameters of its own",
     );
+}
+
+#[test]
+fn methods_and_trait_implementations_can_leave_out_the_arrow() {
+    assert_clean(
+        r#"
+trait Shape:
+    fn area(self) -> Float: ...
+    fn name(self) -> Text: ...
+
+type Sq(Shape):
+    s: Float
+
+    fn area(self):
+        self.s * self.s
+
+    fn name(self):
+        "sq"
+
+type P:
+    n: Int
+
+    fn double(self):
+        self.n * 2
+
+    fn quad(self):
+        self.double() * 2
+
+    fn make(k: Int):
+        P(n: k)
+
+extend P:
+    fn triple(self):
+        self.n * 3
+
+let g = twice(2)
+
+fn twice(x: Int):
+    x * 2
+
+fn main() -> i32:
+    let a: Float = Sq(s: 2.0).area()
+    let b: Text = Sq(s: 1.0).name()
+    let c: Int = P(n: 1).quad() + P(n: 1).triple()
+    let d: P = P.make(3)
+    let e: Int = g
+    0
+"#,
+    );
+    // The body is held to what the trait declares.
+    assert_err(
+        "trait Shape:\n    fn area(self) -> Float: ...\n\ntype Q(Shape):\n    r: Float\n\n    fn area(self):\n        \"text\"\n",
+        "expected `Float`, found `Text`",
+    );
+    // A method that leaves its type undecided stays without one.
+    let (hir, errs) = check("type P:\n    n: Int\n\n    fn show(self):\n        print(\"x\")\n");
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!(hir.fns.iter().all(|f| f.ret == Ty::Unit));
 }
