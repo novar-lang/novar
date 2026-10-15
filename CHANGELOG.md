@@ -6,6 +6,11 @@
   used `def` and `str` and failed `telvax check`; they now use `fn` and `Text`. `publish` type-checks the
   package (with its dependencies) and refuses to publish one that has errors, showing them. `tvpm check`,
   `run`, `serve` and `build` in a package with no dependencies no longer ask for `tvpm lock`.
+* **`tvpm update [name...]`:** moves the locked versions to the newest that the requirements allow and
+  says what changed (`updated mathx 1.0.0 -> 1.2.0`, `added`, `removed`, or `everything is up to date`),
+  then downloads what is missing. With names, only those packages move and the others stay at their
+  locked version unless a requirement forces them. Before, the only way to pick up a new version was to
+  delete `telvax.lock`.
 * **`telvax run` reads its arguments by type:** the words after the function are read as the types it
   declares, so `Text` keeps `123` as text and a `List[Int]` takes `[1,2,3]`. A wrong word says which
   argument and which type (`argument `b` of `add` is Int, and `x` is not a value of that type`), a

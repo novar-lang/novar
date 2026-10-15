@@ -246,3 +246,61 @@ fn the_templates_pass_check_and_publish_refuses_a_broken_package() {
         .contains("broken 0.1.0")
     );
 }
+
+#[test]
+fn update_reports_what_moved() {
+    let root = scratch("update");
+    let home = root.join("home");
+    let reg = root.join("registry");
+    let reg_s = reg.to_str().unwrap();
+    let publish_lib = |version: &str| {
+        let lib = root.join("mathx");
+        if !lib.exists() {
+            assert!(
+                tvpm(&root, &home, &["new", "mathx", "--lib"])
+                    .status
+                    .success()
+            );
+        }
+        let manifest = std::fs::read_to_string(lib.join("telvax.toml")).unwrap();
+        let old = manifest.lines().find(|l| l.starts_with("version")).unwrap();
+        std::fs::write(
+            lib.join("telvax.toml"),
+            manifest.replace(old, &format!("version = \"{version}\"")),
+        )
+        .unwrap();
+        let o = tvpm(&lib, &home, &["publish", "--registry", reg_s]);
+        assert!(o.status.success(), "{}", text(&o));
+    };
+    publish_lib("1.0.0");
+    assert!(tvpm(&root, &home, &["new", "app"]).status.success());
+    let app = root.join("app");
+    assert!(
+        tvpm(&app, &home, &["add", "mathx@^1", "--registry", reg_s])
+            .status
+            .success()
+    );
+    let o = tvpm(&app, &home, &["update", "--registry", reg_s]);
+    assert!(text(&o).contains("added mathx 1.0.0"), "{}", text(&o));
+    let o = tvpm(&app, &home, &["update", "--registry", reg_s]);
+    assert!(
+        text(&o).contains("everything is up to date"),
+        "{}",
+        text(&o)
+    );
+    publish_lib("1.2.0");
+    let o = tvpm(&app, &home, &["update", "mathx", "--registry", reg_s]);
+    let out = text(&o);
+    assert!(
+        o.status.success()
+            && out.contains("updated mathx 1.0.0 -> 1.2.0")
+            && out.contains("downloaded mathx 1.2.0"),
+        "{out}"
+    );
+    let o = tvpm(&app, &home, &["update", "nope", "--registry", reg_s]);
+    assert!(
+        !o.status.success() && text(&o).contains("`nope` is not a registry package"),
+        "{}",
+        text(&o)
+    );
+}

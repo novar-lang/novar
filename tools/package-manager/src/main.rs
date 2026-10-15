@@ -3,6 +3,7 @@ use std::process::{Command, ExitCode};
 
 use semver::{Version, VersionReq};
 use telvax_pkg::manifest::{Dependency, MANIFEST, validate_name};
+use telvax_pkg::project::Change;
 use telvax_pkg::registry::{self, DirRegistry, Registry};
 use telvax_pkg::{Manifest, Project};
 
@@ -16,6 +17,7 @@ usage:
   tvpm remove <name>                 remove a dependency
   tvpm lock                          resolve versions and write telvax.lock
   tvpm install                       lock (if needed) and download what is missing
+  tvpm update [name...]              move locked versions to the newest that fit (all, or just the named)
   tvpm tree                          print the dependency tree
   tvpm search <text>                 find packages in a directory registry
   tvpm publish                       publish this package to the registry
@@ -103,6 +105,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
             lock(&project, reg_ref)
         }
         "install" => install(&current_project()?, reg_ref),
+        "update" => update(&current_project()?, &args, reg_ref),
         "tree" => {
             print!("{}", current_project()?.tree()?);
             Ok(())
@@ -334,6 +337,25 @@ fn lock(project: &Project, reg: Option<&dyn Registry>) -> Res<()> {
     println!("locked {} package(s)", resolution.packages.len());
     for p in &resolution.packages {
         println!("  {} {}", p.name, p.version);
+    }
+    Ok(())
+}
+
+fn update(project: &Project, names: &[String], reg: Option<&dyn Registry>) -> Res<()> {
+    let changes = project.update(reg, names)?;
+    if changes.is_empty() {
+        println!("everything is up to date");
+    }
+    for Change { name, from, to } in changes {
+        match (from, to) {
+            (Some(from), Some(to)) => println!("updated {name} {from} -> {to}"),
+            (None, Some(to)) => println!("added {name} {to}"),
+            (Some(from), None) => println!("removed {name} {from}"),
+            (None, None) => {}
+        }
+    }
+    for fetched in project.install(reg)? {
+        println!("downloaded {fetched}");
     }
     Ok(())
 }
