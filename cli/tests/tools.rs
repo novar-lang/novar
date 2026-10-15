@@ -90,6 +90,34 @@ fn test_runs_the_test_functions() {
 }
 
 #[test]
+fn macros_quote_their_argument_and_dbg_gives_the_value_back() {
+    let src = "fn pick(n: Int) -> Int:\n    if n > 0:\n        n\n    else:\n        todo!()\n\nfn test_dbg():\n    let x = dbg!(pick(4))\n    assert!(x == 4)\n\nfn test_quote():\n    let x = 1\n    assert!(x > 3)\n\nfn test_message():\n    assert!(1 > 3, \"one is small\")\n\nfn test_todo():\n    pick(0)\n\nfn test_panic():\n    panic!(\"boom\")\n";
+    let file = scratch("macros", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path]);
+    assert!(!ok);
+    assert!(out.contains("ok      test_dbg"), "{out}");
+    assert!(err.contains("pick(4) = 4"), "{err}");
+    assert!(out.contains("test_quote: assertion failed: x > 3"), "{out}");
+    assert!(out.contains("test_message: one is small"), "{out}");
+    assert!(out.contains("test_todo: not yet implemented"), "{out}");
+    assert!(out.contains("test_panic: boom"), "{out}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn an_unknown_macro_names_the_ones_that_exist() {
+    let file = scratch("badmacro", "fn main() -> i32:\n    foo!(1)\n    0\n");
+    let (ok, out, err) = run(&["check", file.to_str().unwrap()]);
+    assert!(!ok);
+    assert!(
+        format!("{out}{err}").contains("there is no macro `foo!`"),
+        "{out}{err}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
 fn deeply_nested_programs_are_checked_not_crashed() {
     // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
     // recurses once per level and used to overflow the 8 MB stack of a main thread.

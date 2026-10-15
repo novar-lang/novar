@@ -34,6 +34,9 @@
       "include": "#type"
     },
     {
+      "include": "#macro"
+    },
+    {
       "include": "#call"
     },
     {
@@ -267,6 +270,10 @@
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
       ]
+    },
+    "macro": {
+      "name": "support.function.macro.telvax",
+      "match": "\\b[a-z_][A-Za-z0-9_]*!(?=\\()"
     },
     "call": {
       "name": "entity.name.function.call.telvax",

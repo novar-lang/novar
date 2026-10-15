@@ -1,0 +1,13 @@
+fn pick(n: Int) -> Int:
+    if n > 0:
+        n
+    else:
+        todo!()
+
+fn test_pick():
+    let x = dbg!(pick(4))
+    assert!(x == 4, "pick keeps a positive number")
+
+fn main() -> i32:
+    print(f"{pick(3)}")
+    0

@@ -19,7 +19,22 @@ use telvax_lexer::Token;
 
 /// Names that start a dotted path (`util.clamp`) instead of a field access: `std`, the names
 /// brought in by `import`, and anything that starts with a capital letter (`Shape.Circle`).
-type Heads = Rc<HashSet<String>>;
+type Heads = Rc<Ctx>;
+
+/// What the expression parser knows besides the tokens: the path heads, and the text the
+/// tokens came from (a macro such as `assert!(x > 1)` quotes its argument).
+struct Ctx {
+    heads: HashSet<String>,
+    src: String,
+    base: usize,
+}
+
+impl std::ops::Deref for Ctx {
+    type Target = HashSet<String>;
+    fn deref(&self) -> &HashSet<String> {
+        &self.heads
+    }
+}
 
 macro_rules! run {
     ($parser:expr, $tokens:expr, $eoi:expr, $src:expr, $base:expr) => {{
@@ -170,7 +185,7 @@ fn nesting_error(tokens: &[(Token<'_>, std::ops::Range<usize>)]) -> Option<Diagn
                 }
             }
             Token::Dedent => blocks = blocks.saturating_sub(1),
-            Token::LParen | Token::LBracket | Token::LBrace => {
+            Token::LParen | Token::MacroOpen(_) | Token::LBracket | Token::LBrace => {
                 brackets += 1;
                 if brackets > MAX_BRACKET_DEPTH {
                     return Some(Diagnostic::error(
@@ -262,7 +277,11 @@ pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
 
 fn parse_here(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
     let (mut tokens, lex_errors) = telvax_lexer::tokenize(src);
-    let heads: Heads = Rc::new(import_heads(&tokens));
+    let heads: Heads = Rc::new(Ctx {
+        heads: import_heads(&tokens),
+        src: src.to_string(),
+        base,
+    });
     for (_, span) in &mut tokens {
         *span = span.start + base..span.end + base;
     }
@@ -340,6 +359,72 @@ fn std_path(tail: &[&str], span: &Span) -> Expr {
         node: ExprKind::Path(path),
         span: span.clone(),
     }
+}
+
+/// The macros the compiler knows. Each one is rewritten into a call of a std function, so nothing
+/// after the parser sees a macro.
+fn expand_macro(name: &str, mut args: Vec<Expr>, span: Span, ctx: &Ctx) -> Result<Expr, String> {
+    let text = |value: &str| Spanned {
+        node: ExprKind::Lit(Lit::Str(value.to_string())),
+        span: span.clone(),
+    };
+    // The source of an argument on one line, for the message that quotes it.
+    let quote = |arg: &Expr| {
+        let from = arg.span.start.saturating_sub(ctx.base);
+        let to = arg.span.end.saturating_sub(ctx.base);
+        let raw = ctx.src.get(from..to).unwrap_or("");
+        raw.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let count = |low: usize, high: usize, usage: &str| {
+        if (low..=high).contains(&args.len()) {
+            Ok(())
+        } else {
+            Err(format!("`{name}!` is written `{usage}`"))
+        }
+    };
+    let call = match name {
+        "assert" => {
+            count(
+                1,
+                2,
+                "assert!(condition)` or `assert!(condition, \"message\")",
+            )?;
+            let message = if args.len() == 2 {
+                args.pop().unwrap()
+            } else {
+                text(&format!("assertion failed: {}", quote(&args[0])))
+            };
+            std_call(&["test", "assert_msg"], vec![args.remove(0), message], span)
+        }
+        "dbg" => {
+            count(1, 1, "dbg!(value)")?;
+            let label = text(&quote(&args[0]));
+            std_call(&["debug", "dbg"], vec![args.remove(0), label], span)
+        }
+        "todo" | "unreachable" | "panic" => {
+            let usage = if name == "panic" {
+                "panic!(\"message\")"
+            } else {
+                &format!("{name}!()")
+            };
+            let most = usize::from(name == "panic");
+            count(most, most, usage)?;
+            let message = args.pop().unwrap_or_else(|| {
+                text(if name == "todo" {
+                    "not yet implemented"
+                } else {
+                    "unreachable code was reached"
+                })
+            });
+            std_call(&["test", "fail"], vec![message], span)
+        }
+        _ => {
+            return Err(format!(
+                "there is no macro `{name}!`; the macros are `assert!`, `dbg!`, `todo!`, `unreachable!` and `panic!`"
+            ));
+        }
+    };
+    Ok(call)
 }
 
 /// A call of a std function: `std.math.pow(a, b)`.
@@ -606,7 +691,12 @@ fn comparison(first: Expr, rest: Vec<(Cmp, Expr)>, span: Span) -> Expr {
 
 /// Parses a single expression (used for f-string interpolations and tests).
 pub fn parse_expr(src: &str) -> (Option<Expr>, Vec<Diagnostic>) {
-    parse_expr_at(src, 0, &Rc::new(HashSet::from(["std".to_string()])))
+    let heads = Rc::new(Ctx {
+        heads: HashSet::from(["std".to_string()]),
+        src: src.to_string(),
+        base: 0,
+    });
+    parse_expr_at(src, 0, &heads)
 }
 
 fn parse_expr_at(src: &str, offset: usize, heads: &Heads) -> (Option<Expr>, Vec<Diagnostic>) {
@@ -614,6 +704,11 @@ fn parse_expr_at(src: &str, offset: usize, heads: &Heads) -> (Option<Expr>, Vec<
     for (_, span) in &mut tokens {
         *span = span.start + offset..span.end + offset;
     }
+    let heads = &Rc::new(Ctx {
+        heads: heads.heads.clone(),
+        src: src.to_string(),
+        base: offset,
+    });
     let mut errors: Vec<Diagnostic> = lex_errors
         .into_iter()
         .map(|s| Diagnostic::error(s.start + offset..s.end + offset, "invalid token"))
@@ -1507,7 +1602,23 @@ where
             .delimited_by(just(Token::LBrace), just(Token::RBrace))
             .map_with(|pairs, e| map_literal(pairs, rng(e.span())));
 
+        let macro_ctx = heads.clone();
+        let macro_call = select! { Token::MacroOpen(n) => n }
+            .then(
+                expr.clone()
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(just(Token::RParen))
+            .try_map_with(move |(open, args), e| {
+                let name = &open[..open.len() - 2];
+                expand_macro(name, args, rng(e.span()), &macro_ctx)
+                    .map(|expr| expr.node)
+                    .map_err(|message| Rich::custom(e.span(), message))
+            });
         let primary = choice((
+            macro_call,
             float,
             int,
             triple,

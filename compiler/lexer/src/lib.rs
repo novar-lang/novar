@@ -81,6 +81,9 @@ pub enum Token<'src> {
     // Literals and identifiers
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*")]
     Ident(&'src str),
+    /// `name!(`: the start of a macro call. The parenthesis is part of the token.
+    #[regex(r"[A-Za-z_][A-Za-z0-9_]*!\(")]
+    MacroOpen(&'src str),
     #[regex(r"[0-9][0-9_]*")]
     Int(&'src str),
     #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9]+)?")]
@@ -218,7 +221,8 @@ impl std::fmt::Display for Token<'_> {
             Not => "not",
             True => "True",
             False => "False",
-            Ident(s) | Int(s) | Float(s) | Str(s) | TStr(s) | RStr(s) | FStr(s) | FTStr(s) => s,
+            Ident(s) | MacroOpen(s) | Int(s) | Float(s) | Str(s) | TStr(s) | RStr(s) | FStr(s)
+            | FTStr(s) => s,
             Pipe => "|>",
             Ellipsis => "...",
             StarStar => "**",
@@ -314,7 +318,7 @@ pub fn tokenize(src: &str) -> (Vec<(Token<'_>, Span)>, Vec<Span>) {
             }
         }
         match tok {
-            Token::LParen | Token::LBracket | Token::LBrace => depth += 1,
+            Token::LParen | Token::MacroOpen(_) | Token::LBracket | Token::LBrace => depth += 1,
             Token::RParen | Token::RBracket | Token::RBrace => depth = depth.saturating_sub(1),
             _ => {}
         }
@@ -691,5 +695,15 @@ mod tests {
             flat("asynchronous awaiting"),
             [Ident("asynchronous"), Ident("awaiting")]
         );
+    }
+
+    #[test]
+    fn a_macro_call_starts_with_one_token() {
+        assert_eq!(
+            flat("assert!(a != b)"),
+            [MacroOpen("assert!("), Ident("a"), NotEq, Ident("b"), RParen]
+        );
+        // Without the parenthesis, `!=` is still the comparison.
+        assert_eq!(flat("a!=b"), [Ident("a"), NotEq, Ident("b")]);
     }
 }

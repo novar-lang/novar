@@ -217,6 +217,34 @@ telvax test file.tvx           # run them all, exit 1 if one fails
 telvax test file.tvx double    # only the tests whose name contains `double`
 ```
 
+## Macros
+
+A macro is written `name!(...)`. The compiler has five and you cannot define more. Each one is
+rewritten into a call of a `std` function before the program is checked.
+
+| Macro | What it does |
+|---|---|
+| `assert!(cond)` | like `assert`, and the message quotes the condition: `assertion failed: x > 3` |
+| `assert!(cond, "message")` | stops with your message when `cond` is false |
+| `dbg!(value)` | prints `value_as_written = result` to stderr and gives `value` back |
+| `todo!()` | stops with `not yet implemented`; it can stand where any type is expected |
+| `unreachable!()` | stops with `unreachable code was reached` |
+| `panic!("message")` | stops with the message |
+
+```telvax
+fn pick(n: Int) -> Int:
+    if n > 0:
+        n
+    else:
+        todo!()
+
+fn test_pick():
+    let x = dbg!(pick(4))    # stderr: pick(4) = 4
+    assert!(x == 4)
+```
+
+Macros run in the interpreter, as `assert` does; the native backend does not compile them.
+
 ## Formatting and linting
 
 ```sh

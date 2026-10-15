@@ -68,6 +68,11 @@ test("the pipeline operator, paths and calls", async () => {
   has(t, "embed", "entity.name.function.call");
 });
 
+test("macros", async () => {
+  const t = await tokenize("assert!(a != b)");
+  has(t, "assert!", "support.function.macro");
+});
+
 test("decorators", async () => {
   const t = await tokenize('@endpoint(POST, "/v1/rag/query")');
   has(t, "endpoint", "entity.name.function.decorator");
