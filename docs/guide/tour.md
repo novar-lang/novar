@@ -247,7 +247,8 @@ fn demo(text: Text) -> Int:
 ```
 
 * `T?` is `Some(value)` or `None`; `match` must cover both. Methods: `is_some`, `is_none`,
-  `unwrap` (an error on `None`), `unwrap_or`. Several methods return one: `List.first`, `last`,
+  `unwrap` (an error on `None`), `unwrap_or`, `unwrap_or_else(() => v)`, `expect("message")`,
+  `map`, `and_then`, `filter` and `ok_or(error)`, which turns it into a `Result`. Several methods return one: `List.first`, `last`,
   `pop`, `get`, `Text.find`, `to_int`, `to_float`, `Map.get`, `remove`. As JSON, `None` is
   `null` and `Some(x)` is just `x`.
 * `Map[K, V]` has `Text`, integer or `Bool` keys. It is created with `std.map.new()` and a
@@ -322,6 +323,10 @@ fn main():
         print(f"first = {first}")
 ```
 
+* `Result[T, E]` has `is_ok`, `is_err`, `unwrap` and `expect("message")` (both stop the program
+  with the error), `unwrap_or(v)`, `unwrap_or_else(e => v)`, `map`, `map_err`, `and_then`, and `ok()` /
+  `err()`, which give an `Option`. `and_then` must return a `Result` with the same error type; use
+  `map_err` to change it first. A method that does not exist is a compile error.
 * `expr?` on a `Result` or `Option` returns the error (or `None`) from the current function; the
   function's return type must be a `Result` or `T?` too, and the error types must match.
 * `if x is Pattern:` and `while x is Pattern:` match one pattern and bind its names; they work

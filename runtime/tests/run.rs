@@ -1843,3 +1843,56 @@ fn var_or(name: Text) -> Text:
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+const ERRORS: &str = r#"
+fn parse(s: Text) -> Result[Int, Text]:
+    match s.to_int():
+        case Some(n):
+            Ok(n)
+        case None:
+            Err(f"bad: {s}")
+
+fn chain() -> Int:
+    parse("20").map(n => n + 1).and_then(n => parse("2")).unwrap_or(0)
+
+fn recover() -> Int:
+    parse("x").unwrap_or_else(e => 6)
+
+fn flags() -> Bool:
+    parse("x").map_err(e => 0).is_err() and parse("1").is_ok()
+
+fn kept() -> Int:
+    let o = Some(4)
+    o.map(n => n * 2).filter(n => n > 5).unwrap_or_else(() => 0)
+
+fn dropped() -> Int:
+    let o = Some(4)
+    o.filter(n => n > 5).unwrap_or_else(() => -1)
+
+fn to_result() -> Int:
+    let o = Some(4)
+    o.ok_or("nothing").and_then(n => parse("3")).unwrap()
+
+fn boom() -> Int:
+    parse("x").unwrap()
+
+fn expected() -> Int:
+    parse("x").expect("port")
+"#;
+
+#[test]
+fn option_and_result_methods() {
+    assert_eq!(int(run(ERRORS, "chain", vec![])), 2);
+    assert_eq!(int(run(ERRORS, "recover", vec![])), 6);
+    assert!(matches!(run(ERRORS, "flags", vec![]), Value::Bool(true)));
+    assert_eq!(int(run(ERRORS, "kept", vec![])), 8);
+    assert_eq!(int(run(ERRORS, "dropped", vec![])), -1);
+    assert_eq!(int(run(ERRORS, "to_result", vec![])), 3);
+    let e = load(ERRORS).call("boom", vec![]).unwrap_err().to_string();
+    assert!(e.contains("called `unwrap` on `Err`: bad: x"), "{e}");
+    let e = load(ERRORS)
+        .call("expected", vec![])
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("port: bad: x"), "{e}");
+}

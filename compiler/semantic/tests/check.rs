@@ -3132,3 +3132,43 @@ fn f():
         "Shape",
     );
 }
+
+#[test]
+fn option_and_result_methods_are_checked() {
+    assert_clean(
+        r#"
+fn parse(s: Text) -> Result[Int, Text]:
+    Ok(1)
+
+fn f() -> Int:
+    let a: Result[Int, Int] = parse("1").map_err(e => 0)
+    let b: Int? = parse("1").ok()
+    let c: Text? = parse("1").err()
+    let d: Result[Int, Text] = parse("1").map(n => n + 1).and_then(n => parse("2"))
+    let e: Int? = Some(1).map(n => n + 1).filter(n => n > 1)
+    let g: Result[Int, Text] = Some(1).ok_or("none")
+    let h: Int = Some(1).unwrap_or_else(() => 0)
+    parse("1").unwrap_or_else(e => 0)
+"#,
+    );
+    assert_err(
+        "fn p() -> Result[Int, Text]:\n    Ok(1)\n\nfn f():\n    p().nothing()\n",
+        "no method `nothing` on type `Result[Int, Text]`",
+    );
+    assert_err(
+        "fn p() -> Result[Int, Text]:\n    Ok(1)\n\nfn f():\n    let x: Text = p().unwrap()\n",
+        "expected `Text`, found `Int`",
+    );
+    assert_err(
+        "fn p() -> Result[Int, Text]:\n    Ok(1)\n\nfn f():\n    p().and_then(n => Some(n))\n",
+        "must return a `Result`",
+    );
+    assert_err(
+        "fn p() -> Result[Int, Text]:\n    Ok(1)\n\nfn f():\n    p().and_then(n => Err(3))\n",
+        "map_err",
+    );
+    assert_err(
+        "fn f():\n    let o = Some(1)\n    o.and_then(n => n + 1)\n",
+        "must return an `Option`",
+    );
+}

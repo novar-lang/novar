@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Methods on `Result` and `Option`:** `Result` has `is_ok`, `is_err`, `unwrap`, `expect`,
+  `unwrap_or`, `unwrap_or_else`, `map`, `map_err`, `and_then`, `ok` and `err`; `Option` gains `map`,
+  `and_then`, `filter`, `ok_or`, `unwrap_or_else` and `expect`. They are checked: a method that does not
+  exist on a `Result` is an error (it used to pass without a type).
 * **Inferred return type:** a top-level function without `->` returns the type of its last expression
   (`fn double(x: Int): x * 2` returns an `Int`). `main`, tests, endpoints, generic functions and
   methods still need the `->`.

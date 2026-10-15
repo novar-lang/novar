@@ -830,6 +830,230 @@ fn filter_rows(args: &[Ty]) -> Result<Ty, String> {
     Ok(schema.map_or(Ty::Unknown, Ty::Table))
 }
 
+// ---- Option and Result -------------------------------------------------------------------
+
+fn opt_inner(args: &[Ty]) -> Result<Ty, String> {
+    match &args[0] {
+        Ty::Option(t) => Ok((**t).clone()),
+        t if is_dynamic(t) => Ok(Ty::Unknown),
+        other => Err(format!("the receiver must be an `Option`, found `{other}`")),
+    }
+}
+
+fn res_parts(args: &[Ty]) -> Result<(Ty, Ty), String> {
+    match &args[0] {
+        Ty::Result(t, e) => Ok(((**t).clone(), (**e).clone())),
+        t if is_dynamic(t) => Ok((Ty::Unknown, Ty::Unknown)),
+        other => Err(format!("the receiver must be a `Result`, found `{other}`")),
+    }
+}
+
+fn option_of(t: Ty) -> Ty {
+    Ty::Option(Box::new(t))
+}
+
+fn result_of(t: Ty, e: Ty) -> Ty {
+    Ty::Result(Box::new(t), Box::new(e))
+}
+
+/// The return type of a function argument that takes `params`; `Unknown` when not yet known.
+fn fn_returning(args: &[Ty], i: usize, params: &[Ty], what: &str) -> Result<Ty, String> {
+    match &args[i] {
+        Ty::Fn(p, r) if p.len() == params.len() => {
+            for (given, want) in p.iter().zip(params) {
+                if !given.accepts(want) {
+                    return Err(format!(
+                        "the function takes `{given}` but `{what}` passes `{want}`"
+                    ));
+                }
+            }
+            Ok((**r).clone())
+        }
+        t if is_dynamic(t) => Ok(Ty::Unknown),
+        other => Err(format!(
+            "argument {} must be a function of {} argument(s), found `{other}`",
+            i + 1,
+            params.len()
+        )),
+    }
+}
+
+fn option_map_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Option(t))) => Some(Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unknown))),
+        _ => None,
+    }
+}
+
+fn option_filter_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Option(t))) => Some(Ty::Fn(vec![(**t).clone()], Box::new(Ty::bool()))),
+        _ => None,
+    }
+}
+
+fn option_else_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Option(t))) => Some(Ty::Fn(vec![], t.clone())),
+        _ => None,
+    }
+}
+
+fn option_map(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let t = opt_inner(args)?;
+    Ok(option_of(fn_returning(args, 1, &[t], "map")?))
+}
+
+fn option_and_then(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let t = opt_inner(args)?;
+    match fn_returning(args, 1, &[t], "and_then")? {
+        r @ Ty::Option(_) => Ok(r),
+        r if is_dynamic(&r) => Ok(option_of(Ty::Unknown)),
+        other => Err(format!(
+            "the function must return an `Option`, found `{other}`; use `map` to wrap a plain value"
+        )),
+    }
+}
+
+fn option_filter(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let t = opt_inner(args)?;
+    let r = fn_returning(args, 1, std::slice::from_ref(&t), "filter")?;
+    if !Ty::bool().accepts(&r) {
+        return Err(format!("the predicate must return `Bool`, found `{r}`"));
+    }
+    Ok(option_of(t))
+}
+
+fn option_ok_or(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    Ok(result_of(opt_inner(args)?, args[1].clone()))
+}
+
+fn option_unwrap_or_else(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let t = opt_inner(args)?;
+    let r = fn_returning(args, 1, &[], "unwrap_or_else")?;
+    if !t.accepts(&r) {
+        return Err(format!(
+            "the function returns `{r}` but the option holds `{t}`"
+        ));
+    }
+    Ok(t)
+}
+
+fn option_expect(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 1, &s())?;
+    opt_inner(args)
+}
+
+fn result_is(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    res_parts(args)?;
+    Ok(Ty::bool())
+}
+
+fn result_unwrap(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(res_parts(args)?.0)
+}
+
+fn result_expect(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 1, &s())?;
+    Ok(res_parts(args)?.0)
+}
+
+fn result_unwrap_or(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (t, _) = res_parts(args)?;
+    want(args, 1, &t)?;
+    Ok(t)
+}
+
+fn result_ok(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(option_of(res_parts(args)?.0))
+}
+
+fn result_err(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    Ok(option_of(res_parts(args)?.1))
+}
+
+fn result_ok_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Result(t, _))) => Some(Ty::Fn(vec![(**t).clone()], Box::new(Ty::Unknown))),
+        _ => None,
+    }
+}
+
+fn result_err_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Result(_, e))) => Some(Ty::Fn(vec![(**e).clone()], Box::new(Ty::Unknown))),
+        _ => None,
+    }
+}
+
+fn result_else_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
+    match (i, prev.first()) {
+        (1, Some(Ty::Result(t, e))) => Some(Ty::Fn(vec![(**e).clone()], t.clone())),
+        _ => None,
+    }
+}
+
+fn result_map(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (t, e) = res_parts(args)?;
+    Ok(result_of(fn_returning(args, 1, &[t], "map")?, e))
+}
+
+fn result_map_err(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (t, e) = res_parts(args)?;
+    Ok(result_of(t, fn_returning(args, 1, &[e], "map_err")?))
+}
+
+fn result_and_then(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (t, e) = res_parts(args)?;
+    match fn_returning(args, 1, &[t], "and_then")? {
+        Ty::Result(u, e2) => {
+            if !e.accepts(&e2) {
+                return Err(format!(
+                    "the function fails with `{e2}` but this `Result` fails with `{e}`; use `map_err` to convert one"
+                ));
+            }
+            Ok(result_of(*u, e))
+        }
+        r if is_dynamic(&r) => Ok(result_of(Ty::Unknown, e)),
+        other => Err(format!(
+            "the function must return a `Result`, found `{other}`; use `map` to wrap a plain value"
+        )),
+    }
+}
+
+fn result_unwrap_or_else(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let (t, e) = res_parts(args)?;
+    let r = fn_returning(args, 1, &[e], "unwrap_or_else")?;
+    if !t.accepts(&r) {
+        return Err(format!("the function returns `{r}` but the value is `{t}`"));
+    }
+    Ok(t)
+}
+
+const fn hinted(check: Check, hint: Hint) -> Sig {
+    Sig {
+        check,
+        hint,
+        from_expected: None,
+    }
+}
+
 const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::text::clean_whitespace", sig(str_to_str)),
     ("std::text::trim", sig(str_to_str)),
@@ -902,6 +1126,41 @@ const FUNCTIONS: &[(&str, Sig)] = &[
             from_expected: None,
         },
     ),
+    ("std::option::map", hinted(option_map, option_map_hint)),
+    (
+        "std::option::and_then",
+        hinted(option_and_then, option_map_hint),
+    ),
+    (
+        "std::option::filter",
+        hinted(option_filter, option_filter_hint),
+    ),
+    ("std::option::ok_or", sig(option_ok_or)),
+    (
+        "std::option::unwrap_or_else",
+        hinted(option_unwrap_or_else, option_else_hint),
+    ),
+    ("std::option::expect", sig(option_expect)),
+    ("std::result::is_ok", sig(result_is)),
+    ("std::result::is_err", sig(result_is)),
+    ("std::result::unwrap", sig(result_unwrap)),
+    ("std::result::expect", sig(result_expect)),
+    ("std::result::unwrap_or", sig(result_unwrap_or)),
+    (
+        "std::result::unwrap_or_else",
+        hinted(result_unwrap_or_else, result_else_hint),
+    ),
+    ("std::result::map", hinted(result_map, result_ok_hint)),
+    (
+        "std::result::map_err",
+        hinted(result_map_err, result_err_hint),
+    ),
+    (
+        "std::result::and_then",
+        hinted(result_and_then, result_ok_hint),
+    ),
+    ("std::result::ok", sig(result_ok)),
+    ("std::result::err", sig(result_err)),
     ("std::iter::enumerate", sig(enumerate)),
     ("std::iter::zip", sig(zip)),
     ("std::iter::sum", sig(sum)),
