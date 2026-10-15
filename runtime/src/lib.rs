@@ -4,6 +4,7 @@
 // limit (a warning today, a hard error in a future compiler).
 #![cfg_attr(feature = "gpu", recursion_limit = "256")]
 
+mod caps;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod interp;
@@ -15,6 +16,7 @@ mod table;
 mod tensor;
 mod value;
 
+pub use caps::{Capability, Caps};
 pub use interp::{Device, EndpointError, Executor, Interp, RuntimeError};
 pub use std_impl::embed_text;
 pub use value::{
