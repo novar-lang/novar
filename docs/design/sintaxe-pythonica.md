@@ -119,5 +119,6 @@ Os tipos aparecem como são escritos no programa: ``expected `i32`, found `Text`
 * `match`/`if` como valor em qualquer posição (hoje só na posição final de uma função, e `a if c else b`).
 * Intervalos fechados (`0..=n`): use `range(0, n + 1)`.
 * Fatias (`xs[1:3]`), strings de várias linhas, `//` de divisão inteira, `**`; entram com L12 do roadmap.
+* `def` no lugar de `fn`, ou ao lado dele: avaliado em `def-versus-fn.md`; fica `fn`.
 * Modo script (arquivo sem `fn main`); um executável nativo ainda exige `fn main() -> i32`.
 * Argumentos nomeados em chamadas de biblioteca são só rótulos (não reordenam).
