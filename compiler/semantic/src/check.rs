@@ -550,7 +550,24 @@ impl Checker {
                             continue;
                         }
                     }
-                    for f in &imp.fns {
+                    // Methods with type parameters of their own wait for a call that picks them.
+                    let (own, plain): (Vec<&ast::Fn>, Vec<&ast::Fn>) =
+                        imp.fns.iter().partition(|f| !f.generics.is_empty());
+                    if !own.is_empty() {
+                        if imp.trait_name.is_some() {
+                            for f in &own {
+                                self.err(
+                                    f.name.span.clone(),
+                                    "a method of a trait cannot have type parameters of its own",
+                                );
+                            }
+                        } else {
+                            let mut only = imp.clone();
+                            only.fns = own.into_iter().cloned().collect();
+                            self.generic_impls.entry(ty.clone()).or_default().push(only);
+                        }
+                    }
+                    for f in plain {
                         let mut f = f.clone();
                         f.name.node = format!("{ty}::{}", f.name.node);
                         if let Some(tr) = &imp.trait_name {
@@ -2359,11 +2376,15 @@ impl Checker {
                 self.impls.insert((tr.node.clone(), key.to_string()));
             }
             for f in &imp.fns {
+                // A method with type parameters of its own is instantiated at each call that uses
+                // it (see `generic_method_call`).
                 if !f.generics.is_empty() {
-                    self.err(
-                        f.name.span.clone(),
-                        "methods with their own type parameters are not supported yet",
-                    );
+                    if imp.trait_name.is_some() {
+                        self.err(
+                            f.name.span.clone(),
+                            "a method of a trait cannot have type parameters of its own",
+                        );
+                    }
                     continue;
                 }
                 let full = format!("{key}::{}", f.name.node);
@@ -2387,6 +2408,206 @@ impl Checker {
                 });
             }
         }
+    }
+
+    /// The type (`Box`, `Plain`) whose `impl` has a method `name` with type parameters of its own,
+    /// when `ty` is one of its values.
+    fn generic_method_owner(&self, ty: &Ty, name: &str) -> Option<String> {
+        let key = match self.resolve(ty) {
+            Ty::Struct(k) | Ty::Enum(k) => k,
+            _ => return None,
+        };
+        let base = self
+            .instance_args
+            .get(&key)
+            .map_or(key, |(base, _)| base.clone());
+        self.generic_impls
+            .get(&base)?
+            .iter()
+            .any(|i| {
+                i.fns
+                    .iter()
+                    .any(|f| f.name.node == name && !f.generics.is_empty())
+            })
+            .then_some(base)
+    }
+
+    /// `recv.m(args)` where `m` has type parameters of its own (`fn map[U](self, f: (T) -> U)`):
+    /// infer them from the arguments, create the instance for them, call it.
+    fn generic_method_call(
+        &mut self,
+        receiver: hir::Expr,
+        owner: &str,
+        name: &str,
+        args: &[ast::Expr],
+        expected: Option<&Ty>,
+        span: &Span,
+    ) -> hir::Expr {
+        let bad = |this: &mut Self, msg: String| {
+            this.err(span.clone(), msg);
+            Self::mk(hir::ExprKind::Error, Ty::Unknown, span)
+        };
+        let Some((decl, imp)) = self.generic_impls.get(owner).and_then(|imps| {
+            imps.iter().find_map(|imp| {
+                imp.fns
+                    .iter()
+                    .find(|f| f.name.node == name && !f.generics.is_empty())
+                    .map(|f| (f.clone(), imp.clone()))
+            })
+        }) else {
+            return bad(self, format!("`{owner}` has no method `{name}`"));
+        };
+        let (Ty::Struct(key) | Ty::Enum(key)) = self.resolve(&receiver.ty) else {
+            return bad(self, format!("no method `{name}` on `{}`", receiver.ty));
+        };
+        // What the type's own parameters stand for in this receiver (`T` is `Int` in `Box<Int>`).
+        let mut impl_bind: HashMap<String, Ty> = HashMap::new();
+        if let Some((_, type_args)) = self.instance_args.get(&key).cloned() {
+            for (written, actual) in imp.ty_args.iter().zip(&type_args) {
+                if written.path.len() == 1
+                    && imp
+                        .generics
+                        .iter()
+                        .any(|g| g.name.node == written.path[0].node)
+                {
+                    impl_bind.insert(written.path[0].node.clone(), actual.clone());
+                }
+            }
+        }
+        // The signature, with the method's own parameters left as `Ty::Param`.
+        let mut sig_params = impl_bind.clone();
+        for g in &decl.generics {
+            sig_params.insert(g.name.node.clone(), Ty::Param(g.name.node.clone()));
+        }
+        let saved_subst = std::mem::replace(&mut self.type_params, sig_params);
+        let saved_impl = self.impl_ty.replace(key.clone());
+        let decl_params: Vec<Ty> = decl
+            .params
+            .iter()
+            .map(|p| self.resolve_type(&p.ty))
+            .collect();
+        let decl_ret = decl.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
+        self.type_params = saved_subst;
+        self.impl_ty = saved_impl;
+        if decl_params.len() != args.len() + 1 {
+            return bad(
+                self,
+                format!(
+                    "expected {} argument(s), found {}",
+                    decl_params.len().saturating_sub(1),
+                    args.len()
+                ),
+            );
+        }
+        let mut bind: HashMap<String, Ty> = HashMap::new();
+        let mut checked: Vec<Option<hir::Expr>> = Vec::new();
+        for (a, declared) in args.iter().zip(&decl_params[1..]) {
+            if matches!(a.node, ast::ExprKind::Closure { .. }) {
+                checked.push(None);
+            } else {
+                let e = self.expr(a, None);
+                self.infer_params(declared, &e.ty, &mut bind);
+                checked.push(Some(e));
+            }
+        }
+        if let Some(want) = expected {
+            let want = self.resolve(want);
+            self.infer_params(&decl_ret, &want, &mut bind);
+        }
+        for (i, a) in args.iter().enumerate() {
+            if checked[i].is_none() {
+                let hint = self.subst_params(&decl_params[i + 1], &bind);
+                let e = self.expr(a, Some(&hint));
+                self.infer_params(&decl_params[i + 1], &e.ty, &mut bind);
+                checked[i] = Some(e);
+            }
+        }
+        // An argument that is not a function where one is declared is the mistake to report,
+        // not the type parameters it leaves open.
+        for (declared, arg) in decl_params[1..].iter().zip(&checked) {
+            if let (Ty::Fn(..), Some(arg)) = (declared, arg) {
+                let shown = self.resolve(&arg.ty);
+                if !matches!(shown, Ty::Fn(..) | Ty::Unknown | Ty::Never) {
+                    return bad(
+                        self,
+                        format!("mismatched types: expected `{declared}`, found `{shown}`"),
+                    );
+                }
+            }
+        }
+        for g in &decl.generics {
+            if !bind.contains_key(&g.name.node) {
+                return bad(
+                    self,
+                    format!(
+                        "cannot infer the type parameter `{}` of `{name}`: add a type annotation",
+                        g.name.node
+                    ),
+                );
+            }
+        }
+        // A literal argument takes the type the call is used as (`let n: Int = s.fold(0, f)`)
+        // before it is pinned to its default.
+        if let Some(want) = expected {
+            let ret = self.subst_params(&decl_ret, &bind);
+            self.unify(want, &ret);
+        }
+        let bind: HashMap<String, Ty> = bind
+            .into_iter()
+            .map(|(k, v)| {
+                let v = self.finalize_ty(&v);
+                (k, v)
+            })
+            .collect();
+        let mut bounds_ok = true;
+        for g in &decl.generics {
+            let ty = bind[&g.name.node].clone();
+            bounds_ok &= self.check_bounds(g, &ty, span);
+        }
+        let params: Vec<Ty> = decl_params
+            .iter()
+            .map(|p| self.subst_params(p, &bind))
+            .collect();
+        let ret = self.subst_params(&decl_ret, &bind);
+        let shown: Vec<String> = decl
+            .generics
+            .iter()
+            .map(|g| bind[&g.name.node].to_string())
+            .collect();
+        let full = format!("{key}::{name}<{}>", shown.join(", "));
+        if bounds_ok && !self.fn_sigs.contains_key(&full) {
+            self.fn_sigs
+                .insert(full.clone(), (params.clone(), ret.clone()));
+            self.methods.insert(full.clone(), key.clone());
+            let mut renamed = decl.clone();
+            renamed.name.node = full.clone();
+            renamed.generics = Vec::new();
+            let mut subst = impl_bind;
+            subst.extend(bind.clone());
+            self.pending.push(Pending {
+                f: renamed,
+                impl_ty: Some(key.clone()),
+                subst,
+            });
+        }
+        let mut all = vec![receiver];
+        for (e, p) in checked.into_iter().zip(&params[1..]) {
+            let e = e.expect("every argument was checked");
+            all.push(self.coerce(e, p));
+        }
+        let callee = Self::mk(
+            hir::ExprKind::Fn(full),
+            Ty::Fn(params, Box::new(ret.clone())),
+            span,
+        );
+        Self::mk(
+            hir::ExprKind::Call {
+                callee: Box::new(callee),
+                args: all,
+            },
+            ret,
+            span,
+        )
     }
 
     /// A call of a generic function, or of an associated function of a generic type
@@ -3492,6 +3713,9 @@ impl Checker {
         if self.method_of(&base.ty, n).is_some() {
             return Ty::Unknown;
         }
+        if self.generic_method_owner(&base.ty, n).is_some() {
+            return Ty::Unknown;
+        }
         // Methods that `call` turns into std functions are not looked up here.
         if method_module(&self.resolve(&base.ty), n).is_some() {
             return Ty::Unknown;
@@ -3819,6 +4043,13 @@ impl Checker {
         {
             let receiver = (**base).clone();
             return self.dyn_call(&trait_name, name, receiver, args, span);
+        }
+        // `b.map(f)` where `map` has type parameters of its own.
+        if let hir::ExprKind::Field { base, name } = &callee.kind
+            && let Some(owner) = self.generic_method_owner(&base.ty, name)
+        {
+            let receiver = (**base).clone();
+            return self.generic_method_call(receiver, &owner, name, args, expected, span);
         }
         // `p.norm()` where `norm` is a method of `p`'s type: `Point::norm(p)`.
         if let hir::ExprKind::Field { base, name } = &callee.kind

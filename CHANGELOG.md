@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Methods with type parameters of their own:** `fn map[U](self, f: (T) -> U) -> Stack[U]` in a generic
+  or a plain `type`, or in an `extend`. The parameters are inferred from the call and may have limits
+  (`[N: Num]`). Before, they were an error ("not supported yet").
 * **Type arguments in a call:** `empty[Text]()`, `pair[Int, Text](1, "a")`. It makes a generic function
   that cannot infer its types from the arguments usable, and the "cannot infer" error now says so.
 * **Built-in limits for type parameters:** `T: Num`, `T: Ord` and `T: Eq` (and `T: (Num, Ord)`) without
