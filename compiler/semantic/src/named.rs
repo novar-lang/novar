@@ -436,7 +436,7 @@ fn walk(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::FString(parts) => {
             for p in parts {
-                if let FPart::Expr(x) = p {
+                for x in p.exprs_mut() {
                     walk(x, f);
                 }
             }

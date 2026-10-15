@@ -157,7 +157,7 @@ fn expr(e: &mut Expr, scopes: &mut Vec<HashSet<String>>) {
         }
         ExprKind::FString(parts) => {
             for p in parts {
-                if let FPart::Expr(x) = p {
+                for x in p.exprs_mut() {
                     expr(x, scopes);
                 }
             }

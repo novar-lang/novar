@@ -66,7 +66,8 @@ fn kind(t: &Token) -> Kind {
         | Continue | Pass | If | Elif | Else | For | In | Is | While | And | Or | Not => {
             Kind::Keyword
         }
-        True | False | Int(_) | Float(_) | Str(_) | TStr(_) | FStr(_) | Ellipsis => Kind::Literal,
+        True | False | Int(_) | Float(_) | Str(_) | TStr(_) | RStr(_) | FStr(_) | FTStr(_)
+        | Ellipsis => Kind::Literal,
         Ident(_) => Kind::Word,
         LParen => Kind::Open('('),
         LBracket => Kind::Open('['),
@@ -562,5 +563,16 @@ mod tests {
             fmt("enum E:\n    from  Parse(Text)\n    Other\n"),
             "enum E:\n    from Parse(Text)\n    Other\n"
         );
+    }
+
+    #[test]
+    fn strings_that_span_lines_or_keep_backslashes() {
+        let src = "let a=f\"\"\"x {n:>{w}}\n  {{y}}\"\"\"\nlet b=r\"a\\nb\"\nlet c=f\"{x!r:>8} {y = }\"\n";
+        let out = fmt(src);
+        assert_eq!(
+            out,
+            "let a = f\"\"\"x {n:>{w}}\n  {{y}}\"\"\"\nlet b = r\"a\\nb\"\nlet c = f\"{x!r:>8} {y = }\"\n"
+        );
+        assert_eq!(fmt(&out), out);
     }
 }

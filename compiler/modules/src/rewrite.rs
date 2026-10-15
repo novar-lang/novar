@@ -265,7 +265,7 @@ impl<'a> Rewriter<'a> {
             ExprKind::Break | ExprKind::Continue => {}
             ExprKind::FString(parts) => {
                 for p in parts {
-                    if let FPart::Expr(x) = p {
+                    for x in p.exprs_mut() {
                         self.expr(x);
                     }
                 }

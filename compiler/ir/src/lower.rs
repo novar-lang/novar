@@ -1426,6 +1426,9 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                     let c = self.str_const(cur, t);
                     chunks.push((c[0], c[1]));
                 }
+                hir::FPart::Fmt { expr, .. } => {
+                    return Err(self.unsupported("formats in f-strings", &expr.span));
+                }
                 hir::FPart::Expr(x) => {
                     let (next, flow) = self.expr(x, cur, env)?;
                     cur = next;
