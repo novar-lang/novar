@@ -30,6 +30,53 @@ struct OpenCall {
     span: Span,
 }
 
+/// Bounds every program can use without declaring a trait: `fn sum[T: Num](xs: List[T]) -> T`.
+#[derive(Clone, Copy)]
+enum Builtin {
+    /// `Int`, `Float` and the sized number types.
+    Num,
+    /// Values that `<` and `>` compare: numbers and `Text`.
+    Ord,
+    /// Values that `==` compares: everything but functions.
+    Eq,
+}
+
+impl Builtin {
+    const NAMES: [&'static str; 3] = ["Num", "Ord", "Eq"];
+
+    fn from_name(name: &str) -> Option<Builtin> {
+        match name {
+            "Num" => Some(Builtin::Num),
+            "Ord" => Some(Builtin::Ord),
+            "Eq" => Some(Builtin::Eq),
+            _ => None,
+        }
+    }
+
+    fn holds(self, ty: &Ty) -> bool {
+        match (self, ty) {
+            (_, Ty::Unknown | Ty::Never | Ty::Param(_)) => true,
+            (Builtin::Num, Ty::Prim(p)) => p.is_numeric(),
+            (Builtin::Num, Ty::IntVar(_) | Ty::FloatVar(_)) => true,
+            (Builtin::Ord, Ty::Prim(p)) => p.is_numeric() || *p == Prim::Str,
+            (Builtin::Ord, Ty::IntVar(_) | Ty::FloatVar(_)) => true,
+            (Builtin::Eq, Ty::Fn(..)) => false,
+            (Builtin::Eq, _) => true,
+            _ => false,
+        }
+    }
+
+    fn meaning(self) -> &'static str {
+        match self {
+            Builtin::Num => {
+                "`Num` is for Int, Float and the sized number types (`i32`, `u8`, `f32`, ...)"
+            }
+            Builtin::Ord => "`Ord` is for numbers and Text, the values `<` and `>` compare",
+            Builtin::Eq => "`Eq` is for every type but functions, the values `==` compares",
+        }
+    }
+}
+
 /// A generic function (or method) instance waiting to have its body checked.
 #[derive(Clone)]
 struct Pending {
@@ -2103,22 +2150,53 @@ impl Checker {
     }
 
     /// Reports a type argument that does not implement a trait its parameter is bounded by.
-    fn check_bounds(&mut self, param: &ast::GenericParam, ty: &Ty, span: &Span) {
+    /// Reports each bound `ty` does not meet; whether it met them all.
+    fn check_bounds(&mut self, param: &ast::GenericParam, ty: &Ty, span: &Span) -> bool {
+        let mut all = true;
         for bound in &param.bounds {
+            let ty = self.resolve(ty);
+            // A trait of the program wins over a built-in bound of the same name.
             if !self.traits.contains_key(&bound.node) {
-                self.err(
-                    bound.span.clone(),
-                    format!("cannot find the trait `{}`", bound.node),
-                );
+                let Some(builtin) = Builtin::from_name(&bound.node) else {
+                    let known: Vec<&str> = self
+                        .traits
+                        .keys()
+                        .map(String::as_str)
+                        .chain(Builtin::NAMES)
+                        .collect();
+                    self.err_hint(
+                        bound.span.clone(),
+                        format!("cannot find the trait `{}`", bound.node),
+                        closest(&bound.node, known)
+                            .map(|c| format!("did you mean `{c}`?"))
+                            .as_deref(),
+                    );
+                    all = false;
+                    continue;
+                };
+                if !builtin.holds(&ty) {
+                    all = false;
+                    self.diags.push(
+                        Diagnostic::error(
+                            span.clone(),
+                            format!(
+                                "`{ty}` does not implement `{}`, which `{}` requires",
+                                bound.node, param.name.node
+                            ),
+                        )
+                        .with_note(builtin.meaning()),
+                    );
+                }
                 continue;
             }
-            let ok = match self.resolve(ty) {
+            let ok = match ty.clone() {
                 Ty::Struct(n) | Ty::Enum(n) => self.impls.contains(&(bound.node.clone(), n)),
                 Ty::Trait(t) => t == bound.node,
                 Ty::Unknown | Ty::Never | Ty::Param(_) => true,
                 _ => false,
             };
             if !ok {
+                all = false;
                 self.err(
                     span.clone(),
                     format!(
@@ -2128,6 +2206,7 @@ impl Checker {
                 );
             }
         }
+        all
     }
 
     /// `Stack<i64>`: the generic struct or enum `name` for these arguments, created the first time.
@@ -2402,10 +2481,11 @@ impl Checker {
                 (k, v)
             })
             .collect();
+        let mut bounds_ok = true;
         if !open {
             for g in &generics {
                 let ty = bind[&g.name.node].clone();
-                self.check_bounds(g, &ty, span);
+                bounds_ok &= self.check_bounds(g, &ty, span);
             }
         }
         let params: Vec<Ty> = decl_params
@@ -2444,6 +2524,9 @@ impl Checker {
                 });
                 format!("{OPEN_CALL}{}", self.open_calls.len() - 1)
             }
+            // The body is not checked for types that do not meet the bounds: it would only
+            // repeat the mistake.
+            _ if !bounds_ok => format!("{name}<invalid>"),
             _ => self.fn_instance(name, &decl, &generics, &bind, &params, &ret),
         };
         let args: Vec<hir::Expr> = checked
@@ -2523,9 +2606,13 @@ impl Checker {
             .iter()
             .map(|(k, v)| (k.clone(), self.finalize_ty(v)))
             .collect();
+        let mut bounds_ok = true;
         for g in &call.generics {
             let ty = bind[&g.name.node].clone();
-            self.check_bounds(g, &ty, &call.span);
+            bounds_ok &= self.check_bounds(g, &ty, &call.span);
+        }
+        if !bounds_ok {
+            return format!("{}<invalid>", call.name);
         }
         let params: Vec<Ty> = call
             .params

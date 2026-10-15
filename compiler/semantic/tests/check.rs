@@ -3172,3 +3172,76 @@ fn f() -> Int:
         "must return an `Option`",
     );
 }
+
+#[test]
+fn built_in_bounds_limit_what_a_type_parameter_accepts() {
+    assert_clean(
+        r#"
+fn add[T: Num](a: T, b: T) -> T:
+    a + b
+
+fn largest[T: Ord](xs: List[T]) -> T:
+    var best = xs[0]
+    for x in xs:
+        if x > best:
+            best = x
+    best
+
+fn same[T: Eq](a: T, b: T) -> Bool:
+    a == b
+
+fn clamp[T: (Num, Ord)](x: T, lo: T) -> T:
+    if x > lo:
+        x + lo
+    else:
+        lo
+
+type P:
+    x: Int
+
+fn main() -> i32:
+    let a = add(1, 2)
+    let b = add(1.5, 2.0)
+    let c = largest(["a", "b"])
+    let d = same(P(x: 1), P(x: 1))
+    let e: f32 = clamp(1.0, 2.0)
+    0
+"#,
+    );
+    let one = |call: &str| {
+        errors(&format!(
+            "fn add[T: Num](a: T) -> T:\n    a\n\nfn big[T: Ord](a: T) -> T:\n    a\n\ntype P:\n    x: Int\n\nfn f():\n    {call}\n"
+        ))
+    };
+    let e = one("add(\"a\")");
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert!(e[0].contains("`Text` does not implement `Num`"), "{e:?}");
+    // The body is not checked for a type that fails the bound, so the mistake shows once.
+    let e = one("big(P(x: 1))");
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert!(e[0].contains("`P` does not implement `Ord`"), "{e:?}");
+    let e = errors("fn f[T: Nom](a: T) -> T:\n    a\n\nfn g():\n    f(1)\n");
+    assert!(
+        e.iter().any(|m| m.contains("cannot find the trait `Nom`")),
+        "{e:?}"
+    );
+    // A trait of the program with the same name as a built-in bound wins.
+    assert_clean(
+        r#"
+trait Num:
+    fn value(self) -> Int: ...
+
+type A(Num):
+    v: Int
+
+    fn value(self) -> Int:
+        self.v
+
+fn get[T: Num](x: T) -> Int:
+    x.value()
+
+fn f() -> Int:
+    get(A(v: 1))
+"#,
+    );
+}
