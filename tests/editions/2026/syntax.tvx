@@ -1,0 +1,114 @@
+# Edition 2026: the forms of the language in one program. It must keep passing `check`,
+# `fmt --check` and `test` unchanged.
+
+type Point:
+    x: Float
+    y: Float
+
+type Query:
+    text: Text
+    top_k: Int = 5
+
+enum Shape:
+    Circle(Float)
+    Rect(Float, Float)
+    Empty
+
+trait Area:
+    fn area(self) -> Float: ...
+
+extend Point:
+    fn norm(self) -> Float:
+        self.x * self.x + self.y * self.y
+
+extend Shape:
+    fn area(self) -> Float:
+        match self:
+            case Shape.Circle(r):
+                3.0 * r * r
+            case Shape.Rect(w, h):
+                w * h
+            case Shape.Empty:
+                0.0
+
+fn clamp(n: Int, low: Int = 0, high: Int = 10) -> Int:
+    if n < low:
+        low
+    elif n > high:
+        high
+    else:
+        n
+
+fn first_word(s: Text) -> Text?:
+    let words = s.split(" ")
+    if words.len() > 0:
+        Some(words[0])
+    else:
+        None
+
+fn parse_age(s: Text) -> Result[Int, Text]:
+    if s == "":
+        return Err("empty")
+    Ok(clamp(int(s.len())))
+
+fn doubled(xs: List[Int]) -> List[Int]:
+    [x * 2 for x in xs if x > 0]
+
+fn total(xs: List[Int]) -> Int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    sum
+
+fn count_up(n: Int) -> Int:
+    var i = 0
+    while i < n:
+        i += 1
+        if i == 100:
+            break
+    i
+
+fn sum_pair(pair: (Int, Int)) -> Int:
+    let (a, b) = pair
+    a + b
+
+fn test_types_and_methods():
+    let p = Point(x: 3.0, y: 4.0)
+    assert_eq(p.norm(), 25.0)
+    assert_eq(Query(text: "a").top_k, 5)
+
+fn test_enums_and_match():
+    assert_eq(Shape.Rect(2.0, 3.0).area(), 6.0)
+    assert_eq(Shape.Empty.area(), 0.0)
+
+fn test_defaults_and_named_arguments():
+    assert_eq(clamp(50), 10)
+    assert_eq(clamp(50, high: 20), 20)
+    assert_eq(clamp(-3), 0)
+
+fn test_options_and_results():
+    assert_eq(first_word("a b") ?? "none", "a")
+    assert(parse_age("").is_err())
+    assert(parse_age("abc").is_ok())
+
+fn test_collections_and_loops():
+    assert_eq(doubled([1, -2, 3]), [2, 6])
+    assert_eq(total([1, 2, 3]), 6)
+    assert_eq(count_up(5), 5)
+    assert_eq(sum_pair((1, 2)), 3)
+    assert_eq([1, 2, 3, 4][1:3], [2, 3])
+
+fn test_closures_pipes_and_strings():
+    let add = (a, b) => a + b
+    assert_eq(add(1, 2), 3)
+    assert_eq(4 |> clamp(low: 5), 5)
+    let name = "world"
+    assert_eq(f"hello {name}", "hello world")
+    assert!(1 + 1 == 2, "arithmetic")
+
+fn test_patterns_in_conditions():
+    var seen = 0
+    let xs = [4, 5]
+    if xs.first() is Some(first):
+        seen = first
+    assert_eq(seen, 4)

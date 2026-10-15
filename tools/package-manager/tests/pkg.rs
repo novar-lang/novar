@@ -128,6 +128,25 @@ fn manifests_round_trip_and_validate() {
 // ---- registry --------------------------------------------------------------------------------
 
 #[test]
+fn the_edition_is_checked_and_defaults_to_the_current_one() {
+    let plain = Manifest::parse("[package]\nname = \"app\"\nversion = \"1.0.0\"\n").unwrap();
+    assert_eq!(plain.package.edition, None);
+    let pinned = Manifest::parse(&format!(
+        "[package]\nname = \"app\"\nversion = \"1.0.0\"\nedition = \"{}\"\n",
+        telvax_pkg::manifest::CURRENT_EDITION
+    ))
+    .unwrap();
+    assert_eq!(Manifest::parse(&pinned.to_toml()).unwrap(), pinned);
+    let e = Manifest::parse("[package]\nname = \"app\"\nversion = \"1.0.0\"\nedition = \"2031\"\n")
+        .unwrap_err()
+        .0;
+    assert!(
+        e.contains("`2026`, not `2031`") && e.contains("update telvax"),
+        "{e}"
+    );
+}
+
+#[test]
 fn publishing_writes_an_index_and_a_checksummed_archive() {
     let reg = Dir::new("reg");
     publish(

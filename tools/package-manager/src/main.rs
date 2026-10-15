@@ -223,6 +223,7 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
         package: telvax_pkg::manifest::PackageInfo {
             name: name.to_string(),
             version: Version::new(0, 1, 0),
+            edition: Some(telvax_pkg::manifest::CURRENT_EDITION.to_string()),
             description: None,
             entry: None,
         },

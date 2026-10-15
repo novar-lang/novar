@@ -1,0 +1,30 @@
+# A small HTTP service that needs no external model: it validates the JSON body, scores the
+# text against two word lists and answers with JSON. Bad input becomes an HTTP 400.
+# Run: telvax serve examples/service/sentiment.tvx
+# Try: curl -XPOST localhost:8080/v1/sentiment -H 'content-type: application/json' -d '{"text":"great and good"}'
+
+import std.http.Status
+
+type Input:
+    text: Text
+
+type Output:
+    label: Text
+    score: Int
+
+fn score_of(text: Text) -> Int:
+    var score = 0
+    for word in text.to_lowercase().split(" "):
+        if ["good", "great", "love"].contains(word):
+            score += 1
+        if ["bad", "awful", "hate"].contains(word):
+            score -= 1
+    score
+
+@endpoint(POST, "/v1/sentiment")
+fn sentiment(input: Input) -> Result[Output, Status]:
+    if input.text.is_empty():
+        return Err(Status.BadRequest("empty text"))
+    let score = score_of(input.text)
+    let label = "positive" if score > 0 else "negative" if score < 0 else "neutral"
+    Ok(Output(label: label, score: score))

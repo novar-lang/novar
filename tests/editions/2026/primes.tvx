@@ -1,0 +1,26 @@
+# Counts primes and prints a few facts. Runs interpreted (`telvax run`) or native (`telvax build`).
+
+fn is_prime(n: Int) -> Bool:
+    if n < 2:
+        return False
+    var d = 2
+    while d * d <= n:
+        if n % d == 0:
+            return False
+        d += 1
+    True
+
+fn main() -> i32:
+    let limit: Int = 100
+    var count = 0
+    for n in range(limit):
+        if is_prime(n):
+            count += 1
+    print(f"primes below {limit}: {count}")
+
+    let squares = [1, 4, 9, 16, 25]
+    var sum = 0
+    for s in squares:
+        sum += s
+    print(f"{squares.len()} squares add up to {sum}, the third is {squares[2]}")
+    count
