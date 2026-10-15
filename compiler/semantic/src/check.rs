@@ -2288,6 +2288,12 @@ impl Checker {
                 );
             }
         }
+        // A literal argument must take the type the call is used as (`let n: Int = id(7)`)
+        // before it is pinned to its default.
+        if let Some(want) = expected {
+            let ret = self.subst_params(&decl_ret, &bind);
+            self.unify(want, &ret);
+        }
         let bind: HashMap<String, Ty> = bind
             .into_iter()
             .map(|(k, v)| {
@@ -3674,6 +3680,7 @@ impl Checker {
         };
         let want = if is_ok { &want_ok } else { &want_err };
         let arg = self.expr(arg, Some(want));
+        let errors = self.diags.len();
         let arg = self.coerce(arg, want);
         let ty = if is_ok {
             Ty::Result(Box::new(arg.ty.clone()), Box::new(want_err))
@@ -3682,7 +3689,7 @@ impl Checker {
         };
         // Keep the declared type when the argument is less specific.
         let ty = match expected {
-            Some(e @ Ty::Result(..)) if e.accepts(&ty) => e.clone(),
+            Some(e @ Ty::Result(..)) if e.accepts(&ty) || self.diags.len() > errors => e.clone(),
             _ => ty,
         };
         let callee_name = match &callee.node {
@@ -3835,6 +3842,7 @@ impl Checker {
             }
         }
         let compatible = self.unify(&l.ty, &r.ty);
+        let mut reported = !compatible;
         if !compatible {
             let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
             self.diags.push(
@@ -3858,8 +3866,12 @@ impl Checker {
                         span.clone(),
                         format!("cannot apply arithmetic to `{}`", l.ty),
                     );
+                    reported = true;
                 }
-                if l.ty == Ty::Unknown {
+                // After an error the result is unknown, so it is not reported a second time.
+                if reported {
+                    Ty::Unknown
+                } else if l.ty == Ty::Unknown {
                     r.ty.clone()
                 } else {
                     l.ty.clone()

@@ -2954,3 +2954,57 @@ fn g(x: Tensor[f32, 2, 3], w: Tensor[f32, 4, 4]) -> Tensor[f32, 2, 4]:
         "{e:?}"
     );
 }
+
+#[test]
+fn generic_call_takes_the_expected_type_for_literals() {
+    assert_clean(
+        r#"
+fn id[T](x: T) -> T:
+    x
+
+fn first[T](xs: List[T]) -> T?:
+    xs.first()
+
+fn f() -> Int:
+    let a: Int = id(7)
+    let b: Int? = first([1, 2])
+    let c: Float = id(2.5)
+    a
+"#,
+    );
+    assert_err(
+        r#"
+fn id[T](x: T) -> T:
+    x
+
+fn f():
+    let a: Text = id(7)
+"#,
+        "mismatched types",
+    );
+}
+
+#[test]
+fn one_mistake_is_reported_once() {
+    let count = |src: &str| errors(src).len();
+    assert_eq!(
+        count("fn f(x: Int?) -> Int:\n    x + 1\n"),
+        1,
+        "operand mismatch returned"
+    );
+    assert_eq!(
+        count("fn k(a: i32, b: i64) -> i64:\n    a + b\n"),
+        1,
+        "operand sizes"
+    );
+    assert_eq!(
+        count("fn h() -> Result[Int, Text]:\n    Err(3)\n"),
+        1,
+        "wrong error type in Err"
+    );
+    assert_eq!(
+        count("fn h() -> Result[Int, Text]:\n    Ok(\"a\")\n"),
+        1,
+        "wrong value type in Ok"
+    );
+}
