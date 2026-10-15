@@ -1,4 +1,5 @@
 mod bundle;
+mod doctor;
 mod native;
 mod serve;
 
@@ -16,6 +17,7 @@ usage:
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
   telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
   telvax run <file.tvx> <function> [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax doctor                                             what this build can do and how it is set up
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
   telvax serve <file.tvx> [--port N] [--host H] [--seed docs.jsonl] [--live] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
@@ -49,6 +51,14 @@ fn real_main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(CliError::Unknown(word)) => {
+            eprint!("error: unknown command `{word}`");
+            if let Some(near) = doctor::closest_command(&word) {
+                eprint!("; did you mean `{near}`?");
+            }
+            eprintln!("\nrun `telvax --help` for the commands");
+            ExitCode::from(2)
+        }
         Err(CliError::Usage) => {
             eprintln!("{USAGE}");
             ExitCode::from(2)
@@ -79,6 +89,10 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             println!("{USAGE}");
             Ok(())
         }
+        ["doctor"] => {
+            print!("{}", doctor::report());
+            Ok(())
+        }
         ["check", file] => check(file).map(|_| ()),
         ["run", file, func, rest @ ..] => run(file, func, rest),
         ["test", file, rest @ ..] => {
@@ -100,6 +114,9 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         ["lsp"] => telvax_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
         ["build", file, rest @ ..] => native::build(file, rest),
+        [word, ..] if !doctor::COMMANDS.contains(word) && !word.starts_with('-') => {
+            Err(CliError::Unknown((*word).to_string()))
+        }
         _ => Err(CliError::Usage),
     }
 }
@@ -251,6 +268,8 @@ pub fn take_quantize<'a>(
 #[derive(Debug)]
 pub enum CliError {
     Usage,
+    /// The first word is not a command.
+    Unknown(String),
     Failed(String),
 }
 

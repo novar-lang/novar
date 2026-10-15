@@ -148,6 +148,38 @@ fn allow_limits_what_a_program_may_touch() {
 }
 
 #[test]
+fn doctor_reports_the_build_and_an_unknown_command_is_named() {
+    let (ok, out, _) = run(&["doctor"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("syntax editions read: 2026"), "{out}");
+    assert!(out.contains("native backend (build, jit)"), "{out}");
+    // A key is reported as set or not, never shown.
+    let key = Command::new(TELVAX)
+        .arg("doctor")
+        .env("OPENAI_API_KEY", "sk-secret-value")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&key.stdout);
+    assert!(
+        text.contains("OPENAI_API_KEY        set") && !text.contains("sk-secret-value"),
+        "{text}"
+    );
+    let out = Command::new(TELVAX).arg("chek").output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        err.contains("unknown command `chek`; did you mean `check`?"),
+        "{err}"
+    );
+    let out = Command::new(TELVAX).arg("frobnicate").output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("unknown command `frobnicate`") && !err.contains("did you mean"),
+        "{err}"
+    );
+}
+
+#[test]
 fn deeply_nested_programs_are_checked_not_crashed() {
     // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
     // recurses once per level and used to overflow the 8 MB stack of a main thread.

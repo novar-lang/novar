@@ -74,6 +74,7 @@ backend (`--features llvm`) is not available on Windows yet.
 
 ```sh
 cargo build --release -p telvax_cli          # target/release/telvax
+telvax doctor                                 # what this build can do (native backend, GPU, live)
 telvax check examples/rag-service.tvx         # parse + type-check, diagnostics point at the exact span
 telvax run examples/basics/primes.tvx main    # interpret
 telvax serve examples/rag-service.tvx         # HTTP server on :8080 (offline model stand-ins)
