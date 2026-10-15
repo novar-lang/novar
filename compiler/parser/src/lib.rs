@@ -53,6 +53,20 @@ fn friendly(e: &Rich<'_, Token<'_>>, src: &str, base: usize) -> Diagnostic {
         Some(Token::Dedent) => {
             return Diagnostic::error(span, "the block ends here, but something is missing");
         }
+        Some(Token::LBrace) if expects(Token::Colon) => {
+            return Diagnostic::error(span, "a block starts with `:` and is indented, not `{ }`")
+                .with_note("write `:` at the end of the line and indent the lines below it");
+        }
+        Some(Token::RParen | Token::Comma) if expects(Token::Colon) => {
+            return Diagnostic::error(span, "a parameter or a field needs a type")
+                .with_note("write `name: Type`, for example `x: Int`");
+        }
+        Some(Token::Ident(_))
+            if expects(Token::Newline) && after_colon_in_fn(src, span.start, base) =>
+        {
+            return Diagnostic::error(span, "a return type is written `-> Type`, not `: Type`")
+                .with_note("for example `fn area(r: Float) -> Float:`");
+        }
         Some(Token::Newline) if expects(Token::Colon) => {
             return Diagnostic::error(span, "expected `:` at the end of this line")
                 .with_note("a line that opens a block ends with `:`");
@@ -81,6 +95,13 @@ fn friendly(e: &Rich<'_, Token<'_>>, src: &str, base: usize) -> Diagnostic {
         return Diagnostic::error(span, format!("unexpected `{found}`"));
     }
     Diagnostic::error(span, e.to_string())
+}
+
+/// Whether the error at `start` follows the `:` of a `fn` header (`fn f(x: Int): Int:`).
+fn after_colon_in_fn(src: &str, start: usize, base: usize) -> bool {
+    let before = &src[..start.saturating_sub(base).min(src.len())];
+    let line = before.rsplit('\n').next().unwrap_or("");
+    line.trim_start().starts_with("fn ") && line.trim_end().ends_with(':')
 }
 
 /// What a lexical error is about, from the text it covers.
@@ -128,6 +149,9 @@ fn foreign_word(word: &str) -> Option<&'static str> {
         "impl" => {
             "`impl` is not used in Telvax: put the methods in the `type`, or use `extend Name:`"
         }
+        "use" => "`use` is not used in Telvax: write `from a.b import C` or `import a.b.C`",
+        "const" => "`const` is not used in Telvax: write `let` for a name that does not change",
+        "function" | "func" | "fun" => "`function` is not used in Telvax: write `fn name(...)`",
         "pub" => {
             "`pub` is not used in Telvax: names that start with `_` are private, all others are public"
         }
@@ -215,6 +239,8 @@ pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
         // Someone who writes `fn` or `let` at the start of a line needs to hear what to write.
         for (word, span) in first_words {
             if let Some(hint) = foreign_word(&word) {
+                // The word's own message says more than "unexpected `def`".
+                errors.retain(|e| e.span != span);
                 errors.push(Diagnostic::error(span, hint));
             }
         }
@@ -1523,17 +1549,24 @@ where
     let body = block_of(stmt);
 
     // `import a.b.C` and `from a.b import C, D`
+    // `as` is only a word here, so it stays a plain name everywhere else.
+    let alias = select! { Token::Ident("as") => () }
+        .ignore_then(ident())
+        .or_not();
     let import = just(Token::Import)
         .ignore_then(path())
+        .then(alias.clone())
         .then_ignore(just(Token::Newline))
-        .map_with(|path, e| {
+        .map_with(|(path, alias), e| {
             Item::Import(Import {
                 path,
                 group: Vec::new(),
+                aliases: vec![alias],
                 span: rng(e.span()),
             })
         });
     let names = ident()
+        .then(alias)
         .separated_by(just(Token::Comma))
         .at_least(1)
         .allow_trailing()
@@ -1548,10 +1581,12 @@ where
                 .or(names),
         )
         .then_ignore(just(Token::Newline))
-        .map_with(|(path, group), e| {
+        .map_with(|(path, names), e| {
+            let (group, aliases) = names.into_iter().unzip();
             Item::Import(Import {
                 path,
                 group,
+                aliases,
                 span: rng(e.span()),
             })
         });

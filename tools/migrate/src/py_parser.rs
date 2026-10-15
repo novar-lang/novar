@@ -1499,6 +1499,7 @@ where
             Item::Import(Import {
                 path,
                 group: Vec::new(),
+                aliases: Vec::new(),
                 span: rng(e.span()),
             })
         });
@@ -1521,6 +1522,7 @@ where
             Item::Import(Import {
                 path,
                 group,
+                aliases: Vec::new(),
                 span: rng(e.span()),
             })
         });
