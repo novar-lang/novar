@@ -332,18 +332,6 @@ where
     select! { Token::Ident(s) if s == w => () }
 }
 
-/// The names of the types as written (`Int`, `Text`, `List`) and as the compiler knows them.
-fn canonical_type_name(name: &str) -> &str {
-    match name {
-        "Int" => "i64",
-        "Float" => "f64",
-        "Text" => "String",
-        "Bool" => "bool",
-        "List" => "Vec",
-        other => other,
-    }
-}
-
 /// `Tensor[f32, 2, 3]`: after the element type, the arguments are the dimensions.
 fn tensor_shape(args: Vec<TypeArg>) -> Vec<TypeArg> {
     let mut out = Vec::new();
@@ -450,7 +438,7 @@ where
             });
         let named = path().then(args.or_not()).map_with(|(mut path, args), e| {
             if path.len() == 1 {
-                let canon = canonical_type_name(&path[0].node).to_string();
+                let canon = telvax_ast::canonical_type_name(&path[0].node).to_string();
                 path[0].node = canon;
             }
             let mut args = args.unwrap_or_default();
@@ -893,10 +881,21 @@ where
             );
         let field = just(Token::Dot).ignore_then(ident().map(Postfix::Field).or(numeric_field));
         let try_ = just(Token::Question).to(Postfix::Try);
+        // `xs[i]`; with commas, `f[Int, Text]` names the types a generic function is called with
+        // and the index is the tuple of them.
         let index = expr
             .clone()
+            .separated_by(just(Token::Comma))
+            .at_least(1)
+            .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
-            .map(Postfix::Index);
+            .map_with(|mut items, e| {
+                Postfix::Index(if items.len() == 1 {
+                    items.remove(0)
+                } else {
+                    spanned(ExprKind::Tuple(items), e.span())
+                })
+            });
         let path_heads = heads.clone();
         let postfix = primary.foldl_with(
             call.or(field).or(index).or(try_).repeated(),

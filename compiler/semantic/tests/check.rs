@@ -3306,3 +3306,51 @@ fn main() -> i32:
         assert_err(src, needle);
     }
 }
+
+#[test]
+fn a_generic_function_can_be_called_with_its_types_written() {
+    assert_clean(
+        r#"
+fn id[T](x: T) -> T:
+    x
+
+fn empty[T]() -> List[T]:
+    let xs: List[T] = []
+    xs
+
+fn pair[A, B](a: A, b: B) -> (A, B):
+    (a, b)
+
+fn largest[T: Ord](xs: List[T]) -> T:
+    xs[0]
+
+fn f() -> Int:
+    let a: Int = id[Int](3)
+    let b: f32 = id[f32](2.5)
+    let c: List[Text] = empty[Text]()
+    let d: (Int, Text) = pair[Int, Text](1, "a")
+    let e: Float = largest[Float]([1.5])
+    let g: List[Int] = id[List[Int]]([1])
+    let xs = [1, 2]
+    let k = 0
+    xs[k]
+"#,
+    );
+    let base = "fn id[T](x: T) -> T:\n    x\n\nfn pair[A, B](a: A, b: B) -> (A, B):\n    (a, b)\n\nfn f():\n";
+    assert_err(
+        &format!("{base}    id[Int](\"x\")\n"),
+        "expected `Int`, found `Text`",
+    );
+    assert_err(
+        &format!("{base}    pair[Int](1, 2)\n"),
+        "`pair` takes 2 type argument(s), found 1",
+    );
+    assert_err(
+        &format!("{base}    id[Nope](1)\n"),
+        "cannot find type `Nope`",
+    );
+    assert_err(
+        "fn empty[T]() -> List[T]:\n    let xs: List[T] = []\n    xs\n\nfn f():\n    empty()\n",
+        "`empty[Type](..)`",
+    );
+}

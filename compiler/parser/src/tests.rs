@@ -685,3 +685,20 @@ fn mistakes_in_a_function_header_say_what_to_write() {
     let (_, errs) = parse("use util::clamp\n");
     assert!(errs.iter().any(|e| e.message.contains("from a.b import C")));
 }
+
+#[test]
+fn type_arguments_after_a_function_name() {
+    // `f[Int](x)` is an index followed by a call; commas make the index a tuple of types.
+    let ExprKind::Call { callee, .. } = ok_expr("pair[Int, Text](1, 'a')") else {
+        panic!("not a call")
+    };
+    let ExprKind::Index { index, .. } = callee.node else {
+        panic!("not an index")
+    };
+    assert!(matches!(&index.node, ExprKind::Tuple(items) if items.len() == 2));
+    // A plain index is unchanged.
+    let ExprKind::Index { index, .. } = ok_expr("xs[i]") else {
+        panic!("not an index")
+    };
+    assert!(matches!(index.node, ExprKind::Path(_)));
+}

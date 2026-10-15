@@ -30,6 +30,37 @@ struct OpenCall {
     span: Span,
 }
 
+/// A type written where an expression is parsed: `Int`, `List[Text]`, `Map[Text, Int]`.
+fn expr_as_type(e: &ast::Expr) -> Option<ast::Type> {
+    let (path, args) = match &e.node {
+        ast::ExprKind::Path(p) => (p.clone(), Vec::new()),
+        ast::ExprKind::Index { base, index } => {
+            let ast::ExprKind::Path(p) = &base.node else {
+                return None;
+            };
+            let parts = match &index.node {
+                ast::ExprKind::Tuple(items) => items.clone(),
+                _ => vec![(**index).clone()],
+            };
+            let args = parts
+                .iter()
+                .map(|a| expr_as_type(a).map(ast::TypeArg::Type))
+                .collect::<Option<Vec<_>>>()?;
+            (p.clone(), args)
+        }
+        _ => return None,
+    };
+    let mut path = path;
+    if path.len() == 1 {
+        path[0].node = ast::canonical_type_name(&path[0].node).to_string();
+    }
+    Some(ast::Type {
+        path,
+        args,
+        span: e.span.clone(),
+    })
+}
+
 /// Bounds every program can use without declaring a trait: `fn sum[T: Num](xs: List[T]) -> T`.
 #[derive(Clone, Copy)]
 enum Builtin {
@@ -2364,6 +2395,7 @@ impl Checker {
         &mut self,
         name: &str,
         type_name: Option<&str>,
+        explicit: &[ast::Type],
         args: &[ast::Expr],
         expected: Option<&Ty>,
         span: &Span,
@@ -2433,6 +2465,22 @@ impl Checker {
         }
         // Arguments first (closures wait until the types they need are known).
         let mut bind: HashMap<String, Ty> = HashMap::new();
+        if !explicit.is_empty() {
+            if explicit.len() != generics.len() {
+                return bad(
+                    self,
+                    format!(
+                        "`{name}` takes {} type argument(s), found {}",
+                        generics.len(),
+                        explicit.len()
+                    ),
+                );
+            }
+            for (g, t) in generics.iter().zip(explicit) {
+                let ty = self.resolve_type(t);
+                bind.insert(g.name.node.clone(), ty);
+            }
+        }
         let mut checked: Vec<Option<hir::Expr>> = Vec::new();
         for (a, declared) in args.iter().zip(&decl_params) {
             if matches!(a.node, ast::ExprKind::Closure { .. }) {
@@ -2460,7 +2508,7 @@ impl Checker {
                 return bad(
                     self,
                     format!(
-                        "cannot infer the type parameter `{}` of `{name}`: add a type annotation",
+                        "cannot infer the type parameter `{}` of `{name}`: add a type annotation, or write the type in the call: `{name}[Type](..)`",
                         g.name.node
                     ),
                 );
@@ -3661,13 +3709,40 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        // `first[Int](xs)`: the types a generic function is called with, written down.
+        if let ast::ExprKind::Index { base, index } = &callee.node
+            && let ast::ExprKind::Path(p) = &base.node
+            && p.len() == 1
+            && self.lookup_local(&p[0].node).is_none()
+            && !self.fn_sigs.contains_key(&p[0].node)
+            && self.generic_fns.contains_key(&p[0].node)
+        {
+            let parts = match &index.node {
+                ast::ExprKind::Tuple(items) => items.clone(),
+                _ => vec![(**index).clone()],
+            };
+            let mut types = Vec::new();
+            for part in &parts {
+                match expr_as_type(part) {
+                    Some(t) => types.push(t),
+                    None => {
+                        self.err(
+                            part.span.clone(),
+                            "a type argument is a type name, for example `first[Int](xs)`",
+                        );
+                        return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+                    }
+                }
+            }
+            return self.generic_call(&p[0].node.clone(), None, &types, args, expected, span);
+        }
         if let ast::ExprKind::Path(p) = &callee.node {
             if p.len() == 1
                 && self.lookup_local(&p[0].node).is_none()
                 && !self.fn_sigs.contains_key(&p[0].node)
                 && self.generic_fns.contains_key(&p[0].node)
             {
-                return self.generic_call(&p[0].node.clone(), None, args, expected, span);
+                return self.generic_call(&p[0].node.clone(), None, &[], args, expected, span);
             }
             if p.len() == 2
                 && (self.generic_structs.contains_key(&p[0].node)
@@ -3680,6 +3755,7 @@ impl Checker {
                 return self.generic_call(
                     &p[1].node.clone(),
                     Some(&p[0].node.clone()),
+                    &[],
                     args,
                     expected,
                     span,
