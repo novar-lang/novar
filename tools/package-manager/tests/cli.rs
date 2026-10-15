@@ -186,3 +186,63 @@ fn yank_hides_a_version_from_new_installs() {
             .success()
     );
 }
+
+#[test]
+fn the_templates_pass_check_and_publish_refuses_a_broken_package() {
+    let root = scratch("templates");
+    let home = root.join("home");
+    let reg = root.join("registry");
+    let reg_s = reg.to_str().unwrap();
+    // The files `new` writes are valid Telvax, for a binary and for a library.
+    for (name, lib) in [("fresh", false), ("freshlib", true)] {
+        let args: Vec<&str> = if lib {
+            vec!["new", name, "--lib"]
+        } else {
+            vec!["new", name]
+        };
+        let o = tvpm(&root, &home, &args);
+        assert!(o.status.success(), "{}", text(&o));
+        let src = std::fs::read_to_string(root.join(name).join("src").join(if lib {
+            "lib.tvx"
+        } else {
+            "main.tvx"
+        }))
+        .unwrap();
+        let (_, errors) = telvax_parser::parse(&src);
+        assert!(errors.is_empty(), "{name}: {errors:?}");
+    }
+    // A fresh library publishes, since it checks.
+    let o = tvpm(
+        &root.join("freshlib"),
+        &home,
+        &["publish", "--registry", reg_s],
+    );
+    assert!(o.status.success(), "{}", text(&o));
+    // A broken one does not, and the diagnostics are shown.
+    let broken = root.join("broken");
+    assert!(
+        tvpm(&root, &home, &["new", "broken", "--lib"])
+            .status
+            .success()
+    );
+    std::fs::write(
+        broken.join("src/lib.tvx"),
+        "fn bad() -> Int:\n    \"not an int\"\n",
+    )
+    .unwrap();
+    let o = tvpm(&broken, &home, &["publish", "--registry", reg_s]);
+    let out = text(&o);
+    assert!(!o.status.success(), "{out}");
+    assert!(
+        out.contains("mismatched types") && out.contains("was not published"),
+        "{out}"
+    );
+    assert!(
+        !text(&tvpm(
+            &root,
+            &home,
+            &["search", "broken", "--registry", reg_s]
+        ))
+        .contains("broken 0.1.0")
+    );
+}

@@ -128,6 +128,25 @@ impl Project {
         Ok(fetched)
     }
 
+    /// Parses and type-checks the package as `telvax check` would, with its installed dependencies.
+    /// The error is the diagnostics, rendered, and a count.
+    pub fn check(&self) -> Result<(), String> {
+        let entry = self.entry()?;
+        let deps = self.dependency_packages()?;
+        let loaded = telvax_modules::load(&entry, &deps)?;
+        let (_, lowered) = telvax_hir::lower(&loaded.program);
+        let all: Vec<_> = loaded.diagnostics.iter().cloned().chain(lowered).collect();
+        let errors = all.iter().filter(|d| d.is_error()).count();
+        if errors == 0 {
+            return Ok(());
+        }
+        Err(format!(
+            "{}error: {errors} error(s) in `{}`\n",
+            loaded.map.render(&all, false),
+            entry.display()
+        ))
+    }
+
     /// The dependencies for the compiler, from `telvax.lock`. Fails when the lockfile is missing or
     /// does not cover the manifest, or a package is not installed.
     pub fn dependency_packages(&self) -> Result<Vec<Package>, String> {
