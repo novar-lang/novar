@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **`telvax run` reads its arguments by type:** the words after the function are read as the types it
+  declares, so `Text` keeps `123` as text and a `List[Int]` takes `[1,2,3]`. A wrong word says which
+  argument and which type (`argument `b` of `add` is Int, and `x` is not a value of that type`), a
+  wrong count lists the parameters, and an unknown function lists the ones the file has. The function
+  name is optional: `telvax run app.tvx` runs `main`. Only `telvax check` prints "ok" now; `run`,
+  `test` and `serve` no longer do.
 * **`telvax doctor`:** prints the version, the syntax editions it reads, which features this binary was
   built with (tables, live services, GPU, native backend) and the environment variables that change
   its behavior; keys are shown as set or not set, never their value. An unknown command now says

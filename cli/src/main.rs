@@ -16,7 +16,7 @@ usage:
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
   telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
-  telvax run <file.tvx> <function> [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax doctor                                             what this build can do and how it is set up
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
@@ -93,8 +93,12 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             print!("{}", doctor::report());
             Ok(())
         }
-        ["check", file] => check(file).map(|_| ()),
-        ["run", file, func, rest @ ..] => run(file, func, rest),
+        ["check", file] => check(file).map(|_| eprintln!("`{file}` ok")),
+        // Without a function name, `main` runs: `telvax run app.tvx --allow fs`.
+        ["run", file, rest @ ..] => match rest {
+            [func, args @ ..] if !func.starts_with('-') => run(file, func, args),
+            _ => run(file, "main", rest),
+        },
         ["test", file, rest @ ..] => {
             let (caps, rest) = take_allow(rest)?;
             match rest.as_slice() {
@@ -317,7 +321,6 @@ pub fn check_project(file: &str) -> Result<Checked, CliError> {
     };
     let loaded = telvax_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
-    eprintln!("`{file}` ok");
     let bundle = bundle::Bundle::new(file, &loaded, &deps);
     Ok(Checked { hir, bundle })
 }
@@ -327,16 +330,40 @@ pub fn check(file: &str) -> Result<telvax_hir::hir::Program, CliError> {
     check_project(file).map(|c| c.hir)
 }
 
-fn parse_arg(raw: &str) -> Value {
-    if let Ok(i) = raw.parse::<i64>() {
-        Value::Int(i)
-    } else if let Ok(x) = raw.parse::<f64>() {
-        Value::Float(x)
-    } else if let Ok(b) = raw.parse::<bool>() {
-        Value::Bool(b)
-    } else {
-        Value::str(raw)
+/// The values for the command-line words after the function name, read as the types the function
+/// declares: a `Text` parameter takes the word as it is (so `"123"` stays text), the others take it
+/// as JSON (`3`, `2.5`, `true`, `[1, 2]`).
+fn call_arguments(interp: &Interp, func: &str, words: &[&str]) -> Result<Vec<Value>, CliError> {
+    let Some((params, _)) = interp.signature(func) else {
+        return failed(format!("no function `{func}`"));
+    };
+    if params.len() != words.len() {
+        let list: Vec<String> = params.iter().map(|(n, t)| format!("{n}: {t}")).collect();
+        return failed(format!(
+            "`{func}` takes {} argument(s) ({}), got {}",
+            params.len(),
+            list.join(", "),
+            words.len()
+        ));
     }
+    params
+        .iter()
+        .zip(words)
+        .map(|((name, ty), word)| {
+            let json = if *ty == telvax_hir::Ty::str() {
+                serde_json::Value::String((*word).to_string())
+            } else {
+                serde_json::from_str(word).or_else(|_| {
+                    failed(format!(
+                        "argument `{name}` of `{func}` is {ty}, and `{word}` is not a value of that type (write numbers, true, false, null, [..] or {{..}} as JSON)"
+                    ))
+                })?
+            };
+            interp
+                .value_from_json(ty, &json)
+                .or_else(|e| failed(format!("argument `{name}` of `{func}` is {ty}: {e}")))
+        })
+        .collect()
 }
 
 /// `telvax test <file> [name]`: runs every function called `test_*` that takes no arguments. A
@@ -378,14 +405,23 @@ fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     let (device, args) = take_device(&args)?;
     let (workers, args) = take_workers(&args);
     let checked = check_project(file)?;
+    let mut names: Vec<String> = checked.hir.fns.iter().map(|f| f.name.clone()).collect();
+    names.sort();
     let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
+    if interp.signature(func).is_none() {
+        return failed(format!(
+            "`{file}` has no function `{func}`; it has: {}",
+            names.join(", ")
+        ));
+    }
     interp.set_quantization(quant);
     interp.set_device(device);
     if let Some(workers) = workers {
         attach_cluster(&interp, workers, &checked.bundle)?;
     }
+    let values = call_arguments(&interp, func, &args)?;
     let value = interp
-        .call(func, args.iter().map(|a| parse_arg(a)).collect())
+        .call(func, values)
         .or_else(|e| failed(e.to_string()))?;
     // A function that returns nothing has nothing to show.
     if !matches!(value, Value::Unit) {
