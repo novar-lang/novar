@@ -190,6 +190,31 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
                 want_vec(&args[0])?.iter().take(n).cloned().collect(),
             ))
         }
+        "std::task::gather" => {
+            let tasks = want_vec(&args[0])?;
+            if let Some(bad) = tasks.iter().find(|t| !matches!(t, Value::Task(_))) {
+                return err(format!(
+                    "`std.task.gather` needs tasks, found {}",
+                    bad.type_name()
+                ));
+            }
+            Ok(Value::Task(Arc::new(crate::value::TaskVal::Gather(tasks))))
+        }
+        "std::task::sleep" => Ok(Value::Task(Arc::new(crate::value::TaskVal::Sleep(
+            want_usize(&args[0])? as u64,
+        )))),
+        "std::task::run" => interp.run_task_value(&args[0]),
+        "std::time::sleep" => {
+            std::thread::sleep(std::time::Duration::from_millis(
+                want_usize(&args[0])? as u64
+            ));
+            Ok(Value::Unit)
+        }
+        "std::time::now" => Ok(Value::Float(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |d| d.as_secs_f64()),
+        )),
         "std::map::from_entries" => {
             let mut entries = Vec::new();
             for item in want_vec(&args[0])? {

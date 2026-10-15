@@ -191,6 +191,8 @@ pub struct Fn {
     pub attrs: Vec<Attribute>,
     pub is_pub: bool,
     pub name: Ident,
+    /// `async fn`: calling it gives a `Task` that `await` runs.
+    pub is_async: bool,
     pub generics: Vec<GenericParam>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
@@ -298,6 +300,8 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Break,
     Continue,
+    /// `await task`: runs a `Task` (what an `async fn` returns) and gives its value.
+    Await(Box<Expr>),
     /// `expr?`: the value of an `Ok` / `Some`, or return the `Err` / `None` from the function.
     Try(Box<Expr>),
     /// `(a, b, c)`: two or more values.

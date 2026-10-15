@@ -401,6 +401,9 @@ fn lower_fn<'c>(cx: &Cx<'c, '_>, f: &hir::FnDef) -> Result<melior::ir::Operation
         )
         .with_note(format!("in function `{}`", f.name))
     };
+    if f.is_async {
+        return Err(unsupported("`async fn`".to_string()));
+    }
     let loc = Location::unknown(ctx);
 
     let mut param_tys = Vec::new();
@@ -1251,6 +1254,7 @@ impl<'c, 'b, 'p> Emitter<'c, 'b, 'p> {
                 Err(self.unsupported("enums and `match`", &e.span))
             }
             ExprKind::Try(_) => Err(self.unsupported("the `?` operator", &e.span)),
+            ExprKind::Await(_) => Err(self.unsupported("`await`", &e.span)),
             ExprKind::Tuple(_) => Err(self.unsupported("tuples", &e.span)),
             ExprKind::DynCall { .. } => Err(self.unsupported("trait methods", &e.span)),
             ExprKind::Break | ExprKind::Continue => {

@@ -128,7 +128,9 @@ impl Linter {
                 args.iter().for_each(|a| self.expr(a));
             }
             ExprKind::Field { base, .. } => self.expr(base),
-            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) | ExprKind::Await(expr) => {
+                self.expr(expr)
+            }
             ExprKind::Binary { lhs, rhs, .. } => {
                 self.expr(lhs);
                 self.expr(rhs);

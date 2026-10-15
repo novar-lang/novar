@@ -1271,6 +1271,7 @@ where
                 let span = rng(e.span());
                 Item::Fn(Fn {
                     attrs,
+                    is_async: false,
                     is_pub: is_pub.is_some(),
                     name,
                     generics,

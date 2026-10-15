@@ -12,7 +12,7 @@ use crate::std_impl;
 
 #[cfg(feature = "gpu")]
 mod gpu_chain;
-use crate::value::{Closure, Db, Env, MapKey, MapVal, StructVal, Value, from_json};
+use crate::value::{Closure, Db, Env, MapKey, MapVal, StructVal, TaskVal, Value, from_json};
 
 /// Where `std.tensor` operations on `f32` tensors run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -389,19 +389,84 @@ impl Interp {
         v
     }
 
-    /// Calls a Telvax function by name.
+    /// Calls a Telvax function by name. An `async fn` runs to the end, as if it were awaited.
     pub fn call(&self, name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
         let f = self
             .fns
             .get(name)
             .ok_or_else(|| RuntimeError::new(format!("no function `{name}`")))?;
-        self.call_fn(f, args, 0).map_err(|c| match c {
+        let finish = |started: Value| match started {
+            Value::Task(_) => self.run_task(&started, 0),
+            done => Ok(done),
+        };
+        self.call_fn(f, args, 0)
+            .and_then(finish)
+            .map_err(Self::plain_error)
+    }
+
+    fn plain_error(c: Ctrl) -> RuntimeError {
+        match c {
             Ctrl::Fail(e) => e,
             Ctrl::Return(_) => RuntimeError::new("unexpected return"),
             Ctrl::Break | Ctrl::Continue => {
                 RuntimeError::new("`break` or `continue` outside a loop")
             }
-        })
+        }
+    }
+
+    /// Runs a task (what an `async fn` gave, or `std.task.sleep`, or `std.task.gather`).
+    fn run_task(&self, task: &Value, depth: usize) -> Eval {
+        let Value::Task(t) = task else {
+            return fail(format!("`await` needs a task, found {}", task.type_name()));
+        };
+        match &**t {
+            TaskVal::Call { name, args } => {
+                let f = self.fns.get(name).ok_or_else(|| {
+                    Ctrl::Fail(RuntimeError::new(format!("no function `{name}`")))
+                })?;
+                self.run_fn(f, args.clone(), depth)
+            }
+            TaskVal::Sleep(ms) => {
+                std::thread::sleep(std::time::Duration::from_millis(*ms));
+                Ok(Value::Unit)
+            }
+            TaskVal::Gather(tasks) => self.gather(tasks, depth),
+        }
+    }
+
+    /// Runs the tasks at the same time, on at most 64 threads, and gives their values in order.
+    /// When one fails, the first failure (by position) is the result.
+    fn gather(&self, tasks: &[Value], depth: usize) -> Eval {
+        let workers = tasks.len().min(64);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let slots: Vec<Mutex<Option<Result<Value, RuntimeError>>>> =
+            tasks.iter().map(|_| Mutex::new(None)).collect();
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(task) = tasks.get(i) else { break };
+                        let done = self.run_task(task, depth).map_err(Self::plain_error);
+                        *slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(done);
+                    }
+                });
+            }
+        });
+        let mut values = Vec::with_capacity(tasks.len());
+        for slot in slots {
+            match slot.into_inner().unwrap_or_else(|e| e.into_inner()) {
+                Some(Ok(v)) => values.push(v),
+                Some(Err(e)) => return Err(Ctrl::Fail(e)),
+                None => return fail("a task of `std.task.gather` did not run"),
+            }
+        }
+        Ok(Value::vec(values))
+    }
+
+    /// `std.task.run(task)`: runs a task from code that is not async.
+    pub(crate) fn run_task_value(&self, task: &Value) -> Result<Value, RuntimeError> {
+        self.run_task(task, 0).map_err(Self::plain_error)
     }
 
     /// Runs an `@endpoint` function on a JSON payload, returning the JSON response body.
@@ -484,7 +549,27 @@ impl Interp {
         })
     }
 
+    /// A call. An `async fn` does not run: the call gives a task, and `await` runs it.
     fn call_fn(&self, f: &hir::FnDef, args: Vec<Value>, depth: usize) -> Eval {
+        if f.is_async {
+            if args.len() != f.params.len() {
+                return fail(format!(
+                    "`{}` takes {} argument(s), got {}",
+                    f.name,
+                    f.params.len(),
+                    args.len()
+                ));
+            }
+            return Ok(Value::Task(Arc::new(TaskVal::Call {
+                name: f.name.clone(),
+                args,
+            })));
+        }
+        self.run_fn(f, args, depth)
+    }
+
+    /// Runs the body of a function.
+    fn run_fn(&self, f: &hir::FnDef, args: Vec<Value>, depth: usize) -> Eval {
         if args.len() != f.params.len() {
             return fail(format!(
                 "`{}` takes {} argument(s), got {}",
@@ -945,6 +1030,10 @@ impl Interp {
                     return self.eval(&arm.body, ctx);
                 }
                 fail("no `match` arm matched")
+            }
+            ExprKind::Await(inner) => {
+                let task = self.eval(inner, ctx)?;
+                self.run_task(&task, ctx.depth)
             }
             ExprKind::Try(inner) => match self.eval(inner, ctx)? {
                 Value::Ok(v) => Ok(*v),

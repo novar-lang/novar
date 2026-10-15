@@ -1227,3 +1227,53 @@ fn a_variant_can_take_the_errors_of_question_mark() {
     assert!(e.variants[0].from && !e.variants[1].from);
     assert_eq!(e.variants[0].name.node, "Parse");
 }
+
+#[test]
+fn async_functions_and_await() {
+    let f = only_fn("async fn load(id: Int) -> Int:\n    let a = await fetch(id)\n    a\n");
+    assert!(f.is_async);
+    assert!(!only_fn("fn load() -> Int:\n    1\n").is_async);
+    let Stmt::Let(a) = &f.body.stmts[0] else {
+        panic!()
+    };
+    assert!(
+        matches!(&a.init.node, ExprKind::Await(inner) if matches!(inner.node, ExprKind::Call { .. }))
+    );
+    // `?` after the awaited call is for the value that comes out: `(await f())?`.
+    let ExprKind::Try(inner) = ok_expr("await fetch(1)?") else {
+        panic!()
+    };
+    assert!(
+        matches!(&inner.node, ExprKind::Await(call) if matches!(call.node, ExprKind::Call { .. }))
+    );
+}
+
+#[test]
+fn await_binds_like_a_prefix_operator() {
+    assert!(matches!(ok_expr("-await x"), ExprKind::Unary { .. }));
+    let ExprKind::Binary { lhs, .. } = ok_expr("await a + 1") else {
+        panic!()
+    };
+    assert!(matches!(lhs.node, ExprKind::Await(_)));
+    assert!(matches!(ok_expr("await a.b(c)"), ExprKind::Await(_)));
+    assert!(matches!(ok_expr("await await x"), ExprKind::Await(_)));
+}
+
+#[test]
+fn async_methods_in_types_traits_and_enums() {
+    let p = ok_program(
+        "trait Source:\n    async fn load(self) -> Int: ...\n\ntype A(Source):\n    n: Int\n\n    async fn load(self) -> Int:\n        self.n\n\nenum E:\n    X\n\n    async fn f(self) -> Int:\n        1\n",
+    );
+    let Item::Trait(t) = &p.items[0] else {
+        panic!()
+    };
+    assert!(t.fns[0].is_async);
+    let Item::Impl(imp) = &p.items[2] else {
+        panic!()
+    };
+    assert!(imp.fns[0].is_async);
+    let Item::Impl(imp) = &p.items[4] else {
+        panic!()
+    };
+    assert!(imp.fns[0].is_async);
+}

@@ -126,6 +126,13 @@ test("f-strings over lines and raw text", async () => {
   assert.ok(!raw[1].some((sc) => sc.startsWith("meta.interpolation")), "no interpolation in raw text");
 });
 
+test("async fn and await", async () => {
+  const t = await tokenize("async fn load(id: Int) -> Int:\n    let v = await fetch(id)\n    v");
+  has(t, "async", "storage.modifier.async");
+  has(t, "await", "keyword.control");
+  has(t, "load", "entity.name.function");
+});
+
 test("numbers, constants, comments and control flow", async () => {
   const t = await tokenize("for i in range(10_000):\n    if x >= 2.5e-3 and ok or not done:\n        return True  # done");
   has(t, "for", "keyword.control");

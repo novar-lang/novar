@@ -114,7 +114,9 @@ fn expr(e: &mut Expr, scopes: &mut Vec<HashSet<String>>) {
         }
         ExprKind::Field { base, .. } => expr(base, scopes),
         ExprKind::Named { value, .. } => expr(value, scopes),
-        ExprKind::Unary { expr: inner, .. } | ExprKind::Try(inner) => expr(inner, scopes),
+        ExprKind::Unary { expr: inner, .. } | ExprKind::Try(inner) | ExprKind::Await(inner) => {
+            expr(inner, scopes)
+        }
         ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
             expr(lhs, scopes);
             expr(rhs, scopes);

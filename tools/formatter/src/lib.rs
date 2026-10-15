@@ -62,10 +62,9 @@ enum Kind {
 fn kind(t: &Token) -> Kind {
     use Token::*;
     match t {
-        Import | From | Fn | Let | Var | Enum | Trait | Extend | Match | Case | Return | Break
-        | Continue | Pass | If | Elif | Else | For | In | Is | While | And | Or | Not => {
-            Kind::Keyword
-        }
+        Import | From | Fn | Async | Await | Let | Var | Enum | Trait | Extend | Match | Case
+        | Return | Break | Continue | Pass | If | Elif | Else | For | In | Is | While | And
+        | Or | Not => Kind::Keyword,
         True | False | Int(_) | Float(_) | Str(_) | TStr(_) | RStr(_) | FStr(_) | FTStr(_)
         | Ellipsis => Kind::Literal,
         Ident(_) => Kind::Word,
@@ -572,6 +571,17 @@ mod tests {
         assert_eq!(
             out,
             "let a = f\"\"\"x {n:>{w}}\n  {{y}}\"\"\"\nlet b = r\"a\\nb\"\nlet c = f\"{x!r:>8} {y = }\"\n"
+        );
+        assert_eq!(fmt(&out), out);
+    }
+
+    #[test]
+    fn async_and_await() {
+        let src = "async  fn load(id:Int)->Result[Text,Text]:\n    let a=await  fetch(id)?\n    let b=-await g()\n    Ok(a)\n";
+        let out = fmt(src);
+        assert_eq!(
+            out,
+            "async fn load(id: Int) -> Result[Text, Text]:\n    let a = await fetch(id)?\n    let b = -await g()\n    Ok(a)\n"
         );
         assert_eq!(fmt(&out), out);
     }
