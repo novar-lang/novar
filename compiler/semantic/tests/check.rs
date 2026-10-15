@@ -3839,19 +3839,31 @@ fn type_aliases() {
 }
 
 #[test]
-fn question_mark_wraps_the_error_in_an_enum() {
-    let src = "enum AppError:\n    Parse(Text)\n    Range(Int)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn check() -> Result[Int, Int]:\n    Ok(1)\n\n";
+fn question_mark_wraps_the_error_in_a_marked_variant() {
+    let src = "enum AppError:\n    from Parse(Text)\n    from Range(Int)\n    Other(Text)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn check() -> Result[Int, Int]:\n    Ok(1)\n\n";
     assert_clean(&format!(
         "{src}fn f() -> Result[Int, AppError]:\n    let a = parse()?\n    let b = check()?\n    Ok(a + b)\n"
     ));
-    // Two variants that hold a `Text` leave no way to tell which one is meant.
+    // A variant that is not marked is not used, even when it is the only one that fits.
     assert_err(
-        "enum E:\n    A(Text)\n    B(Text)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn f() -> Result[Int, E]:\n    let a = parse()?\n    Ok(a)\n",
-        "give `E` one variant that holds a `Text`",
+        "enum E:\n    A(Text)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn f() -> Result[Int, E]:\n    let a = parse()?\n    Ok(a)\n",
+        "mark a variant of `E` that holds a `Text` with `from` (`from Name(Text)`)",
     );
     assert_err(
         "fn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn f() -> Result[Int, Int]:\n    let a = parse()?\n    Ok(a)\n",
         "`?` cannot turn the error `Text` into `Int`",
+    );
+    assert_err(
+        "enum E:\n    from A(Text)\n    from B(Text)\n",
+        "two variants marked `from` hold a `Text`",
+    );
+    assert_err(
+        "enum E:\n    from A(Text, Int)\n    from B\n",
+        "a variant marked `from` holds one value",
+    );
+    assert_err(
+        "enum E[T]:\n    from A(T)\n    B\n",
+        "a generic enum cannot mark a variant `from`",
     );
 }
 

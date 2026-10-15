@@ -395,6 +395,7 @@ impl<'a> Printer<'a> {
                     .collect();
                 format!("{}({})", v.name.node, tys.join(", "))
             };
+            let text = if v.from { format!("from {text}") } else { text };
             self.line(1, &text, v.name.span.start);
         }
     }

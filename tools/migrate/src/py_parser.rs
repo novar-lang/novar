@@ -1754,6 +1754,7 @@ where
             name,
             fields: fields.unwrap_or_default(),
             names: Vec::new(),
+            from: false,
         });
     let enum_ = just(Token::Enum)
         .ignore_then(ident())
