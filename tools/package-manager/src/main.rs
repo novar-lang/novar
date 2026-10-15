@@ -133,6 +133,14 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
                 return Err("publishing to an HTTP registry is not supported; publish to a directory and serve it".into());
             }
             let project = current_project()?;
+            prepare(&project, reg_ref)?;
+            // A package that does not compile is not worth anyone's download.
+            if let Err(report) = project.check() {
+                eprint!("{report}");
+                return Err(
+                    "the package does not pass `telvax check`, so it was not published".into(),
+                );
+            }
             let entry = registry::publish(Path::new(&spec), &project.dir)?;
             println!(
                 "published {} {} (sha256 {})",
@@ -160,12 +168,7 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
         }
         "check" | "run" | "serve" | "build" => {
             let project = current_project()?;
-            if !project.lock_is_fresh() && !project.manifest.dependencies.is_empty() {
-                lock(&project, reg_ref)?;
-            }
-            for fetched in project.install(reg_ref)? {
-                eprintln!("downloaded {fetched}");
-            }
+            prepare(&project, reg_ref)?;
             let entry = project.entry()?;
             let mut command = Command::new(telvax_binary());
             command.arg(&cmd);
@@ -192,6 +195,21 @@ fn run(mut args: Vec<String>, registry_spec: Option<String>) -> Res<()> {
             Err(String::new())
         }
     }
+}
+
+/// Locks (when the lock is missing or out of date) and installs the dependencies. A package
+/// without dependencies has nothing to lock.
+fn prepare(project: &Project, reg: Option<&dyn Registry>) -> Res<()> {
+    if project.manifest.dependencies.is_empty() {
+        return Ok(());
+    }
+    if !project.lock_is_fresh() {
+        lock(project, reg)?;
+    }
+    for fetched in project.install(reg)? {
+        eprintln!("downloaded {fetched}");
+    }
+    Ok(())
 }
 
 fn telvax_binary() -> PathBuf {
@@ -234,10 +252,13 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
     let (file, body) = if lib {
         (
             "lib.tvx",
-            "def hello() -> str:\n    return \"hello from a library\"\n",
+            "fn hello() -> Text:\n    \"hello from a library\"\n",
         )
     } else {
-        ("main.tvx", "def main():\n    print(\"hello, world\")\n")
+        (
+            "main.tvx",
+            "fn main() -> i32:\n    print(\"hello, world\")\n    0\n",
+        )
     };
     let path = dir.join("src").join(file);
     if !path.exists() {
