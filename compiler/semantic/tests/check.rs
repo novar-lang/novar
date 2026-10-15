@@ -3172,3 +3172,64 @@ fn f() -> Int:
         "must return an `Option`",
     );
 }
+
+#[test]
+fn functions_are_values_with_a_written_type() {
+    assert_clean(
+        r#"
+type Handler:
+    run: (Int) -> Int
+
+fn apply(f: (Int) -> Int, x: Int) -> Int:
+    f(x)
+
+fn each(xs: List[Int], f: (Int) -> ()):
+    for x in xs:
+        f(x)
+
+fn twice(x: Int) -> Int:
+    x * 2
+
+fn adder(n: Int) -> (Int) -> Int:
+    x => x + n
+
+fn thunk(n: Int) -> () -> Int:
+    () => n
+
+fn show(x: Int):
+    print(f"{x}")
+
+fn map2[T, U](xs: List[T], f: (T) -> U) -> List[U]:
+    xs.map(f)
+
+fn main() -> i32:
+    let a = apply(twice, 1) + apply(x => x + 1, 1) + adder(2)(3) + thunk(4)()
+    let h = Handler(run: twice)
+    let b: Int = h.run(5)
+    let g: (Int, Int) -> Int = (x: Int, y) => x + y
+    each([1], show)
+    let c: List[Text] = map2([1], x => f"{x}")
+    0
+"#,
+    );
+    for (src, needle) in [
+        (
+            "fn a(f: (Int) -> Int):\n    pass\n\nfn two(x: Int, y: Int) -> Int:\n    x\n\nfn b():\n    a(two)\n",
+            "expected `(Int) -> Int`, found `(Int, Int) -> Int`",
+        ),
+        (
+            "fn a(f: (Int) -> Int):\n    pass\n\nfn b():\n    a(x => \"s\")\n",
+            "expected `(Int) -> Int`, found `(Int) -> Text`",
+        ),
+        (
+            "fn a(f: (Int) -> Int):\n    pass\n\nfn b():\n    a(5)\n",
+            "expected `(Int) -> Int`",
+        ),
+        (
+            "fn b():\n    let f = (x: Int) => x\n    f(\"s\")\n",
+            "expected `Int`, found `Text`",
+        ),
+    ] {
+        assert_err(src, needle);
+    }
+}

@@ -259,6 +259,12 @@ fn demo(text: Text) -> Int:
   `values`. Like `List`, copies share the same entries. Keys are kept in order; JSON objects use
   string keys.
 * `List` also has `sort` (numbers, strings, bools) and `reverse`; `Text` has `chars` and `lines`.
+* Functions are values. The type of one is written like a header without the name:
+  `(Int, Int) -> Int`, `() -> Text`, `(Int) -> ()` for one that returns nothing. A name can hold a
+  function (`let f = twice`), and a parameter, a field, a list element or a return value can too:
+  `fn apply(f: (Int) -> Int, x: Int) -> Int: f(x)`, `fn adder(n: Int) -> (Int) -> Int: x => x + n`.
+  A closure parameter can say its type: `(x: Int) => x + 1`. Calling a function with the wrong
+  number or types of arguments is a compile error that shows both types.
 * `x => x + 1` and `(a, b) => a + b` are one-line functions. For more, write an `fn` inside the
   function: `fn add(a: Int): a + k`. Both capture variables by value, so assigning to a variable
   from outside is a compile error; shared `List` and `Map` values can still be changed from

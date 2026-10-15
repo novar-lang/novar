@@ -412,6 +412,42 @@ where
                     span,
                 }
             });
+        // `(Int, Int) -> Int`, `() -> Text`: the type of a function. The same spelling as a
+        // function header's return type, with the parameter types in parentheses. `()` is the
+        // type of a function that returns nothing: `(Int) -> ()`.
+        let unit_ty = just(Token::LParen)
+            .then(just(Token::RParen))
+            .map_with(|_, e| {
+                let span = rng(e.span());
+                Type {
+                    path: vec![Ident {
+                        node: "(unit)".into(),
+                        span: span.clone(),
+                    }],
+                    args: Vec::new(),
+                    span,
+                }
+            });
+        let fn_ty = ty
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .then_ignore(just(Token::Arrow))
+            .then(ty.clone())
+            .map_with(|(mut params, ret), e| {
+                let span = rng(e.span());
+                params.push(ret);
+                Type {
+                    path: vec![Ident {
+                        node: "(fn)".into(),
+                        span: span.clone(),
+                    }],
+                    args: params.into_iter().map(TypeArg::Type).collect(),
+                    span,
+                }
+            });
         let named = path().then(args.or_not()).map_with(|(mut path, args), e| {
             if path.len() == 1 {
                 let canon = canonical_type_name(&path[0].node).to_string();
@@ -428,7 +464,9 @@ where
             }
         });
         // `T?` is `Option<T>`.
-        tuple_ty
+        fn_ty
+            .or(tuple_ty)
+            .or(unit_ty)
             .or(named)
             .then(just(Token::Question).or_not())
             .map_with(|(base, optional), e| match optional {
@@ -1088,8 +1126,10 @@ where
 
         // `x => x + 1`, `(a, b) => a + b`, `() => 1`; a parameter may also be a tuple of names:
         // `((i, s)) => ..`.
+        // A name may carry its type: `(x: Int) => x + 1`.
         let arrow_param = ident()
-            .map(|name| (name, Vec::new()))
+            .then(just(Token::Colon).ignore_then(type_()).or_not())
+            .map(|(name, ty)| (name, Vec::new(), ty))
             .or(tuple_names().map_with(|names, e| {
                 let at = rng(e.span());
                 (
@@ -1098,6 +1138,7 @@ where
                         span: at,
                     },
                     names,
+                    None,
                 )
             }));
         let arrow_params = arrow_param
@@ -1112,8 +1153,10 @@ where
             .then(expr.clone())
             .map_with(|(params, body), e| {
                 let mut names = Vec::new();
+                let mut types = Vec::new();
                 let mut lets = Vec::new();
-                for (name, parts) in params {
+                for (name, parts, ty) in params {
+                    types.push(ty);
                     if !parts.is_empty() {
                         let span = name.span.clone();
                         lets.extend(tuple_lets(parts, name.clone(), None, false, span));
@@ -1133,7 +1176,6 @@ where
                         e.span(),
                     )
                 };
-                let types = vec![None; names.len()];
                 spanned(
                     ExprKind::Closure {
                         params: names,
