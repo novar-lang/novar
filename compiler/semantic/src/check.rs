@@ -13,6 +13,55 @@ type Span = std::ops::Range<usize>;
 
 /// A variant (or `Ok` / `Err`) with its enum name and payload types, for exhaustiveness checks.
 type Constructor = (Option<String>, String, Vec<Ty>);
+/// The patterns of one arm, a column for each value that is matched (`None` matches anything).
+type Row<'p> = Vec<Option<&'p hir::Pat>>;
+
+/// The rows with each `a | b` in the first column replaced by one row for each alternative.
+fn expand_or<'p>(rows: &[Row<'p>]) -> Vec<Row<'p>> {
+    fn push<'p>(row: &Row<'p>, out: &mut Vec<Row<'p>>) {
+        match row[0] {
+            Some(hir::Pat::Or(alts)) => {
+                for alt in alts {
+                    let mut r = row.clone();
+                    r[0] = Some(alt);
+                    push(&r, out);
+                }
+            }
+            _ => out.push(row.clone()),
+        }
+    }
+    let mut out = Vec::new();
+    for row in rows {
+        push(row, &mut out);
+    }
+    out
+}
+
+/// The fewest items a list that matches the pattern in this column has.
+fn list_min_len(p: Option<&hir::Pat>) -> usize {
+    match p {
+        Some(hir::Pat::List { before, after, .. }) => before.len() + after.len(),
+        _ => 0,
+    }
+}
+
+/// The patterns for the `n` items of a list, when a pattern with these parts matches a list of
+/// that length (`None` when it does not). The items `*rest` stands for match anything.
+fn list_items<'p>(
+    before: &'p [hir::Pat],
+    has_rest: bool,
+    after: &'p [hir::Pat],
+    n: usize,
+) -> Option<Vec<Option<&'p hir::Pat>>> {
+    let fixed = before.len() + after.len();
+    if (has_rest && n < fixed) || (!has_rest && n != fixed) {
+        return None;
+    }
+    let mut out: Vec<Option<&hir::Pat>> = before.iter().map(Some).collect();
+    out.extend(std::iter::repeat_n(None, n - fixed));
+    out.extend(after.iter().map(Some));
+    Some(out)
+}
 
 /// Prefix of the name given to a call of a generic function whose instance is not chosen yet.
 const OPEN_CALL: &str = "\u{0}open";
@@ -1121,8 +1170,24 @@ impl Checker {
                     self.finalize_pat(a);
                 }
             }
-            hir::Pat::Tuple(items) => items.iter_mut().for_each(|a| self.finalize_pat(a)),
-            hir::Pat::Wild | hir::Pat::Lit(_) => {}
+            hir::Pat::Tuple(items) | hir::Pat::Or(items) => {
+                items.iter_mut().for_each(|a| self.finalize_pat(a))
+            }
+            hir::Pat::List {
+                before,
+                rest,
+                after,
+            } => {
+                before
+                    .iter_mut()
+                    .chain(rest.as_deref_mut())
+                    .chain(after.iter_mut())
+                    .for_each(|a| self.finalize_pat(a));
+            }
+            hir::Pat::Struct { fields, .. } => {
+                fields.iter_mut().for_each(|(_, a)| self.finalize_pat(a))
+            }
+            hir::Pat::Wild | hir::Pat::Lit(_) | hir::Pat::NegInt(_) => {}
         }
     }
 
@@ -1262,6 +1327,9 @@ impl Checker {
                 self.finalize_expr(scrutinee);
                 for arm in arms {
                     self.finalize_pat(&mut arm.pat);
+                    if let Some(g) = &mut arm.guard {
+                        self.finalize_expr(g);
+                    }
                     self.finalize_expr(&mut arm.body);
                 }
             }
@@ -3371,6 +3439,7 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        let diags_before = self.diags.len();
         let scrut = self.expr(scrutinee, None);
         let sty = self.resolve(&scrut.ty);
         if arms.is_empty() {
@@ -3382,6 +3451,10 @@ impl Checker {
         for arm in arms {
             self.scopes.push(HashMap::new());
             let pat = self.pattern(&arm.pat, &sty);
+            let guard = arm.guard.as_ref().map(|g| {
+                let g = self.expr(g, Some(&Ty::bool()));
+                self.coerce(g, &Ty::bool())
+            });
             let want = expected
                 .clone()
                 .or_else(|| (ty != Ty::Never).then(|| ty.clone()));
@@ -3402,9 +3475,21 @@ impl Checker {
                 );
                 ty = Ty::Unknown;
             }
-            out.push(hir::Arm { pat, body });
+            out.push(hir::Arm {
+                pat,
+                guard,
+                body,
+                unreachable: false,
+            });
         }
         self.check_exhaustive(&sty, &out, span);
+        if self.diags.len() == diags_before {
+            // The arm the parser adds for `if x is Pattern:` has no pattern of its own.
+            let written: Vec<bool> = arms.iter().map(|a| a.pat.span != *span).collect();
+            for (i, dead) in self.unreachable_arms(&sty, &out).into_iter().enumerate() {
+                out[i].unreachable = dead && written[i];
+            }
+        }
         Self::mk(
             hir::ExprKind::Match {
                 scrutinee: Box::new(scrut),
@@ -3479,6 +3564,143 @@ impl Checker {
                 hir::Pat::Lit(l.clone())
             }
             P::Variant { path, args } => self.variant_pattern(p, path, args, &ty),
+            P::NegLit(l) => {
+                let lit_ty = match l {
+                    ast::Lit::Float(_) => self.fresh(true),
+                    _ => self.fresh(false),
+                };
+                if !self.unify(&ty, &lit_ty) {
+                    self.err(
+                        p.span.clone(),
+                        format!("this pattern does not match a value of type `{ty}`"),
+                    );
+                }
+                match l {
+                    ast::Lit::Int(n) => hir::Pat::NegInt(*n),
+                    ast::Lit::Float(x) => hir::Pat::Lit(ast::Lit::Float(-x)),
+                    other => hir::Pat::Lit(other.clone()),
+                }
+            }
+            P::Or(alts) => {
+                let alts: Vec<hir::Pat> = alts.iter().map(|a| self.pattern(a, &ty)).collect();
+                if alts.iter().any(Self::binds) {
+                    self.err(
+                        p.span.clone(),
+                        "the alternatives of `|` cannot bind names; write a `case` for each one, or test the value with `if`",
+                    );
+                }
+                hir::Pat::Or(alts)
+            }
+            P::List {
+                before,
+                rest,
+                after,
+            } => {
+                let elem = match &ty {
+                    Ty::Vec(t) => (**t).clone(),
+                    Ty::Unknown => Ty::Unknown,
+                    other => {
+                        self.err(
+                            p.span.clone(),
+                            format!("a list pattern cannot match `{other}`"),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                let before = before.iter().map(|a| self.pattern(a, &elem)).collect();
+                let rest_ty = Ty::Vec(Box::new(elem.clone()));
+                let rest = rest.as_ref().map(|r| Box::new(self.pattern(r, &rest_ty)));
+                let after = after.iter().map(|a| self.pattern(a, &elem)).collect();
+                hir::Pat::List {
+                    before,
+                    rest,
+                    after,
+                }
+            }
+            P::Struct { path, fields } => self.struct_pattern(p, path, fields, &ty),
+        }
+    }
+
+    /// Whether a pattern binds a name.
+    fn binds(p: &hir::Pat) -> bool {
+        match p {
+            hir::Pat::Bind(_) => true,
+            hir::Pat::Wild | hir::Pat::Lit(_) | hir::Pat::NegInt(_) => false,
+            hir::Pat::Tuple(items) | hir::Pat::Or(items) => items.iter().any(Self::binds),
+            hir::Pat::Variant { args, .. } => args.iter().any(Self::binds),
+            hir::Pat::List {
+                before,
+                rest,
+                after,
+            } => {
+                before.iter().any(Self::binds)
+                    || rest.as_deref().is_some_and(Self::binds)
+                    || after.iter().any(Self::binds)
+            }
+            hir::Pat::Struct { fields, .. } => fields.iter().any(|(_, f)| Self::binds(f)),
+        }
+    }
+
+    /// `Point(x: a, y: 0)`: some of the fields of a `type`, each with its own pattern.
+    fn struct_pattern(
+        &mut self,
+        p: &ast::Pattern,
+        path: &[ast::Ident],
+        fields: &[(ast::Ident, ast::Pattern)],
+        ty: &Ty,
+    ) -> hir::Pat {
+        let name = path
+            .iter()
+            .map(|i| i.node.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        // A value of a generic `type` is an instance (`Box<Int>`); the pattern names the base.
+        let key = match ty {
+            Ty::Struct(k)
+                if *k == name || self.instance_args.get(k).is_some_and(|(b, _)| *b == name) =>
+            {
+                Some(k.clone())
+            }
+            Ty::Unknown if self.struct_fields.contains_key(&name) => Some(name.clone()),
+            _ => None,
+        };
+        let Some(key) = key else {
+            let message = if self.struct_fields.contains_key(&name)
+                || self.generic_structs.contains_key(&name)
+            {
+                format!("this pattern is a `{name}` but the value is `{ty}`")
+            } else {
+                format!("`{name}` is not a type; a pattern with `field: pattern` names a `type`")
+            };
+            self.err(p.span.clone(), message);
+            return hir::Pat::Wild;
+        };
+        let declared = self.struct_fields.get(&key).cloned().unwrap_or_default();
+        let mut out: Vec<(String, hir::Pat)> = Vec::new();
+        for (field, sub) in fields {
+            let Some((_, field_ty)) = declared.iter().find(|(n, _)| *n == field.node) else {
+                let hint = closest(&field.node, declared.iter().map(|(n, _)| n.as_str()))
+                    .map(str::to_string);
+                self.err_hint(
+                    field.span.clone(),
+                    format!("no field `{}` on type `{name}`", field.node),
+                    hint.as_deref(),
+                );
+                continue;
+            };
+            if out.iter().any(|(n, _)| *n == field.node) {
+                self.err(
+                    field.span.clone(),
+                    format!("the field `{}` is in this pattern twice", field.node),
+                );
+                continue;
+            }
+            let field_ty = field_ty.clone();
+            out.push((field.node.clone(), self.pattern(sub, &field_ty)));
+        }
+        hir::Pat::Struct {
+            name: key,
+            fields: out,
         }
     }
 
@@ -3616,14 +3838,23 @@ impl Checker {
         }
     }
 
-    /// Reports a `match` that can fall through.
+    /// Reports a `match` that can fall through. An arm with a guard may not be taken, so it does
+    /// not count.
     fn check_exhaustive(&mut self, sty: &Ty, arms: &[hir::Arm], span: &Span) {
-        let rows: Vec<Vec<Option<&hir::Pat>>> = arms.iter().map(|a| vec![Some(&a.pat)]).collect();
+        let rows: Vec<Row> = arms
+            .iter()
+            .filter(|a| a.guard.is_none())
+            .map(|a| vec![Some(&a.pat)])
+            .collect();
         if self.exhaustive(&rows, std::slice::from_ref(sty)) {
             return;
         }
         let missing = match self.constructors_of(sty) {
-            Some(ctors) => {
+            Some(ctors)
+                if ctors
+                    .iter()
+                    .all(|(en, _, _)| !matches!(en.as_deref(), Some("(tuple)" | "(struct)"))) =>
+            {
                 let names: Vec<String> = ctors
                     .iter()
                     .filter(|(en, v, fields)| {
@@ -3637,9 +3868,27 @@ impl Checker {
                     .collect();
                 format!(": missing {}", names.join(", "))
             }
-            None => ": add a `_` arm".to_string(),
+            _ if arms.iter().any(|a| a.guard.is_some()) => {
+                ": an arm with `if` may not be taken, so add a `_` arm".to_string()
+            }
+            _ => ": add a `_` arm".to_string(),
         };
         self.err(span.clone(), format!("non-exhaustive `match`{missing}"));
+    }
+
+    /// For each arm, whether the arms before it (leaving out the ones with a guard) already take
+    /// every value it could take.
+    fn unreachable_arms(&self, sty: &Ty, arms: &[hir::Arm]) -> Vec<bool> {
+        let mut rows: Vec<Row> = Vec::new();
+        let mut out = Vec::new();
+        for arm in arms {
+            let row = [Some(&arm.pat)];
+            out.push(!rows.is_empty() && !self.useful(&rows, &row, std::slice::from_ref(sty)));
+            if arm.guard.is_none() {
+                rows.push(vec![Some(&arm.pat)]);
+            }
+        }
+        out
     }
 
     /// The constructors a value of `ty` can have, when `match` has to cover each of them.
@@ -3659,6 +3908,13 @@ impl Checker {
                 "(tuple)".to_string(),
                 parts,
             )]),
+            Ty::Struct(name) => self.struct_fields.get(&name).map(|fields| {
+                vec![(
+                    Some("(struct)".to_string()),
+                    name.clone(),
+                    fields.iter().map(|(_, t)| t.clone()).collect(),
+                )]
+            }),
             Ty::Option(t) => Some(vec![
                 (Some("Option".to_string()), "Some".to_string(), vec![*t]),
                 (Some("Option".to_string()), "None".to_string(), vec![]),
@@ -3667,16 +3923,50 @@ impl Checker {
         }
     }
 
-    /// Rows whose first column can match `variant`, with that column replaced by its fields.
+    /// The constructor a pattern stands for: its enum (or the marker of a tuple or a `type`) and
+    /// its variant.
+    fn ctor_of_pat(p: &hir::Pat) -> Option<(Option<String>, String)> {
+        match p {
+            hir::Pat::Variant {
+                enum_name, variant, ..
+            } => Some((enum_name.clone(), variant.clone())),
+            hir::Pat::Tuple(_) => Some((Some("(tuple)".into()), "(tuple)".into())),
+            hir::Pat::Struct { name, .. } => Some((Some("(struct)".into()), name.clone())),
+            _ => None,
+        }
+    }
+
+    /// The patterns of the parts of a constructor pattern, in order (a `type`'s fields in the
+    /// order they were declared; the ones the pattern leaves out match anything).
+    fn parts_of_pat<'p>(&self, p: &'p hir::Pat) -> Vec<Option<&'p hir::Pat>> {
+        match p {
+            hir::Pat::Variant { args, .. } | hir::Pat::Tuple(args) => {
+                args.iter().map(Some).collect()
+            }
+            hir::Pat::Struct { name, fields } => self
+                .struct_fields
+                .get(name)
+                .map(|declared| {
+                    declared
+                        .iter()
+                        .map(|(n, _)| fields.iter().find(|(f, _)| f == n).map(|(_, p)| p))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Rows whose first column can match `variant`, with that column replaced by its parts.
     fn specialize<'p>(
         &self,
-        rows: &[Vec<Option<&'p hir::Pat>>],
+        rows: &[Row<'p>],
         enum_name: Option<&str>,
         variant: &str,
         arity: usize,
-    ) -> Vec<Vec<Option<&'p hir::Pat>>> {
+    ) -> Vec<Row<'p>> {
         let mut out = Vec::new();
-        for row in rows {
+        for row in expand_or(rows) {
             let rest = &row[1..];
             match row[0] {
                 None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
@@ -3684,63 +3974,179 @@ impl Checker {
                     r.extend_from_slice(rest);
                     out.push(r);
                 }
-                Some(hir::Pat::Tuple(args)) if variant == "(tuple)" => {
-                    let mut r: Vec<Option<&hir::Pat>> = args.iter().map(Some).collect();
-                    r.resize(arity, None);
-                    r.extend_from_slice(rest);
-                    out.push(r);
+                Some(p) => {
+                    let Some((en, v)) = Self::ctor_of_pat(p) else {
+                        continue;
+                    };
+                    if v == variant && en.as_deref() == enum_name {
+                        let mut r = self.parts_of_pat(p);
+                        r.resize(arity, None);
+                        r.extend_from_slice(rest);
+                        out.push(r);
+                    }
                 }
-                Some(hir::Pat::Variant {
-                    enum_name: en,
-                    variant: v,
-                    args,
-                }) if v == variant && en.as_deref() == enum_name => {
-                    let mut r: Vec<Option<&hir::Pat>> = args.iter().map(Some).collect();
-                    r.resize(arity, None);
-                    r.extend_from_slice(rest);
-                    out.push(r);
-                }
-                _ => {}
             }
         }
         out
     }
 
-    /// The classic usefulness check: does every value of `tys` match some row?
-    fn exhaustive(&self, rows: &[Vec<Option<&hir::Pat>>], tys: &[Ty]) -> bool {
-        let Some((first, rest_tys)) = tys.split_first() else {
-            return !rows.is_empty();
+    /// Rows whose first column can match a list of exactly `n` items, with that column replaced by
+    /// the `n` items.
+    fn list_rows<'p>(rows: &[Row<'p>], n: usize) -> Vec<Row<'p>> {
+        let mut out = Vec::new();
+        for row in expand_or(rows) {
+            let rest = &row[1..];
+            match row[0] {
+                None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
+                    let mut r = vec![None; n];
+                    r.extend_from_slice(rest);
+                    out.push(r);
+                }
+                Some(hir::Pat::List {
+                    before,
+                    rest: gap,
+                    after,
+                }) => {
+                    if let Some(mut r) = list_items(before, gap.is_some(), after, n) {
+                        r.extend_from_slice(rest);
+                        out.push(r);
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        out
+    }
+
+    /// Whether every value of `tys` matches some row.
+    fn exhaustive(&self, rows: &[Row], tys: &[Ty]) -> bool {
+        !self.useful(rows, &vec![None; tys.len()], tys)
+    }
+
+    /// Whether some value matches `q` and none of `rows`. With `q` made of wildcards, that is the
+    /// question "is something left over?"; with the pattern of an arm, "can this arm ever be taken?".
+    fn useful<'p>(&self, rows: &[Row<'p>], q: &[Option<&'p hir::Pat>], tys: &[Ty]) -> bool {
+        let Some((first_ty, rest_tys)) = tys.split_first() else {
+            return rows.is_empty();
         };
-        let constructors = self.constructors_of(first);
-        if let Some(ctors) = constructors {
-            return ctors.iter().all(|(en, v, fields)| {
-                let sub = self.specialize(rows, en.as_deref(), v, fields.len());
-                let mut next = fields.clone();
-                next.extend_from_slice(rest_tys);
-                self.exhaustive(&sub, &next)
+        let rows = expand_or(rows);
+        let (q0, q_rest) = (q[0], &q[1..]);
+        if let Some(hir::Pat::Or(alts)) = q0 {
+            return alts.iter().any(|alt| {
+                let mut row = vec![Some(alt)];
+                row.extend_from_slice(q_rest);
+                self.useful(&rows, &row, tys)
             });
         }
-        if matches!(self.resolve(first), Ty::Prim(Prim::Bool)) {
-            return [true, false].iter().all(|b| {
-                let sub: Vec<Vec<Option<&hir::Pat>>> = rows
+        let first_ty = self.resolve(first_ty);
+        let with_rest = |mut parts: Vec<Option<&'p hir::Pat>>| {
+            parts.extend_from_slice(q_rest);
+            parts
+        };
+        let types_then_rest = |mut parts: Vec<Ty>| {
+            parts.extend_from_slice(rest_tys);
+            parts
+        };
+        match q0 {
+            None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
+                if let Some(ctors) = self.constructors_of(&first_ty) {
+                    return ctors.iter().any(|(en, v, fields)| {
+                        let sub = self.specialize(&rows, en.as_deref(), v, fields.len());
+                        self.useful(
+                            &sub,
+                            &with_rest(vec![None; fields.len()]),
+                            &types_then_rest(fields.clone()),
+                        )
+                    });
+                }
+                if matches!(first_ty, Ty::Prim(Prim::Bool)) {
+                    return [true, false].iter().any(|b| {
+                        let sub = Self::literal_rows(&rows, &hir::Pat::Lit(ast::Lit::Bool(*b)));
+                        self.useful(&sub, q_rest, rest_tys)
+                    });
+                }
+                if let Ty::Vec(item) = &first_ty {
+                    let longest = rows.iter().map(|r| list_min_len(r[0])).max().unwrap_or(0);
+                    return (0..=longest + 1).any(|n| {
+                        let sub = Self::list_rows(&rows, n);
+                        self.useful(
+                            &sub,
+                            &with_rest(vec![None; n]),
+                            &types_then_rest(vec![(**item).clone(); n]),
+                        )
+                    });
+                }
+                // Numbers, texts and unknown types: only a catch-all covers every value.
+                let sub: Vec<Row> = rows
                     .iter()
-                    .filter(|r| match r[0] {
-                        None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => true,
-                        Some(hir::Pat::Lit(ast::Lit::Bool(x))) => x == b,
-                        _ => false,
-                    })
+                    .filter(|r| matches!(r[0], None | Some(hir::Pat::Wild | hir::Pat::Bind(_))))
                     .map(|r| r[1..].to_vec())
                     .collect();
-                self.exhaustive(&sub, rest_tys)
-            });
+                self.useful(&sub, q_rest, rest_tys)
+            }
+            Some(lit @ (hir::Pat::Lit(_) | hir::Pat::NegInt(_))) => {
+                let sub = Self::literal_rows(&rows, lit);
+                self.useful(&sub, q_rest, rest_tys)
+            }
+            Some(hir::Pat::List {
+                before,
+                rest,
+                after,
+            }) => {
+                let min = before.len() + after.len();
+                let longest = rows
+                    .iter()
+                    .map(|r| list_min_len(r[0]))
+                    .max()
+                    .unwrap_or(0)
+                    .max(min);
+                let lengths: Vec<usize> = if rest.is_some() {
+                    (min..=longest + 1).collect()
+                } else {
+                    vec![min]
+                };
+                let item = match &first_ty {
+                    Ty::Vec(t) => (**t).clone(),
+                    _ => Ty::Unknown,
+                };
+                lengths.into_iter().any(|n| {
+                    let sub = Self::list_rows(&rows, n);
+                    let items = list_items(before, rest.is_some(), after, n).unwrap_or_default();
+                    self.useful(
+                        &sub,
+                        &with_rest(items),
+                        &types_then_rest(vec![item.clone(); n]),
+                    )
+                })
+            }
+            Some(p) => {
+                let Some((en, v)) = Self::ctor_of_pat(p) else {
+                    return true;
+                };
+                let Some((_, _, fields)) = self
+                    .constructors_of(&first_ty)
+                    .and_then(|cs| cs.into_iter().find(|(e, n, _)| *e == en && *n == v))
+                else {
+                    // A pattern of another type: that is reported where it is checked.
+                    return true;
+                };
+                let sub = self.specialize(&rows, en.as_deref(), &v, fields.len());
+                let mut parts = self.parts_of_pat(p);
+                parts.resize(fields.len(), None);
+                self.useful(&sub, &with_rest(parts), &types_then_rest(fields))
+            }
         }
-        // Numbers, strings and unknown types: only a catch-all covers every value.
-        let sub: Vec<Vec<Option<&hir::Pat>>> = rows
-            .iter()
-            .filter(|r| matches!(r[0], None | Some(hir::Pat::Wild | hir::Pat::Bind(_))))
+    }
+
+    /// Rows whose first column matches the literal `lit` (or anything), without that column.
+    fn literal_rows<'p>(rows: &[Row<'p>], lit: &hir::Pat) -> Vec<Row<'p>> {
+        rows.iter()
+            .filter(|r| match r[0] {
+                None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => true,
+                Some(p) => p == lit,
+            })
             .map(|r| r[1..].to_vec())
-            .collect();
-        self.exhaustive(&sub, rest_tys)
+            .collect()
     }
 
     fn path(&mut self, p: &[ast::Ident], expected: Option<&Ty>, span: &Span) -> hir::Expr {

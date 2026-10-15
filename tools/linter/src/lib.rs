@@ -2,7 +2,8 @@
 //!
 //! * a local variable or parameter that is never read (names starting with `_` are exempt);
 //! * a private function (a name starting with `_`) that nothing calls (`main` and endpoints are
-//!   exempt, and so is every public function).
+//!   exempt, and so is every public function);
+//! * a `case` of a `match` that no value can reach, because the cases above it take them all.
 
 use std::collections::{HashMap, HashSet};
 
@@ -46,6 +47,12 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
             ));
         }
     }
+    for span in &l.unreachable {
+        out.push(
+            Diagnostic::warning(span.clone(), "this `case` is never reached")
+                .with_note("the cases above it already take every value it could take"),
+        );
+    }
     out.sort_by_key(|d| d.span.start);
     out
 }
@@ -56,6 +63,8 @@ struct Linter {
     read: HashSet<LocalId>,
     called: HashSet<String>,
     fn_names: HashMap<String, std::ops::Range<usize>>,
+    /// The `case`s that cannot be reached.
+    unreachable: Vec<std::ops::Range<usize>>,
 }
 
 impl Linter {
@@ -81,10 +90,22 @@ impl Linter {
     fn pattern(&mut self, p: &Pat) {
         match p {
             Pat::Bind(l) => self.declare(l),
-            Pat::Variant { args, .. } | Pat::Tuple(args) => {
+            Pat::Variant { args, .. } | Pat::Tuple(args) | Pat::Or(args) => {
                 args.iter().for_each(|a| self.pattern(a))
             }
-            Pat::Wild | Pat::Lit(_) => {}
+            Pat::List {
+                before,
+                rest,
+                after,
+            } => {
+                before
+                    .iter()
+                    .chain(rest.as_deref())
+                    .chain(after)
+                    .for_each(|a| self.pattern(a));
+            }
+            Pat::Struct { fields, .. } => fields.iter().for_each(|(_, a)| self.pattern(a)),
+            Pat::Wild | Pat::Lit(_) | Pat::NegInt(_) => {}
         }
     }
 
@@ -183,6 +204,12 @@ impl Linter {
                 self.expr(scrutinee);
                 for arm in arms {
                     self.pattern(&arm.pat);
+                    if let Some(g) = &arm.guard {
+                        self.expr(g);
+                    }
+                    if arm.unreachable {
+                        self.unreachable.push(arm.body.span.clone());
+                    }
                     self.expr(&arm.body);
                 }
             }
@@ -273,5 +300,67 @@ fn main() -> i32:
             let m = messages(src);
             assert!(m.is_empty(), "{m:?}");
         }
+    }
+
+    #[test]
+    fn reports_cases_that_cannot_be_reached() {
+        let m = messages(
+            r#"
+enum S:
+    A
+    B
+
+fn f(s: S, n: Int) -> Int:
+    let x = match s:
+        case S.A:
+            1
+        case S.B:
+            2
+        case _:
+            3
+    let y = match n:
+        case 1:
+            1
+        case n2 if n2 > 5:
+            2
+        case _:
+            3
+        case 2:
+            4
+    let z = match [n]:
+        case [_, *_]:
+            1
+        case [1]:
+            2
+        case _:
+            3
+    x + y + z
+
+fn main() -> i32:
+    f(S.A, 1)
+    0
+"#,
+        );
+        assert_eq!(m, ["this `case` is never reached"; 3]);
+        // The arm that `if x is P:` adds, and cases a guard may skip, are not reported.
+        assert!(
+            messages(
+                r#"
+fn f() -> Int:
+    let o: Int? = Some(1)
+    if o is Some(v) and v > 0:
+        return v
+    match o:
+        case Some(v) if v > 1:
+            return v
+        case Some(_):
+            return 0
+        case None:
+            return 1
+    0
+"#
+            )
+            .is_empty()
+        );
     }
 }

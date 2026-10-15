@@ -374,8 +374,10 @@ fn space_between(
         // Calls and indexing.
         (Word | Literal | Close(_) | Question, Open('(' | '[')) => false,
         (Keyword, Open(_)) => true,
-        // Prefix `-` sticks to its operand.
-        (Op, _) if prev.text == "-" && !before_prev.is_some_and(is_value_end) => false,
+        // Prefix `-` sticks to its operand, and so does the `*` of `[first, *rest]`.
+        (Op, _) if matches!(prev.text, "-" | "*") && !before_prev.is_some_and(is_value_end) => {
+            false
+        }
         _ => true,
     }
 }
@@ -527,5 +529,21 @@ mod tests {
         // Formatting twice changes nothing.
         let once = fmt(src);
         assert_eq!(fmt(&once), once);
+    }
+
+    #[test]
+    fn patterns_keep_their_shape() {
+        let src = "fn f(x:Int)->Int:\n    match x:\n        case 1|2:\n            0\n        case -1:\n            1\n        case [a,*rest]:\n            2\n        case [*_,z]:\n            3\n        case P(x:0,y:b)if b>1:\n            4\n        case _:\n            5\n    a,b=b,a\n    let (p,q),r=t\n";
+        let out = fmt(src);
+        assert_eq!(
+            out,
+            "fn f(x: Int) -> Int:\n    match x:\n        case 1 | 2:\n            0\n        case -1:\n            1\n        case [a, *rest]:\n            2\n        case [*_, z]:\n            3\n        case P(x: 0, y: b) if b > 1:\n            4\n        case _:\n            5\n    a, b = b, a\n    let (p, q), r = t\n"
+        );
+        assert_eq!(fmt(&out), out);
+        // The star of a product keeps its spaces.
+        assert_eq!(
+            fmt("let a=b*c\nlet d=[x*2 for x in xs]\n"),
+            "let a = b * c\nlet d = [x * 2 for x in xs]\n"
+        );
     }
 }

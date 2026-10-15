@@ -96,8 +96,27 @@ impl<'a> Rewriter<'a> {
                 self.enum_path(path);
                 args.iter_mut().for_each(|a| self.pattern(a));
             }
-            PatKind::Tuple(items) => items.iter_mut().for_each(|a| self.pattern(a)),
-            PatKind::Wild | PatKind::Lit(_) => {}
+            PatKind::Tuple(items) | PatKind::Or(items) => {
+                items.iter_mut().for_each(|a| self.pattern(a))
+            }
+            PatKind::List {
+                before,
+                rest,
+                after,
+            } => {
+                before
+                    .iter_mut()
+                    .chain(rest.as_deref_mut())
+                    .chain(after.iter_mut())
+                    .for_each(|a| self.pattern(a));
+            }
+            PatKind::Struct { path, fields } => {
+                if path.len() == 1 {
+                    self.rename(&mut path[0]);
+                }
+                fields.iter_mut().for_each(|(_, a)| self.pattern(a));
+            }
+            PatKind::Wild | PatKind::Lit(_) | PatKind::NegLit(_) => {}
         }
     }
 
@@ -186,6 +205,9 @@ impl<'a> Rewriter<'a> {
                 for arm in arms {
                     self.scopes.push(HashSet::new());
                     self.pattern(&mut arm.pat);
+                    if let Some(g) = &mut arm.guard {
+                        self.expr(g);
+                    }
                     self.expr(&mut arm.body);
                     self.scopes.pop();
                 }

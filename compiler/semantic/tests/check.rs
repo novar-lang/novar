@@ -3580,3 +3580,173 @@ fn f(s: Text, xs: List[Int], x: f32) -> f32:
     // `"a" in "abc"` and chains over texts keep working.
     assert_clean("fn f(s: Text) -> Bool:\n    \"a\" < s < \"c\" and \"b\" in s\n");
 }
+
+const PATTERN_TYPES: &str = "type P:\n    x: Int\n    y: Int\n\nenum S:\n    A\n    B(Int)\n\n";
+
+fn with_types(body: &str) -> String {
+    format!("{PATTERN_TYPES}{body}")
+}
+
+#[test]
+fn guards_and_alternatives_in_cases() {
+    assert_clean(&with_types(
+        "fn f(n: Int, s: S) -> Int:\n    match n:\n        case 0 | 1:\n            0\n        \
+         case -5:\n            1\n        case m if m > 9:\n            2\n        case _:\n            3\n",
+    ));
+    assert_clean(&with_types(
+        "fn f(s: S) -> Int:\n    match s:\n        case S.A | S.B(_):\n            0\n",
+    ));
+    assert_clean(&with_types(
+        "fn f(s: S) -> Int:\n    match s:\n        case S.B(1 | 2):\n            0\n        \
+         case S.B(_) | S.A:\n            1\n",
+    ));
+    // An arm with a guard may not be taken, so the others have to cover everything.
+    assert_err(
+        &with_types(
+            "fn f(n: Int) -> Int:\n    match n:\n        case m if m > 1:\n            0\n",
+        ),
+        "an arm with `if` may not be taken, so add a `_` arm",
+    );
+    assert_err(
+        &with_types(
+            "fn f(s: S) -> Int:\n    match s:\n        case S.A:\n            0\n        \
+             case S.B(n) if n > 0:\n            1\n",
+        ),
+        "non-exhaustive `match`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(n: Int) -> Int:\n    match n:\n        case m if m:\n            0\n        case _:\n            1\n",
+        ),
+        "mismatched types: expected `Bool`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(s: S) -> Int:\n    match s:\n        case S.B(a) | S.A:\n            0\n",
+        ),
+        "the alternatives of `|` cannot bind names",
+    );
+    assert_err(
+        &with_types(
+            "fn f(s: Text) -> Int:\n    match s:\n        case -1:\n            0\n        case _:\n            1\n",
+        ),
+        "this pattern does not match a value of type `Text`",
+    );
+}
+
+#[test]
+fn list_patterns() {
+    assert_clean(&with_types(
+        "fn f(xs: List[Int]) -> Int:\n    match xs:\n        case []:\n            0\n        \
+         case [a, *rest]:\n            a + rest[0]\n",
+    ));
+    assert_clean(&with_types(
+        "fn f(xs: List[Int]) -> Int:\n    match xs:\n        case [*_, last]:\n            last\n        \
+         case []:\n            0\n",
+    ));
+    assert_clean(&with_types(
+        "fn f(xs: List[Int]) -> Int:\n    match xs:\n        case [1, 2]:\n            0\n        \
+         case [_, *_]:\n            1\n        case []:\n            2\n",
+    ));
+    // `*rest` is a list of the items in between.
+    assert_clean(&with_types(
+        "fn f(xs: List[Int]) -> List[Int]:\n    match xs:\n        case [_, *rest]:\n            rest\n        \
+         case _:\n            xs\n",
+    ));
+    assert_err(
+        &with_types(
+            "fn f(xs: List[Int]) -> Int:\n    match xs:\n        case []:\n            0\n        \
+             case [a]:\n            a\n        case [a, b]:\n            b\n",
+        ),
+        "non-exhaustive `match`: add a `_` arm",
+    );
+    assert_err(
+        &with_types(
+            "fn f(xs: List[Int]) -> Int:\n    match xs:\n        case [a, *_]:\n            a\n",
+        ),
+        "non-exhaustive `match`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(n: Int) -> Int:\n    match n:\n        case [a]:\n            a\n        case _:\n            0\n",
+        ),
+        "a list pattern cannot match `Int`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(xs: List[Text]) -> Int:\n    match xs:\n        case [1, *_]:\n            1\n        case _:\n            0\n",
+        ),
+        "this pattern does not match a value of type `Text`",
+    );
+}
+
+#[test]
+fn type_patterns() {
+    assert_clean(&with_types(
+        "fn f(p: P) -> Int:\n    match p:\n        case P(x: 0, y: b):\n            b\n        \
+         case P(x: a):\n            a\n",
+    ));
+    assert_clean(&with_types(
+        "fn f(p: P, s: S) -> Int:\n    match (p, s):\n        case (P(y: 0), S.A):\n            0\n        \
+         case (_, S.B(n)):\n            n\n        case (P(x: a), _):\n            a\n",
+    ));
+    assert_err(
+        &with_types("fn f(p: P) -> Int:\n    match p:\n        case P(x: 0):\n            0\n"),
+        "non-exhaustive `match`: add a `_` arm",
+    );
+    assert_err(
+        &with_types(
+            "fn f(p: P) -> Int:\n    match p:\n        case P(z: a):\n            0\n        case _:\n            1\n",
+        ),
+        "no field `z` on type `P`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(p: P) -> Int:\n    match p:\n        case P(x: a, x: b):\n            0\n        case _:\n            1\n",
+        ),
+        "the field `x` is in this pattern twice",
+    );
+    assert_err(
+        &with_types(
+            "fn f(s: S) -> Int:\n    match s:\n        case P(x: a):\n            0\n        case _:\n            1\n",
+        ),
+        "this pattern is a `P` but the value is `S`",
+    );
+    assert_err(
+        &with_types(
+            "fn f(p: P) -> Int:\n    match p:\n        case Q(x: a):\n            0\n        case _:\n            1\n",
+        ),
+        "`Q` is not a type",
+    );
+    assert_err(
+        &with_types(
+            "fn f(p: P) -> Int:\n    match p:\n        case P(x: \"a\"):\n            0\n        case _:\n            1\n",
+        ),
+        "this pattern does not match a value of type `Int`",
+    );
+}
+
+#[test]
+fn match_as_a_value_and_nested_tuples() {
+    assert_clean(&with_types(
+        "fn f(n: Int) -> Text:\n    let v = match n:\n        case 1:\n            \"one\"\n        case _:\n            \"many\"\n    \
+         var w = \"\"\n    w = match n:\n        case 1:\n            \"a\"\n        case _:\n            v\n    w\n",
+    ));
+    assert_err(
+        &with_types(
+            "fn f(n: Int):\n    let v: Int = match n:\n        case 1:\n            \"one\"\n        case _:\n            2\n",
+        ),
+        "`match` arms have incompatible types",
+    );
+    assert_clean(&with_types(
+        "fn f(t: ((Int, Int), Text)) -> Int:\n    let (a, b), s = t\n    for i, (x, y) in [(1, 2)].enumerate():\n        let z = i + x + y\n    \
+         var p = 1\n    var q = 2\n    p, q = q, p\n    let m, n = 1, 2\n    a + b + p + q + m + n\n",
+    ));
+    assert_clean(&with_types(
+        "fn f((a, (b, c)): (Int, (Int, Int))) -> Int:\n    a + b + c\n\nfn g() -> Int:\n    let h = ((a, b), c) => a + b + c\n    f((1, (2, 3)))\n",
+    ));
+    // `if x is Pattern and condition` can use the names of the pattern.
+    assert_clean(&with_types(
+        "fn f(o: Int?) -> Int:\n    if o is Some(n) and n > 3:\n        return n\n    0\n",
+    ));
+}

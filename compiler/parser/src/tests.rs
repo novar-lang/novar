@@ -893,3 +893,184 @@ fn fstring_formats_and_debug_form() {
 fn triple_quoted_text() {
     assert!(matches!(ok_expr("\"\"\"a\nb\"\"\""), ExprKind::Lit(Lit::Str(s)) if s == "a\nb"));
 }
+
+fn arms_of(body: &str) -> Vec<Arm> {
+    let p = ok_program(&format!("fn f(x: Int) -> Int:\n    match x:\n{body}"));
+    let Item::Fn(f) = &p.items[0] else { panic!() };
+    let Some(tail) = &f.body.tail else {
+        panic!("{:?}", f.body)
+    };
+    let ExprKind::Match { arms, .. } = &tail.node else {
+        panic!("{tail:?}")
+    };
+    arms.clone()
+}
+
+fn parse_messages(src: &str) -> Vec<String> {
+    parse(src).1.into_iter().map(|d| d.message).collect()
+}
+
+#[test]
+fn patterns_with_alternatives_guards_and_signs() {
+    let arms = arms_of(
+        "        case 1 | 2 | 3:\n            1\n        case -1:\n            2\n        \
+         case n if n > 3 and n < 9:\n            3\n        case Some(1 | 2):\n            4\n        \
+         case _:\n            5\n",
+    );
+    assert!(matches!(&arms[0].pat.node, PatKind::Or(alts) if alts.len() == 3));
+    assert!(matches!(arms[1].pat.node, PatKind::NegLit(Lit::Int(1))));
+    assert!(arms[2].guard.is_some() && matches!(arms[2].pat.node, PatKind::Bind(_)));
+    let PatKind::Variant { args, .. } = &arms[3].pat.node else {
+        panic!()
+    };
+    assert!(matches!(args[0].node, PatKind::Or(_)));
+    assert!(arms[4].guard.is_none());
+}
+
+#[test]
+fn list_and_type_patterns() {
+    let arms = arms_of(
+        "        case []:\n            1\n        case [a, *rest]:\n            2\n        \
+         case [*_, z]:\n            3\n        case [a, *_, z]:\n            4\n        \
+         case Point(x: 0, y: b):\n            5\n        case _:\n            6\n",
+    );
+    assert!(
+        matches!(&arms[0].pat.node, PatKind::List { before, rest, after }
+        if before.is_empty() && rest.is_none() && after.is_empty())
+    );
+    assert!(
+        matches!(&arms[1].pat.node, PatKind::List { before, rest, after }
+        if before.len() == 1 && matches!(rest.as_deref().map(|r| &r.node), Some(PatKind::Bind(n)) if n == "rest") && after.is_empty())
+    );
+    assert!(
+        matches!(&arms[2].pat.node, PatKind::List { before, rest, after }
+        if before.is_empty() && matches!(rest.as_deref().map(|r| &r.node), Some(PatKind::Wild)) && after.len() == 1)
+    );
+    assert!(
+        matches!(&arms[3].pat.node, PatKind::List { before, after, .. } if before.len() == 1 && after.len() == 1)
+    );
+    assert!(matches!(&arms[4].pat.node, PatKind::Struct { path, fields }
+        if path[0].node == "Point" && fields.len() == 2 && fields[1].0.node == "y"));
+    // Values and fields are not mixed, and a list has one `*rest`.
+    assert!(
+        parse_messages("fn f(x: Int):\n    match x:\n        case P(1, y: 2):\n            1\n")
+            .iter()
+            .any(|m| m.contains("names the fields"))
+    );
+    assert!(
+        parse_messages("fn f(x: Int):\n    match x:\n        case [*a, *b]:\n            1\n")
+            .iter()
+            .any(|m| m.contains("one `*rest`"))
+    );
+}
+
+#[test]
+fn a_pattern_that_does_not_exist_says_what_to_write() {
+    let message = |case: &str| {
+        let src = format!("fn f(x: Int):\n    match x:\n        case {case}:\n            1\n");
+        let messages = parse_messages(&src);
+        assert_eq!(messages.len(), 1, "{case}: {messages:?}");
+        messages[0].clone()
+    };
+    assert!(message("1..3").contains("a range is not a pattern; write `case n if 1 <= n < 3:`"));
+    assert!(message("[a, ..rest]").contains("`[first, *rest]`"));
+    assert!(message("n @ 5").contains("`name @ pattern` is not a pattern"));
+    assert!(message("x and y").contains("a condition goes after `if`"));
+    assert!(message("1 + 2").contains("a pattern is a literal"));
+    // The first name is kept, so the body is not told it is missing.
+    let (_, errors) = parse("fn f(x: Int):\n    match x:\n        case n @ 5:\n            n\n");
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn match_is_a_value_after_let_assignment_and_return() {
+    let src = "fn f(x: Int) -> Int:\n    let a = match x:\n        case 1:\n            10\n        case _:\n            20\n    \
+               var b = 0\n    b = match a:\n        case 10:\n            1\n        case _:\n            2\n    \
+               return match b:\n        case 1:\n            3\n        case _:\n            4\n";
+    let p = ok_program(src);
+    let Item::Fn(f) = &p.items[0] else { panic!() };
+    let Stmt::Let(a) = &f.body.stmts[0] else {
+        panic!()
+    };
+    // The last line of each arm is its value.
+    let ExprKind::Match { arms, .. } = &a.init.node else {
+        panic!("{:?}", a.init)
+    };
+    assert!(matches!(&arms[0].body.node, ExprKind::Block(b) if b.tail.is_some()));
+    assert!(
+        matches!(&f.body.stmts[2], Stmt::Expr(e) if matches!(&e.node, ExprKind::Assign { value, .. } if matches!(value.node, ExprKind::Match { .. })))
+    );
+    assert!(matches!(
+        &f.body.tail.as_deref().map(|t| &t.node),
+        Some(ExprKind::Match { .. })
+    ));
+}
+
+#[test]
+fn tuples_are_taken_apart_at_any_depth() {
+    // `let a, (b, c) = t` and `let (a, b), c = t` make a temporary for each inner tuple.
+    let names = |src: &str| -> Vec<String> {
+        let p = ok_program(&format!("fn f(t: Int):\n    {src}\n"));
+        let Item::Fn(f) = &p.items[0] else { panic!() };
+        f.body
+            .stmts
+            .iter()
+            .filter_map(|s| match s {
+                Stmt::Let(l) => Some(l.name.node.clone()),
+                _ => None,
+            })
+            .filter(|n| !n.starts_with("__"))
+            .collect()
+    };
+    assert_eq!(names("let a, (b, c) = t"), ["a", "b", "c"]);
+    assert_eq!(names("let (a, b), c = t"), ["a", "b", "c"]);
+    assert_eq!(names("let (a, (b, _)), c = t"), ["a", "b", "c"]);
+    // A parameter can be a tuple too, and the parts are bound at the top of the body.
+    let p = ok_program("fn f((a, (b, c)): (Int, (Int, Int)), k: Int) -> Int:\n    a + b + c + k\n");
+    let Item::Fn(f) = &p.items[0] else { panic!() };
+    assert_eq!(f.params.len(), 2);
+    assert!(f.params[0].name.node.starts_with("__arg"));
+    assert!(f.body.stmts.len() >= 3 || f.body.tail.is_some());
+}
+
+#[test]
+fn several_targets_are_assigned_at_once() {
+    let p =
+        ok_program("fn f():\n    var a = 1\n    var b = 2\n    a, b = b, a\n    let c, d = 1, 2\n");
+    let Item::Fn(f) = &p.items[0] else { panic!() };
+    // The right side is evaluated once into a temporary, then each target is assigned.
+    let Stmt::Expr(e) = &f.body.stmts[2] else {
+        panic!("{:?}", f.body.stmts)
+    };
+    let ExprKind::Block(b) = &e.node else {
+        panic!()
+    };
+    assert_eq!(b.stmts.len(), 3);
+    assert!(matches!(&b.stmts[1], Stmt::Expr(a) if matches!(a.node, ExprKind::Assign { .. })));
+}
+
+#[test]
+fn if_is_may_have_a_condition() {
+    let p = ok_program(
+        "fn f(o: Int):\n    if o is Some(n) and n > 3:\n        1\n    else:\n        2\n",
+    );
+    let Item::Fn(f) = &p.items[0] else { panic!() };
+    let Stmt::Expr(e) = &f.body.stmts[0] else {
+        panic!("{:?}", f.body)
+    };
+    let ExprKind::Match { arms, .. } = &e.node else {
+        panic!()
+    };
+    assert!(arms[0].guard.is_some() && arms[1].guard.is_none());
+}
+
+#[test]
+fn let_with_a_pattern_says_what_to_use() {
+    let messages = parse_messages("fn f(p: Int):\n    let P(x: a) = p\n");
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("take names, not a pattern")),
+        "{messages:?}"
+    );
+}

@@ -117,6 +117,8 @@ pub struct Variant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arm {
     pub pat: Pattern,
+    /// `case x if x > 3:`: the arm is taken only when this is true.
+    pub guard: Option<Expr>,
     pub body: Expr,
 }
 
@@ -129,8 +131,23 @@ pub enum PatKind {
     /// A lowercase name that binds the matched value.
     Bind(String),
     Lit(Lit),
+    /// `-1`, `-2.5`: a literal with a minus sign.
+    NegLit(Lit),
     /// `(a, b)`
     Tuple(Vec<Pattern>),
+    /// `1 | 2`: any of the alternatives. They cannot bind names.
+    Or(Vec<Pattern>),
+    /// `[a, b]`, `[first, *rest]`, `[*_, last]`: a list. `rest` is the `*name` (or `*_`) part.
+    List {
+        before: Vec<Pattern>,
+        rest: Option<Box<Pattern>>,
+        after: Vec<Pattern>,
+    },
+    /// `Point(x: a, y: 0)`: a value of a `type`, naming some of its fields.
+    Struct {
+        path: Vec<Ident>,
+        fields: Vec<(Ident, Pattern)>,
+    },
     /// `Shape::Circle(r)`, `Shape::Empty`, `Ok(v)`, `Err(e)`
     Variant {
         path: Vec<Ident>,

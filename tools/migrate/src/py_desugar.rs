@@ -88,9 +88,19 @@ fn binds(p: &Pattern, out: &mut HashSet<String>) {
         PatKind::Bind(n) => {
             out.insert(n.clone());
         }
-        PatKind::Tuple(items) => items.iter().for_each(|i| binds(i, out)),
+        PatKind::Tuple(items) | PatKind::Or(items) => items.iter().for_each(|i| binds(i, out)),
         PatKind::Variant { args, .. } => args.iter().for_each(|i| binds(i, out)),
-        PatKind::Wild | PatKind::Lit(_) => {}
+        PatKind::List {
+            before,
+            rest,
+            after,
+        } => before
+            .iter()
+            .chain(rest.as_deref())
+            .chain(after)
+            .for_each(|i| binds(i, out)),
+        PatKind::Struct { fields, .. } => fields.iter().for_each(|(_, i)| binds(i, out)),
+        PatKind::Wild | PatKind::Lit(_) | PatKind::NegLit(_) => {}
     }
 }
 

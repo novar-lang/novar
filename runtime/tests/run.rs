@@ -2181,3 +2181,211 @@ fn f() -> Int:
 "#;
     assert_eq!(int(run(src, "f", vec![])), 3);
 }
+
+const PATTERNS: &str = r#"
+type P:
+    x: Int
+    y: Int
+
+enum S:
+    C(Int)
+    R(Int, Int)
+    E
+
+fn sign(n: Int) -> Text:
+    match n:
+        case 0:
+            "zero"
+        case -1 | -2:
+            "small negative"
+        case x if x < 0:
+            "negative"
+        case 1 | 2 | 3:
+            "small"
+        case _:
+            "big"
+
+fn kind(s: S) -> Int:
+    match s:
+        case S.C(_) | S.R(_, _):
+            0
+        case S.E:
+            1
+
+fn describe(xs: List[Int]) -> Text:
+    match xs:
+        case []:
+            "empty"
+        case [one]:
+            f"one {one}"
+        case [first, *rest]:
+            f"{first} then {rest.len()}"
+
+fn ends(xs: List[Int]) -> Text:
+    match xs:
+        case [a, *_, z]:
+            f"{a}..{z}"
+        case _:
+            "short"
+
+fn where_is(p: P) -> Text:
+    match p:
+        case P(x: 0, y: 0):
+            "origin"
+        case P(x: 0):
+            "on y"
+        case P(y: yy, x: xx):
+            f"{xx},{yy}"
+
+fn nested(v: (S, List[P])) -> Text:
+    match v:
+        case (S.R(a, 2), [P(x: 1, y: b), *_]):
+            f"{a}{b}"
+        case (S.C(c), [_, P(y: d)]):
+            f"{c}{d}"
+        case _:
+            "none"
+"#;
+
+fn patterns(body: &str) -> String {
+    shown(&format!("{PATTERNS}\n{body}"))
+}
+
+#[test]
+fn match_with_guards_alternatives_and_signs() {
+    let all = patterns(
+        r#"
+fn f() -> Text:
+    f"{sign(0)}|{sign(-2)}|{sign(-9)}|{sign(2)}|{sign(50)}|{kind(S.R(1, 2))}{kind(S.E)}"
+"#,
+    );
+    assert_eq!(all, "zero|small negative|negative|small|big|01");
+    // A negative float, and a guard that sees the names of its pattern.
+    let src = r#"
+fn f() -> Text:
+    let a = match -2.5:
+        case -2.5:
+            "match"
+        case _:
+            "no"
+    let b = match (3, 4):
+        case (x, y) if x > y:
+            "first"
+        case (x, y) if x + y == 7:
+            "sum"
+        case _:
+            "none"
+    f"{a} {b}"
+"#;
+    assert_eq!(shown(src), "match sum");
+}
+
+#[test]
+fn match_with_lists_and_types() {
+    let out = patterns(
+        r#"
+fn f() -> Text:
+    f"{describe([])}|{describe([4])}|{describe([1, 2, 3])}|{ends([1, 2, 3])}|{ends([1])}|{ends([5, 6])}"
+"#,
+    );
+    assert_eq!(out, "empty|one 4|1 then 2|1..3|short|5..6");
+    let out = patterns(
+        r#"
+fn f() -> Text:
+    f"{where_is(P(x: 0, y: 0))}|{where_is(P(x: 0, y: 5))}|{where_is(P(x: 3, y: 4))}"
+"#,
+    );
+    assert_eq!(out, "origin|on y|3,4");
+    let out = patterns(
+        r#"
+fn f() -> Text:
+    let a = nested((S.R(7, 2), [P(x: 1, y: 8), P(x: 0, y: 0)]))
+    let b = nested((S.C(3), [P(x: 0, y: 0), P(x: 1, y: 9)]))
+    let c = nested((S.E, []))
+    f"{a} {b} {c}"
+"#,
+    );
+    assert_eq!(out, "78 39 none");
+    // `*rest` is a list that can be used, and a list of texts matches its literals.
+    let src = r#"
+fn total(xs: List[Int]) -> Int:
+    match xs:
+        case []:
+            0
+        case [head, *tail]:
+            head + total(tail)
+
+fn f() -> Text:
+    let words = match ["a", "b"]:
+        case ["a", second]:
+            second
+        case _:
+            "?"
+    f"{total([1, 2, 3, 4])} {words}"
+"#;
+    assert_eq!(shown(src), "10 b");
+}
+
+#[test]
+fn match_is_a_value_and_if_is_has_a_condition() {
+    let src = r#"
+fn pick(n: Int) -> Int:
+    let a = match n:
+        case 1:
+            10
+        case _:
+            let k = n * 2
+            k + 1
+    var b = 0
+    b = match a:
+        case 10:
+            1
+        case _:
+            2
+    return match b:
+        case 1:
+            100
+        case _:
+            200
+
+fn f() -> Text:
+    let o: Int? = Some(5)
+    var hits = ""
+    if o is Some(n) and n > 9:
+        hits = hits + "big"
+    elif o is Some(n) and n > 3:
+        hits = hits + f"mid{n}"
+    else:
+        hits = hits + "none"
+    let stack = [1, 2, 3, 4]
+    var seen = 0
+    while stack.pop() is Some(v) and v > 1:
+        seen = seen + v
+    f"{pick(1)} {pick(7)} {hits} {seen}"
+"#;
+    assert_eq!(shown(src), "100 200 mid5 9");
+}
+
+#[test]
+fn tuples_are_taken_apart_and_swapped() {
+    let src = r#"
+fn add((a, b): (Int, Int), k: Int) -> Int:
+    a + b + k
+
+fn deep(t: ((Int, Int), (Int, (Int, Int)))) -> Int:
+    let (a, b), (c, (d, e)) = t
+    a * 10000 + b * 1000 + c * 100 + d * 10 + e
+
+fn f() -> Text:
+    var x = 1
+    var y = 2
+    x, y = y, x
+    let q, r = 7 // 2, 7 % 2
+    var out = ""
+    for i, (a, b) in [(1, 2), (3, 4)].enumerate():
+        out = out + f"{i}{a}{b},"
+    let sum = [(1, (2, 3)), (4, (5, 6))].map(((a, (b, c))) => a + b + c)
+    f"{add((1, 2), 3)} {deep(((1, 2), (3, (4, 5))))} {x}{y} {q}{r} {out} {sum}"
+"#;
+    assert_eq!(shown(src), "6 12345 21 31 012,134, [6, 15]");
+}

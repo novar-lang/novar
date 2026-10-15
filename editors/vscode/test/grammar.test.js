@@ -109,6 +109,13 @@ test("f-strings take quotes and formats inside their braces", async () => {
   has(t, "x", "meta.interpolation");
 });
 
+test("alternatives and list patterns in a case", async () => {
+  const t = await tokenize("match x:\n    case 1 | 2:\n        a\n    case [first, *rest] if first > 1:\n        b");
+  has(t, "|", "keyword.operator.alternative");
+  has(t, "case", "keyword.control");
+  has(t, "if", "keyword.control");
+});
+
 test("numbers, constants, comments and control flow", async () => {
   const t = await tokenize("for i in range(10_000):\n    if x >= 2.5e-3 and ok or not done:\n        return True  # done");
   has(t, "for", "keyword.control");

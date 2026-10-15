@@ -895,9 +895,22 @@ impl Interp {
             ExprKind::Match { scrutinee, arms } => {
                 let value = self.eval(scrutinee, ctx)?;
                 for arm in arms {
-                    if match_pattern(&arm.pat, &value, &mut ctx.env) {
-                        return self.eval(&arm.body, ctx);
+                    if !match_pattern(&arm.pat, &value, &mut ctx.env) {
+                        continue;
                     }
+                    if let Some(guard) = &arm.guard {
+                        match self.eval(guard, ctx)? {
+                            Value::Bool(true) => {}
+                            Value::Bool(false) => continue,
+                            other => {
+                                return fail(format!(
+                                    "the `if` of a `case` gave {}, not a Bool",
+                                    other.type_name()
+                                ));
+                            }
+                        }
+                    }
+                    return self.eval(&arm.body, ctx);
                 }
                 fail("no `match` arm matched")
             }
@@ -1155,6 +1168,45 @@ fn match_pattern(pat: &hir::Pat, value: &Value, env: &mut Env) -> bool {
                     .iter()
                     .zip(items.iter())
                     .all(|(p, v)| match_pattern(p, v, env))
+        }
+        (hir::Pat::NegInt(a), Value::Int(b)) => -i128::from(*a) == i128::from(*b),
+        (hir::Pat::NegInt(a), Value::Float(b)) => -(*a as f64) == *b,
+        (hir::Pat::Or(alts), v) => alts.iter().any(|alt| match_pattern(alt, v, env)),
+        (
+            hir::Pat::List {
+                before,
+                rest,
+                after,
+            },
+            Value::Vec(items),
+        ) => {
+            let items = items.snapshot();
+            let fixed = before.len() + after.len();
+            if items.len() < fixed || (rest.is_none() && items.len() != fixed) {
+                return false;
+            }
+            let (head, tail) = (&items[..before.len()], &items[items.len() - after.len()..]);
+            let middle = &items[before.len()..items.len() - after.len()];
+            before
+                .iter()
+                .zip(head)
+                .all(|(p, v)| match_pattern(p, v, env))
+                && after
+                    .iter()
+                    .zip(tail)
+                    .all(|(p, v)| match_pattern(p, v, env))
+                && rest
+                    .as_deref()
+                    .is_none_or(|p| match_pattern(p, &Value::vec(middle.to_vec()), env))
+        }
+        (hir::Pat::Struct { name, fields }, Value::Struct(s)) => {
+            s.name == *name
+                && fields.iter().all(|(field, p)| {
+                    s.fields
+                        .iter()
+                        .find(|(n, _)| n == field)
+                        .is_some_and(|(_, v)| match_pattern(p, v, env))
+                })
         }
         (hir::Pat::Lit(l), v) => match (l, v) {
             (Lit::Int(a), Value::Int(b)) => i128::from(*b) == i128::from(*a),
