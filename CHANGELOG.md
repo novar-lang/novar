@@ -7,6 +7,9 @@
   time. Blocks nested past 64 levels and brackets past 200 are an error that says so, and the parser and
   the checker run on a stack of their own, so a long sum or calls inside calls are checked instead of
   overflowing the stack and ending the process.
+* **Methods with type parameters of their own:** `fn map[U](self, f: (T) -> U) -> Stack[U]` in a generic
+  or a plain `type`, or in an `extend`. The parameters are inferred from the call and may have limits
+  (`[N: Num]`). Before, they were an error ("not supported yet").
 * **Type arguments in a call:** `empty[Text]()`, `pair[Int, Text](1, "a")`. It makes a generic function
   that cannot infer its types from the arguments usable, and the "cannot infer" error now says so.
 * **Built-in limits for type parameters:** `T: Num`, `T: Ord` and `T: Eq` (and `T: (Num, Ord)`) without
