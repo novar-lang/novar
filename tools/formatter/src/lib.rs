@@ -68,7 +68,7 @@ fn kind(t: &Token) -> Kind {
         True | False | Int(_) | Float(_) | Str(_) | TStr(_) | RStr(_) | FStr(_) | FTStr(_)
         | Ellipsis => Kind::Literal,
         Ident(_) => Kind::Word,
-        LParen => Kind::Open('('),
+        LParen | MacroOpen(_) => Kind::Open('('),
         LBracket => Kind::Open('['),
         LBrace => Kind::Open('{'),
         RParen => Kind::Close('('),
@@ -397,6 +397,15 @@ mod tests {
         assert_eq!(
             out,
             "fn add(a: Int, b: Int) -> Int:\n    let x = a + b * 2\n    if x > 3:\n        return x\n    x - 1\n"
+        );
+    }
+
+    #[test]
+    fn macro_calls_keep_their_name_and_parenthesis_together() {
+        let out = fmt("fn f():\n  let x=dbg!( g(1))\n  assert!(x>1,\"big\")\n");
+        assert_eq!(
+            out,
+            "fn f():\n    let x = dbg!(g(1))\n    assert!(x > 1, \"big\")\n"
         );
     }
 

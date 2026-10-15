@@ -81,6 +81,15 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             Value::Bool(true) => Ok(Value::Unit),
             _ => err("assertion failed"),
         },
+        "std::test::assert_msg" => match &args[0] {
+            Value::Bool(true) => Ok(Value::Unit),
+            _ => err(want_str(&args[1])?.to_string()),
+        },
+        "std::test::fail" => err(want_str(&args[0])?.to_string()),
+        "std::debug::dbg" => {
+            eprintln!("{} = {}", want_str(&args[1])?, args[0]);
+            Ok(args[0].clone())
+        }
         "std::test::assert_eq" => {
             if args[0].equals(&args[1]) {
                 Ok(Value::Unit)

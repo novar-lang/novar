@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Built-in macros:** `assert!(cond)` quotes the condition when it fails, `assert!(cond, "message")`,
+  `dbg!(value)` prints `value = result` to stderr and gives the value back, and `todo!()`,
+  `unreachable!()` and `panic!("message")` stop the program (and fit any type). An unknown `name!(...)`
+  names the macros that exist. Users cannot define macros. The formatter and the VS Code grammar know
+  the `name!(` form.
 * **The `|>` operator follows one rule:** `x |> stage` is the call `stage` with `x` as its first argument.
   Names and defaults now count that argument (`1 |> scale(k: 3)` and `1 |> scale` used to fail with
   "missing the argument" and "expected 2 argument(s)"), and a suffix after the stage applies to the

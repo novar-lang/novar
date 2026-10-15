@@ -1277,3 +1277,31 @@ fn async_methods_in_types_traits_and_enums() {
     };
     assert!(imp.fns[0].is_async);
 }
+
+#[test]
+fn macros_become_calls_of_std_functions() {
+    let ExprKind::Call { callee, args } = ok_expr("assert!(a  >\n b)") else {
+        panic!("expected a call");
+    };
+    assert_eq!(show(&callee), "std.test.assert_msg");
+    assert_eq!(args.len(), 2);
+    assert!(matches!(&args[1].node, ExprKind::Lit(Lit::Str(s)) if s == "assertion failed: a > b"));
+}
+
+#[test]
+fn macro_errors_say_what_to_write() {
+    for (src, wanted) in [
+        ("foo!(1)", "there is no macro `foo!`"),
+        ("dbg!()", "`dbg!` is written `dbg!(value)`"),
+        ("todo!(1)", "`todo!` is written `todo!()`"),
+    ] {
+        let (_, errs) = parse_expr(src);
+        assert!(
+            errs.iter().any(|e| e.message.contains(wanted)),
+            "{src}: {errs:?}"
+        );
+    }
+    // `!=` and a lone `!` are as before.
+    assert!(matches!(ok_expr("a != b"), ExprKind::Binary { .. }));
+    assert!(!parse_expr("!a").1.is_empty());
+}

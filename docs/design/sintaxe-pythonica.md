@@ -84,6 +84,7 @@ fn handle(q: Query) -> Result[Reply, Status]:
 * Caminhos: `std.text.trim`, `Shape.Circle`, `util.clamp` são caminhos quando o primeiro nome é `std`, um nome trazido por `import`/`from` ou começa com maiúscula; senão `a.b` é campo/método.
 * `Nome(campo: valor, ...)` com todos os argumentos nomeados e `Nome` maiúsculo constrói um tipo; campos com valor padrão podem ser omitidos.
 * Nomes e valores padrão em chamadas são resolvidos antes da verificação (`compiler/semantic/src/named.rs`): para funções e métodos definidos no programa os argumentos são reordenados e os padrões preenchidos; para o resto (biblioteca, métodos de valores sem tipo conhecido) o nome é só um rótulo. `x.m(...)` só usa a assinatura de `m` se um único tipo do programa tem um método com esse nome.
+* Macros: `nome!(args)`. O lexer produz um token só para `nome!(`, então `a != b` e um `!` sozinho continuam como antes. O parser reescreve as cinco macros do compilador (`assert!`, `dbg!`, `todo!`, `unreachable!`, `panic!`) em chamadas de `std.test.*` e `std.debug.dbg`; depois do parser ninguém vê uma macro. O usuário não define macros.
 * `a in b` equivale a `b.contains(a)`; `x is Padrão` só existe como condição de `if`/`elif`/`while`.
 * `type` não é palavra reservada: só abre uma declaração no começo de um item, então ainda pode ser nome de campo ou variável (`type: Text`).
 * Palavras reservadas: `fn let var enum trait extend import from return if elif else while for in is match case break continue pass and or not True False`. `None`, `Some`, `Ok` e `Err` são nomes comuns.
@@ -120,5 +121,6 @@ Os tipos aparecem como são escritos no programa: ``expected `i32`, found `Text`
 * Intervalos fechados (`0..=n`): use `range(0, n + 1)`.
 * Fatias (`xs[1:3]`), strings de várias linhas, `//` de divisão inteira, `**`; entram com L12 do roadmap.
 * `def` no lugar de `fn`, ou ao lado dele: avaliado em `def-versus-fn.md`; fica `fn`.
+* Macros definidas pelo usuário: só as cinco do compilador existem.
 * Modo script (arquivo sem `fn main`); um executável nativo ainda exige `fn main() -> i32`.
 * Argumentos nomeados em chamadas de biblioteca são só rótulos (não reordenam).

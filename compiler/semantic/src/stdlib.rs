@@ -907,6 +907,24 @@ fn test_assert(args: &[Ty]) -> Result<Ty, String> {
     Ok(Ty::Unit)
 }
 
+fn test_assert_msg(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    want(args, 0, &Ty::bool())?;
+    want(args, 1, &s())?;
+    Ok(Ty::Unit)
+}
+
+fn test_fail(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want(args, 0, &s())?;
+    Ok(Ty::Never)
+}
+
+fn debug_dbg(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    Ok(args[0].clone())
+}
+
 fn test_assert_eq(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 2)?;
     if args[0].accepts(&args[1]) || args[1].accepts(&args[0]) {
@@ -1445,6 +1463,9 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::table::sql", sig_expected(sql_check, sql_result)),
     ("std::test::assert", sig(test_assert)),
     ("std::test::assert_eq", sig(test_assert_eq)),
+    ("std::test::assert_msg", sig(test_assert_msg)),
+    ("std::test::fail", sig(test_fail)),
+    ("std::debug::dbg", sig(debug_dbg)),
     ("std::env::get", sig(env_get)),
     ("std::fs::read", sig(fs_read)),
     ("std::fs::write", sig(fs_write)),
