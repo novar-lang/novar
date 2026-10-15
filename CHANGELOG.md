@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **The `|>` operator follows one rule:** `x |> stage` is the call `stage` with `x` as its first argument.
+  Names and defaults now count that argument (`1 |> scale(k: 3)` and `1 |> scale` used to fail with
+  "missing the argument" and "expected 2 argument(s)"), and a suffix after the stage applies to the
+  result of the call (`s |> parse()?`, `n |> make().field`, `n |> items()[0]`; the first two were errors).
+  `|>` binds looser than every operator, and the error for `x |> f == 1` says to write `(x |> f()) == 1`.
 * **Inferred return type, more places:** a method without `->` (in a `type`, an `extend`, or an
   associated function) returns the type of its last expression; a method that implements a trait returns
   what the trait declares for it; and a global can call a function that has no `->`. `main`, tests,

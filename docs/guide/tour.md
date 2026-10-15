@@ -73,6 +73,18 @@ let docs = query
     |> store.search(3)
 ```
 
+The rule is one: `x |> stage` is the call `stage` with `x` as its first argument, and then it is a call
+like any other.
+
+* The stage is a function (`x |> f`, `x |> std.text.trim`), a call (`x |> f(a)`) or a closure
+  (`x |> (n => n + 1)`).
+* Names and defaults count the value the pipe provides: with `fn scale(x: Int, k: Int = 2)`, both
+  `1 |> scale` and `1 |> scale(k: 3)` work.
+* A suffix after the stage applies to the result of the call: `s |> parse()?` is `parse(s)?`,
+  `n |> make().field` is `make(n).field`, and `n |> items()[0]` is `items(n)[0]`.
+* `|>` binds looser than every operator: `a + b |> f` pipes the sum, and `x |> f == 1` pipes into
+  `f == 1`, which is an error. Write `(x |> f()) == 1`.
+
 ## Tensors and tables
 
 ```telvax

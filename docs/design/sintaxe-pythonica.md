@@ -68,7 +68,7 @@ fn handle(q: Query) -> Result[Reply, Status]:
 | função como valor | `x => x + 1`, `(a, b) => a + b`, `() => 1`; `((i, x)) => ...` abre uma tupla; um `fn` dentro de um `fn` é um fechamento de várias linhas |
 | decisão | `if`/`elif`/`else`, `a if c else b`, `match x:` + `case Padrão:`, `if x is Some(v):`, `while x is Some(v):` |
 | laços | `for x in xs:`, `for i, x in xs:`, `for i in range(n)`, `range(a, b)`, `while`, `break`, `continue`, `pass` |
-| operadores | `and or not in`, `|>`, `?` |
+| operadores | `and or not in`, `|>`, `?`; `x |> f(a)` é `f(x, a)`, vale para nomes e padrões como numa chamada, e `|>` liga mais fraco que qualquer operador |
 | módulos | `from a.b import C, D`, `import a.b.C`, `C as E` para renomear, `.` em todo caminho (`std.text.trim`, `Shape.Circle`) |
 | privado | nome começando com `_`; não existe `pub` |
 | endpoint | `@endpoint(POST, "/rota")` ou `@endpoint(method: POST, path: "/rota")` |

@@ -4,6 +4,10 @@
 //!   default of `limit` when it has one.
 //! * `Query(text: "x")` fills `top_k` from its default.
 //!
+//! * `x |> f(a, b: 1)` is the call `f(x, a, b: 1)` and then goes through the same rules, so names and
+//!   defaults count the argument the pipe provides. A suffix after the stage (`x |> f()?`,
+//!   `x |> f().field`, `x |> f()[0]`) applies to the result of the call.
+//!
 //! The pass knows the functions and types written in the program. For a call it cannot match to
 //! one of them (a library function, a method of a value whose type is not known yet), names are
 //! only labels: they are dropped and the arguments keep the order they were written in.
@@ -99,6 +103,17 @@ impl Known {
 
 /// Applies names and defaults to every call and construction in `program`.
 pub fn resolve(program: &mut Program) -> Vec<Diagnostic> {
+    // Pipes become calls first, so the rules below see the argument they provide.
+    let mut unpipe = |e: &mut Expr| desugar_pipe(e);
+    for item in &mut program.items {
+        match item {
+            Item::Let(l) => walk(&mut l.init, &mut unpipe),
+            Item::Fn(f) => walk_fn(f, &mut unpipe),
+            Item::Impl(i) => i.fns.iter_mut().for_each(|f| walk_fn(f, &mut unpipe)),
+            Item::Trait(t) => t.fns.iter_mut().for_each(|f| walk_fn(f, &mut unpipe)),
+            _ => {}
+        }
+    }
     let known = Known::collect(program);
     let mut diags = Vec::new();
     let mut visit = |e: &mut Expr| rewrite(e, &known, &mut diags);
@@ -116,6 +131,111 @@ pub fn resolve(program: &mut Program) -> Vec<Diagnostic> {
 
 fn walk_fn(f: &mut Fn, visit: &mut impl FnMut(&mut Expr)) {
     walk_block(&mut f.body, visit);
+}
+
+/// Turns `lhs |> stage` into the call it means. A pipe whose right side is not a function or a call
+/// is left for the checker to report.
+fn desugar_pipe(e: &mut Expr) {
+    if !matches!(e.node, ExprKind::Pipe { .. }) {
+        return;
+    }
+    let span = e.span.clone();
+    let placeholder = Spanned {
+        node: ExprKind::Error,
+        span: span.clone(),
+    };
+    let ExprKind::Pipe { lhs, rhs } = std::mem::replace(&mut e.node, placeholder.node) else {
+        return;
+    };
+    match pipe_into(*lhs, *rhs) {
+        Ok(mut call) => {
+            call.span = span;
+            *e = call;
+        }
+        Err(back) => {
+            let (lhs, rhs) = *back;
+            e.node = ExprKind::Pipe {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+    }
+}
+
+/// `a.b.c`: names and fields only, so it names a function (`std.text.trim`, `llm.complete`).
+fn is_path_chain(e: &Expr) -> bool {
+    match &e.node {
+        ExprKind::Path(_) => true,
+        ExprKind::Field { base, .. } => is_path_chain(base),
+        _ => false,
+    }
+}
+
+/// `stage` with `lhs` as the first argument of its call. A suffix on the stage applies to the
+/// result of that call. Gives both back when `stage` is neither a function nor a call.
+fn pipe_into(lhs: Expr, stage: Expr) -> Result<Expr, Box<(Expr, Expr)>> {
+    let Spanned { node, span } = stage;
+    let wrap = |inner: Result<Expr, Box<(Expr, Expr)>>,
+                make: &dyn std::ops::Fn(Box<Expr>) -> ExprKind|
+     -> Result<Expr, Box<(Expr, Expr)>> {
+        match inner {
+            Ok(call) => Ok(Spanned {
+                node: make(Box::new(call)),
+                span: span.clone(),
+            }),
+            Err(back) => {
+                let (lhs, stage) = *back;
+                Err(Box::new((
+                    lhs,
+                    Spanned {
+                        node: make(Box::new(stage)),
+                        span: span.clone(),
+                    },
+                )))
+            }
+        }
+    };
+    match node {
+        ExprKind::Call { callee, mut args } => {
+            args.insert(0, lhs);
+            Ok(Spanned {
+                node: ExprKind::Call { callee, args },
+                span,
+            })
+        }
+        ExprKind::Path(_) | ExprKind::Closure { .. } => Ok(Spanned {
+            node: ExprKind::Call {
+                callee: Box::new(Spanned {
+                    node,
+                    span: span.clone(),
+                }),
+                args: vec![lhs],
+            },
+            span,
+        }),
+        ExprKind::Field { base, name } if is_path_chain(&base) => Ok(Spanned {
+            node: ExprKind::Call {
+                callee: Box::new(Spanned {
+                    node: ExprKind::Field { base, name },
+                    span: span.clone(),
+                }),
+                args: vec![lhs],
+            },
+            span,
+        }),
+        ExprKind::Field { base, name } => wrap(pipe_into(lhs, *base), &move |b| ExprKind::Field {
+            base: b,
+            name: name.clone(),
+        }),
+        ExprKind::Try(inner) => wrap(pipe_into(lhs, *inner), &ExprKind::Try),
+        ExprKind::Index { base, index } if !is_path_chain(&base) => {
+            wrap(pipe_into(lhs, *base), &move |b| ExprKind::Index {
+                base: b,
+                index: index.clone(),
+            })
+        }
+        other => Err(Box::new((lhs, Spanned { node: other, span }))),
+    }
 }
 
 fn rewrite(e: &mut Expr, known: &Known, diags: &mut Vec<Diagnostic>) {
