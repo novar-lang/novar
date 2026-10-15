@@ -762,3 +762,50 @@ fn option_value(v: &Value) -> Option<&Value> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    /// The checker's table of std functions and the runtime's implementations are written apart
+    /// and must agree: a function the checker accepts has to exist when the program runs.
+    #[test]
+    fn every_std_function_the_checker_accepts_is_implemented() {
+        let interp = Interp::new(telvax_hir::hir::Program::default()).expect("an empty program");
+        // Called with no arguments, a function that exists complains about them or panics on the
+        // missing one; only a function the runtime does not know says it is not implemented.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let mut missing = Vec::new();
+        let mut checked = 0;
+        for path in telvax_hir::stdlib::function_paths() {
+            checked += 1;
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                call_function(&interp, path, Vec::new(), &Ty::Unknown)
+            }));
+            if let Ok(Err(e)) = outcome
+                && e.to_string().contains("is not implemented by the runtime")
+            {
+                missing.push(path);
+            }
+        }
+        std::panic::set_hook(previous);
+        assert!(checked > 50, "only {checked} std functions were listed");
+        assert!(
+            missing.is_empty(),
+            "the checker accepts these std functions but the runtime has no code for them: {missing:#?}"
+        );
+    }
+
+    #[test]
+    fn a_function_the_checker_does_not_know_is_reported_as_missing() {
+        // The test above relies on this message; keep it honest.
+        let interp = Interp::new(telvax_hir::hir::Program::default()).unwrap();
+        let e = call_function(&interp, "std::nowhere::nothing", Vec::new(), &Ty::Unknown)
+            .expect_err("no such function");
+        assert!(e.to_string().contains("is not implemented by the runtime"));
+        let e = call_function(&interp, "std::tensor::nothing", Vec::new(), &Ty::Unknown);
+        assert!(e.is_err());
+    }
+}
