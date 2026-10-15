@@ -1033,6 +1033,21 @@ impl<'a> Printer<'a> {
                             s.push_str(&inner);
                             s.push('}');
                         }
+                        FPart::Fmt { expr, repr, spec } => {
+                            s.push('{');
+                            let inner = self.expr(expr, 0);
+                            s.push_str(&inner);
+                            if *repr {
+                                s.push_str("!r");
+                            }
+                            if let Some(ExprKind::Lit(Lit::Str(spec))) =
+                                spec.as_ref().map(|e| &e.node)
+                            {
+                                s.push(':');
+                                s.push_str(spec);
+                            }
+                            s.push('}');
+                        }
                     }
                 }
                 s.push('"');
@@ -1250,7 +1265,7 @@ fn expr_assigns(e: &Expr, out: &mut HashSet<String>) {
         }
         ExprKind::FString(parts) => {
             for p in parts {
-                if let FPart::Expr(x) = p {
+                for x in p.exprs() {
                     expr_assigns(x, out);
                 }
             }

@@ -1429,7 +1429,7 @@ impl Checker {
             }
             K::FString(parts) => {
                 for p in parts {
-                    if let hir::FPart::Expr(x) = p {
+                    for x in p.exprs_mut() {
                         self.finalize_expr(x);
                     }
                 }
@@ -1886,6 +1886,18 @@ impl Checker {
                     .map(|p| match p {
                         ast::FPart::Text(t) => hir::FPart::Text(t.clone()),
                         ast::FPart::Expr(e) => hir::FPart::Expr(self.expr(e, None)),
+                        ast::FPart::Fmt { expr, repr, spec } => {
+                            let expr = self.expr(expr, None);
+                            let spec = spec.as_ref().map(|s| {
+                                let s = self.expr(s, Some(&Ty::str()));
+                                self.coerce(s, &Ty::str())
+                            });
+                            hir::FPart::Fmt {
+                                expr,
+                                repr: *repr,
+                                spec,
+                            }
+                        }
                     })
                     .collect();
                 Self::mk(hir::ExprKind::FString(parts), Ty::str(), span)
@@ -5194,6 +5206,18 @@ impl Checker {
                 },
             };
         }
+        // `str(x)` is `f"{x}"`, so a value is written the same way in both.
+        if let hir::ExprKind::Extern(path) = &callee.kind
+            && path.join("::") == "std::text::to_text"
+            && checked.len() == 1
+        {
+            let value = checked.remove(0);
+            return Self::mk(
+                hir::ExprKind::FString(vec![hir::FPart::Expr(value)]),
+                Ty::str(),
+                span,
+            );
+        }
         Self::mk(
             hir::ExprKind::Call {
                 callee: Box::new(callee),
@@ -5437,14 +5461,21 @@ impl Checker {
         let mut reported = !compatible;
         if !compatible {
             let (lt, rt) = (self.resolve(&l.ty), self.resolve(&r.ty));
-            self.diags.push(
-                Diagnostic::error(
-                    span.clone(),
-                    format!("mismatched operand types: `{lt}` and `{rt}`"),
-                )
-                .with_label(l.span.clone(), format!("this is `{lt}`"))
-                .with_label(r.span.clone(), format!("this is `{rt}`")),
-            );
+            let mut diag = Diagnostic::error(
+                span.clone(),
+                format!("mismatched operand types: `{lt}` and `{rt}`"),
+            )
+            .with_label(l.span.clone(), format!("this is `{lt}`"))
+            .with_label(r.span.clone(), format!("this is `{rt}`"));
+            // A text and something else: what was meant is most often a value in a text.
+            if (lt == Ty::str()) != (rt == Ty::str()) {
+                diag = diag.with_note(if op == Rem && lt == Ty::str() {
+                    "`%` does not format a text; write an f-string: `f\"{n} items\"`"
+                } else {
+                    "to put a value in a text, write an f-string, `f\"n={x}\"`, or turn it into text with `str(x)`"
+                });
+            }
+            self.diags.push(diag);
         }
         let is_num = |t: &Ty| {
             matches!(t, Ty::Prim(p) if p.is_numeric())

@@ -64,6 +64,26 @@
     "string": {
       "patterns": [
         {
+          "name": "string.quoted.double.raw.telvax",
+          "begin": "\\br\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.raw.telvax",
+          "begin": "\\br'",
+          "end": "'",
+          "patterns": [
+            {
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
           "name": "string.quoted.triple.telvax",
           "begin": "\"\"\"",
           "end": "\"\"\"",
@@ -97,6 +117,19 @@
     },
     "fstring": {
       "patterns": [
+        {
+          "name": "string.quoted.triple.interpolated.telvax",
+          "begin": "\\bf\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
         {
           "name": "string.quoted.double.interpolated.telvax",
           "begin": "\\bf\"",

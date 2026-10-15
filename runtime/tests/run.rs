@@ -965,7 +965,7 @@ fn nested(o: Op) -> Float:
         Ok(Value::Bool(false))
     ));
     assert_eq!(a.to_json(), json!({ "Rect": [1.0, 2.0] }));
-    assert_eq!(a.to_string(), "Shape.Rect(1, 2)");
+    assert_eq!(a.to_string(), "Shape.Rect(1.0, 2.0)");
     // JSON in, JSON out (this is how endpoints and workers talk).
     let area = interp
         .call_json("area", &[json!({ "Circle": 3.0 })])
@@ -1122,7 +1122,7 @@ fn reversed() -> List[Text]:
     );
     assert_eq!(
         run(src, "pick", vec![Value::Bool(true)]).to_string(),
-        "Some(yes)"
+        "Some(\"yes\")"
     );
     let ints = |xs: &[i64]| Value::vec(xs.iter().map(|x| Value::Int(*x)).collect());
     assert_eq!(int(run(src, "first_or", vec![ints(&[]), Value::Int(7)])), 7);
@@ -1555,7 +1555,7 @@ fn chain() -> Float:
     Point.new(1.0, 1.0).plus(Point.new(2.0, 3.0)).norm2()
 "#;
     assert_eq!(float(run(src, "run", vec![])), 100.0 + 1.0 + 3.0);
-    assert_eq!(text(run(src, "text", vec![])), "area 4");
+    assert_eq!(text(run(src, "text", vec![])), "area 4.0");
     assert_eq!(float(run(src, "chain", vec![])), 9.0 + 16.0);
 }
 
@@ -1644,9 +1644,9 @@ fn visits() -> List[Text]:
     );
     assert_eq!(
         run(src, "labels", vec![run(src, "mixed", vec![])]).to_json(),
-        json!(["circle with area 3", "a square!"])
+        json!(["circle with area 3.0", "a square!"])
     );
-    assert_eq!(text(run(src, "direct", vec![])), "circle with area 12");
+    assert_eq!(text(run(src, "direct", vec![])), "circle with area 12.0");
     assert_eq!(
         run(src, "visits", vec![]).to_json(),
         json!(["first time, ana", "hello, ana", "first time, bo"])
@@ -2077,7 +2077,10 @@ fn f() -> Text:
     let e = [1 for _ in xs]
     f"{a} {b} {c} {d} {e.len()}"
 "#;
-    assert_eq!(shown(src), "[6, 8, 10] [0, 1, 4, 9] [0:1, 1:2] [2, 4] 5");
+    assert_eq!(
+        shown(src),
+        "[6, 8, 10] [0, 1, 4, 9] [\"0:1\", \"1:2\"] [2, 4] 5"
+    );
 }
 
 #[test]
@@ -2087,7 +2090,10 @@ fn f() -> Text:
     let z = 0
     f"{2 ** 10} {2 ** 3 ** 2} {-2 ** 2} {2.0 ** -1} {7 // 2} {-7 // 2} {7 // -2} {7.5 // 2} {1 < 2 < 3} {3 < 2 < 5} {1 < 2 <= 2} {z < 1 < 2}"
 "#;
-    assert_eq!(shown(src), "1024 512 -4 0.5 3 -4 -4 3 True False True True");
+    assert_eq!(
+        shown(src),
+        "1024 512 -4 0.5 3 -4 -4 3.0 True False True True"
+    );
     for (body, message) in [
         ("2 ** -1", "negative exponent"),
         ("1 // z", "division by zero"),
@@ -2169,7 +2175,7 @@ fn f() -> Text:
 "#;
     assert_eq!(
         shown(src),
-        "3 2.5 9 2 2 a 3 -3 4 3.5 12! 4 2 3 3 [0, 1, 2] [2, 3, 4]"
+        "3 2.5 9 2 2.0 a 3 -3 4 3.5 12! 4.0 2.0 3.0 3.0 [0, 1, 2] [2, 3, 4]"
     );
     // A name of the program wins over the short names.
     let src = r#"
@@ -2471,7 +2477,7 @@ fn f() -> Text:
 "#;
     assert_eq!(
         shown(src),
-        "rect 3x2|circle 1.5|empty|rect 1x1|49|Shape.Rect(1, 2)"
+        "rect 3.0x2.0|circle 1.5|empty|rect 1.0x1.0|49|Shape.Rect(1.0, 2.0)"
     );
 }
 
@@ -2560,5 +2566,80 @@ fn f() -> u64:
         e.message
             .contains("a Map key that is an enum cannot have values"),
         "{e}"
+    );
+}
+
+#[test]
+fn values_are_shown_the_same_way_everywhere() {
+    let src = r#"
+type Reading:
+    name: Text
+    value: f32
+
+enum Mark:
+    Level(f32)
+    Label(Text)
+
+fn f() -> Text:
+    let a: f32 = 0.1
+    let b: f64 = 2.0
+    let xs: List[f32] = [0.1, 0.25]
+    let o: Option[f32] = Some(0.3)
+    let r = Reading(name: "t", value: 0.1)
+    let m = {"k": a}
+    let marks = [Mark.Level(0.1), Mark.Label("x")]
+    f"{a} {b} {xs} {o} {r} {m} {marks}|{str(a)} {str(xs)}|{[1.0, 2.5]} {("a", 1.0)} {["a, b", "c"]}|{1.0e16} {1.0e-5} {2.0 / 3.0}"
+"#;
+    assert_eq!(
+        shown(src),
+        "0.1 2.0 [0.1, 0.25] Some(0.3) Reading(name=\"t\", value=0.1) {\"k\": 0.1} [Mark.Level(0.1), Mark.Label(\"x\")]\
+         |0.1 [0.1, 0.25]|[1.0, 2.5] (\"a\", 1.0) [\"a, b\", \"c\"]|1e+16 1e-05 0.6666666666666666"
+    );
+}
+
+#[test]
+fn f_string_formats_in_full() {
+    let src = r#"
+fn f() -> Text:
+    let w = 6
+    let n = 42
+    let s = "hi"
+    let x = 3.14159
+    let a = f"{n:>{w}}|{n:<{w}}|{n:^{w}}|{s:>{w}}|{x:{w}.2f}|"
+    let b = f"{n:+d} {-n:+d} {n: d} {n:#x} {n:#b} {n:#o} {255:08b} {n:+08d} {-n:=8d}|"
+    let c = f"{12345.678:e} {12345.678:.2e} {0.00012:g} {1234567.0:g} {0.1:.3} {3.0:.3} {100000000.0:g}"
+    let d = f"{1234567.891:,.2f} {1234567:_} {255:#_x} {255:_b} {65:c} {1.5:%} {0.256:.1%}"
+    let e = f"{s!r} {s!s} {x!r} {s!r:>6}|{s=} {n=} {x = } {s=!s} {n=:>5} {n:5} {s:5}|{x:10}|"
+    f"{a}\n{b}\n{c}\n{d}\n{e}"
+"#;
+    assert_eq!(
+        shown(src),
+        "    42|42    |  42  |    hi|  3.14|\n\
+         +42 -42  42 0x2a 0b101010 0o52 11111111 +0000042 -     42|\n\
+         1.234568e+04 1.23e+04 0.00012 1.23457e+06 0.1 3.0 1e+08\n\
+         1,234,567.89 1_234_567 0xff 1111_1111 A 150.000000% 25.6%\n\
+         \"hi\" hi 3.14159   \"hi\"|s=\"hi\" n=42 x = 3.14159 s=hi n=   42    42 hi   |   3.14159|"
+    );
+    for spec in ["q", ".f", "d", "x"] {
+        let src = format!("fn f() -> Text:\n    let s = \"a\"\n    f\"{{s:{spec}}}\"\n");
+        assert!(load(&src).call("f", vec![]).is_err(), "{spec}");
+    }
+}
+
+#[test]
+fn braces_raw_text_and_lines_in_f_strings() {
+    let src = r#"
+fn f() -> Text:
+    let n = 3
+    let name = "bo"
+    let s = f"""Dear {name},
+  you have {n:>3} items {{kept}}
+  total: {n * 2:05d}"""
+    let pattern = r"^\d{3}-\d{4}$"
+    f"{{x}} {{{n}}} }}|{s}|{r"a\nb"}|{pattern} {pattern.len()}"
+"#;
+    assert_eq!(
+        shown(src),
+        "{x} {3} }|Dear bo,\n  you have   3 items {kept}\n  total: 00006|a\\nb|^\\d{3}-\\d{4}$ 13"
     );
 }

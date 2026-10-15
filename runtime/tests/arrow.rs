@@ -297,7 +297,7 @@ fn csv_ingestion_columns_and_rows() {
     );
     assert_eq!(
         i.call("second", vec![t.clone()]).unwrap().to_string(),
-        "Row(id=2, score=2.5, name=bob, ok=False)"
+        "Row(id=2, score=2.5, name=\"bob\", ok=False)"
     );
     assert_eq!(float(i.call("total", vec![t.clone()]).unwrap()), 7.0);
     assert_eq!(

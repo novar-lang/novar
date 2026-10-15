@@ -86,5 +86,5 @@ fn pipes_compute_what_the_equivalent_calls_do() {
 #[test]
 fn a_question_mark_after_a_stage_returns_the_error() {
     assert_eq!(run(SRC, "good").to_string(), "Ok(18)");
-    assert_eq!(run(SRC, "bad").to_string(), "Err(bad)");
+    assert_eq!(run(SRC, "bad").to_string(), "Err(\"bad\")");
 }

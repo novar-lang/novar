@@ -514,81 +514,29 @@ fn tensor_json(shape: &[usize], data: &[f64], single: bool) -> Json {
     }
 }
 
+impl Value {
+    /// The text of the values that are not data: tensors, tables, functions, services.
+    pub(crate) fn fallback_text(&self) -> String {
+        match self {
+            Value::Tensor(t) => format!("Tensor{:?}", t.shape),
+            Value::Table(t) => format!("Table[{} rows]", t.rows()),
+            Value::Status(code, msg) => format!("{code}: {msg}"),
+            Value::Closure(_) => "<function>".to_string(),
+            Value::Func(name) => format!("<fn {name}>"),
+            Value::Native(_) => "<object>".to_string(),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Unit => f.write_str("None"),
-            Value::Bool(b) => f.write_str(if *b { "True" } else { "False" }),
-            Value::Int(i) => write!(f, "{i}"),
-            Value::Float(x) => write!(f, "{x}"),
-            Value::Str(s) => f.write_str(s),
-            Value::Vec(items) => {
-                f.write_str("[")?;
-                for (i, v) in items.snapshot().iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{v}")?;
-                }
-                f.write_str("]")
-            }
-            Value::Struct(s) => {
-                write!(f, "{}(", s.name)?;
-                for (i, (k, v)) in s.fields.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{k}={v}")?;
-                }
-                f.write_str(")")
-            }
-            Value::Enum(e) if e.name == "Option" => match e.fields.first() {
-                Some(v) => write!(f, "Some({v})"),
-                None => f.write_str("None"),
-            },
-            Value::Tuple(items) => {
-                f.write_str("(")?;
-                for (i, v) in items.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{v}")?;
-                }
-                f.write_str(")")
-            }
-            Value::Map(m) => {
-                f.write_str("{")?;
-                for (i, (k, v)) in m.entries().iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    write!(f, "{}: {v}", k.to_value())?;
-                }
-                f.write_str("}")
-            }
-            Value::Enum(e) => {
-                write!(f, "{}.{}", e.name, e.variant)?;
-                if !e.fields.is_empty() {
-                    f.write_str("(")?;
-                    for (i, v) in e.fields.iter().enumerate() {
-                        if i > 0 {
-                            f.write_str(", ")?;
-                        }
-                        write!(f, "{v}")?;
-                    }
-                    f.write_str(")")?;
-                }
-                Ok(())
-            }
-            Value::Tensor(t) => write!(f, "Tensor{:?}", t.shape),
-            Value::Table(t) => write!(f, "Table[{} rows]", t.rows()),
-            Value::Ok(v) => write!(f, "Ok({v})"),
-            Value::Err(v) => write!(f, "Err({v})"),
-            Value::Status(code, msg) => write!(f, "{code}: {msg}"),
-            Value::Closure(_) => f.write_str("<function>"),
-            Value::Func(name) => write!(f, "<fn {name}>"),
-            Value::Native(_) => f.write_str("<object>"),
-        }
+        f.write_str(&crate::show::show(
+            self,
+            None,
+            &crate::show::TypeEnv::default(),
+            false,
+        ))
     }
 }
 

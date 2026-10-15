@@ -805,6 +805,20 @@ fn fstring_parts(body: &str, offset: usize, heads: &Heads) -> Result<Vec<FPart>,
                 text.push_str(&unescape(&body[i..i + 1 + next.len_utf8()]));
                 i += 1 + next.len_utf8();
             }
+            // `{{` and `}}` are the braces themselves.
+            b'{' if bytes.get(i + 1) == Some(&b'{') => {
+                text.push('{');
+                i += 2;
+            }
+            b'}' if bytes.get(i + 1) == Some(&b'}') => {
+                text.push('}');
+                i += 2;
+            }
+            b'}' => {
+                return Err(err(i, i + 1, "a `}` alone in an f-string").with_note(
+                    "write `}}` for a brace in the text, or `{...}` around an expression",
+                ));
+            }
             b'{' => {
                 let start = i + 1;
                 let mut depth = 1;
@@ -818,40 +832,66 @@ fn fstring_parts(body: &str, offset: usize, heads: &Heads) -> Result<Vec<FPart>,
                     j += 1;
                 }
                 if depth != 0 {
-                    return Err(err(i, bytes.len(), "unclosed `{` in f-string"));
+                    return Err(err(i, bytes.len(), "unclosed `{` in f-string")
+                        .with_note("write `{{` for a brace in the text"));
                 }
                 if !text.is_empty() {
                     parts.push(FPart::Text(std::mem::take(&mut text)));
                 }
                 let inner = &body[start..j - 1];
+                if inner.trim().is_empty() {
+                    return Err(err(i, j, "an f-string `{}` needs an expression inside")
+                        .with_note("write `{{}}` for the two braces themselves"));
+                }
                 let (code, spec) = split_format_spec(inner);
-                // `{x=}` shows the source text, then the value.
+                // `{x!r}` shows a `Text` in quotes; `{x!s}` is the plain form.
                 let trimmed = code.trim_end();
-                let debug = trimmed.len() > 1
-                    && trimmed.ends_with('=')
-                    && !trimmed[..trimmed.len() - 1].ends_with(['=', '!', '<', '>']);
+                let (code, conversion) = if let Some(rest) = trimmed.strip_suffix("!r") {
+                    (rest, Some(true))
+                } else if let Some(rest) = trimmed.strip_suffix("!s") {
+                    (rest, Some(false))
+                } else {
+                    (code, None)
+                };
+                // `{x=}` shows the source text, then the value (in quotes when it is a `Text`,
+                // unless a conversion or a format says otherwise).
+                let before_equals = code.trim_end();
+                let debug = before_equals.len() > 1
+                    && before_equals.ends_with('=')
+                    && !before_equals[..before_equals.len() - 1].ends_with(['=', '!', '<', '>']);
                 let expr_src = if debug {
-                    &trimmed[..trimmed.len() - 1]
+                    &before_equals[..before_equals.len() - 1]
                 } else {
                     code
                 };
                 if debug {
-                    parts.push(FPart::Text(format!("{}=", expr_src.trim_start())));
+                    // The text as written, up to and including the `=` and the spaces after it.
+                    parts.push(FPart::Text(inner[..code.len()].to_string()));
                 }
+                let repr = conversion.unwrap_or(debug && spec.is_none());
                 match parse_expr_at(expr_src, offset + start, heads) {
                     (Some(e), errs) if errs.is_empty() => {
-                        let e = match spec {
+                        let spec = match spec {
                             Some(spec) => {
-                                let at = e.span.clone();
-                                let spec = Spanned {
-                                    node: ExprKind::Lit(Lit::Str(unescape(spec))),
-                                    span: at.clone(),
-                                };
-                                std_call(&["text", "format"], vec![e, spec], at)
+                                let spec_start = start + (inner.len() - spec.len());
+                                Some(format_spec_expr(
+                                    spec,
+                                    offset + spec_start,
+                                    e.span.clone(),
+                                    heads,
+                                )?)
                             }
-                            None => e,
+                            None => None,
                         };
-                        parts.push(FPart::Expr(e));
+                        parts.push(if repr || spec.is_some() {
+                            FPart::Fmt {
+                                expr: e,
+                                repr,
+                                spec,
+                            }
+                        } else {
+                            FPart::Expr(e)
+                        });
                     }
                     (_, mut errs) => {
                         return Err(errs.drain(..).next().unwrap_or_else(|| {
@@ -872,6 +912,26 @@ fn fstring_parts(body: &str, offset: usize, heads: &Heads) -> Result<Vec<FPart>,
         parts.push(FPart::Text(text));
     }
     Ok(parts)
+}
+
+/// The format after `:` as a text: plain, or an f-string when it holds `{...}` (`>{width}`).
+fn format_spec_expr(
+    spec: &str,
+    offset: usize,
+    at: Span,
+    heads: &Heads,
+) -> Result<Expr, Diagnostic> {
+    if !spec.contains('{') {
+        return Ok(Spanned {
+            node: ExprKind::Lit(Lit::Str(unescape(spec))),
+            span: at,
+        });
+    }
+    let parts = fstring_parts(spec, offset, heads)?;
+    Ok(Spanned {
+        node: ExprKind::FString(parts),
+        span: at,
+    })
 }
 
 /// Splits the inside of an f-string `{...}` at the first `:` that is not inside brackets or a
@@ -1319,14 +1379,17 @@ where
             .map(|s| ExprKind::Lit(Lit::Str(unescape(&s[1..s.len() - 1]))));
         let triple = select! { Token::TStr(s) => s }
             .map(|s| ExprKind::Lit(Lit::Str(unescape(&s[3..s.len() - 3]))));
+        // `r"a\nb"` keeps its backslashes.
+        let raw = select! { Token::RStr(s) => s }
+            .map(|s| ExprKind::Lit(Lit::Str(s[2..s.len() - 1].to_string())));
         let boolean = select! { Token::True => true, Token::False => false }
             .map(|b| ExprKind::Lit(Lit::Bool(b)));
         let fstring_heads = heads.clone();
-        let fstring = select! { Token::FStr(s) => s }
-            .map_with(|s, e| (s, rng(e.span()).start))
-            .try_map(move |(s, start), _| {
-                // Strip `f"` and the closing quote.
-                fstring_parts(&s[2..s.len() - 1], start + 2, &fstring_heads)
+        let fstring = select! { Token::FStr(s) => (s, 2, 1), Token::FTStr(s) => (s, 4, 3) }
+            .map_with(|(s, open, close), e| (s, open, close, rng(e.span()).start))
+            .try_map(move |(s, open, close, start), _| {
+                // Strip `f"` (or `f"""`) and the closing quote(s).
+                fstring_parts(&s[open..s.len() - close], start + open, &fstring_heads)
                     .map(ExprKind::FString)
                     .map_err(|e| Rich::custom(SimpleSpan::from(e.span), e.message))
             });
@@ -1427,6 +1490,7 @@ where
             float,
             int,
             triple,
+            raw,
             string,
             fstring,
             boolean,

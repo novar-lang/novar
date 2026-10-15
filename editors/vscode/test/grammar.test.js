@@ -116,6 +116,16 @@ test("alternatives and list patterns in a case", async () => {
   has(t, "if", "keyword.control");
 });
 
+test("f-strings over lines and raw text", async () => {
+  const t = await tokenize('let s = f"""a {n}\n  b {{c}}"""\nlet r = r"x\\n{y}"');
+  has(t, 'f"""', "string.quoted.triple.interpolated");
+  has(t, "n", "meta.interpolation");
+  has(t, 'r"', "string.quoted.double.raw");
+  const raw = t.find(([x]) => x.includes("{y}"));
+  assert.ok(raw && raw[1].some((sc) => sc.startsWith("string.quoted.double.raw")), "raw text is not code");
+  assert.ok(!raw[1].some((sc) => sc.startsWith("meta.interpolation")), "no interpolation in raw text");
+});
+
 test("numbers, constants, comments and control flow", async () => {
   const t = await tokenize("for i in range(10_000):\n    if x >= 2.5e-3 and ok or not done:\n        return True  # done");
   has(t, "for", "keyword.control");

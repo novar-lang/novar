@@ -348,6 +348,32 @@ pub enum ForIter {
 pub enum FPart {
     Text(String),
     Expr(Expr),
+    /// `{x:>8}`, `{x!r}` or `{x=}`: the value with a format, or as `repr` (a `Text` in quotes).
+    /// The format is itself text and may hold `{...}` (`{n:>{width}}`).
+    Fmt {
+        expr: Expr,
+        repr: bool,
+        spec: Option<Expr>,
+    },
+}
+
+impl FPart {
+    /// The expressions this part holds.
+    pub fn exprs(&self) -> Vec<&Expr> {
+        match self {
+            FPart::Text(_) => Vec::new(),
+            FPart::Expr(e) => vec![e],
+            FPart::Fmt { expr, spec, .. } => std::iter::once(expr).chain(spec.as_ref()).collect(),
+        }
+    }
+
+    pub fn exprs_mut(&mut self) -> Vec<&mut Expr> {
+        match self {
+            FPart::Text(_) => Vec::new(),
+            FPart::Expr(e) => vec![e],
+            FPart::Fmt { expr, spec, .. } => std::iter::once(expr).chain(spec.as_mut()).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

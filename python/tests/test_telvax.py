@@ -91,7 +91,7 @@ def test_scalars_strings_and_unit(prog):
 def test_structs_are_dicts(prog):
     assert prog.call("scale", {"x": 1.5, "y": -2.0}, 2.0) == {"x": 3.0, "y": -4.0}
     order = {"id": 7, "tags": ["a", "b"], "at": {"x": 1.0, "y": 2.0}}
-    assert prog.call("describe", order) == "order 7 at (1, 2) with 2 tags"
+    assert prog.call("describe", order) == "order 7 at (1.0, 2.0) with 2 tags"
 
 
 def test_type_errors_are_reported(prog):

@@ -86,6 +86,12 @@ pub enum Token<'src> {
     /// `"""..."""`: a string that may span lines.
     #[regex(r#""""([^"\\]|\\.|"[^"]|""[^"])*""""#)]
     TStr(&'src str),
+    /// `r"..."`: a text whose backslashes are kept as written.
+    #[regex(r#"r"([^"\\]|\\.)*"|r'([^'\\]|\\.)*'"#)]
+    RStr(&'src str),
+    /// `f"""..."""`: an f-string that may span lines.
+    #[regex(r#"f"""([^"\\{]|\\.|"[^"]|""[^"]|\{([^{}]|\{[^{}]*\})*\}|\{)*""""#)]
+    FTStr(&'src str),
     /// `f"..."`; interpolation is split by the parser. A `{...}` part may hold quotes of its own
     /// (`f"{m["a"]}"`), and a lone `{` is kept so the parser can say it is not closed.
     #[regex(
@@ -206,7 +212,7 @@ impl std::fmt::Display for Token<'_> {
             Not => "not",
             True => "True",
             False => "False",
-            Ident(s) | Int(s) | Float(s) | Str(s) | TStr(s) | FStr(s) => s,
+            Ident(s) | Int(s) | Float(s) | Str(s) | TStr(s) | RStr(s) | FStr(s) | FTStr(s) => s,
             Pipe => "|>",
             Ellipsis => "...",
             StarStar => "**",
@@ -635,5 +641,25 @@ mod tests {
         assert_eq!(flat(r#"f"{x:.2f} and {y}" + z"#).len(), 3);
         // A brace that is never closed is still one token, so the parser can say so.
         assert_eq!(flat(r#"f"{x""#), [FStr(r#"f"{x""#)]);
+    }
+
+    #[test]
+    fn f_strings_over_lines_and_raw_text() {
+        let src = "f\"\"\"a {x}\n b {m[\"k\"]} {{c}}\"\"\"";
+        assert_eq!(flat(src), [FTStr(src)]);
+        // A plain f-string next to one that spans lines.
+        assert_eq!(flat("f\"a\" f\"\"\"b\"\"\"").len(), 2);
+        assert_eq!(
+            flat(r#"r"a\nb" r'c\d'"#),
+            [RStr(r#"r"a\nb""#), RStr(r"r'c\d'")]
+        );
+        // `r` alone is still a name.
+        assert_eq!(flat("r + r2"), [Ident("r"), Plus, Ident("r2")]);
+        assert_eq!(flat(r#"r "x""#), [Ident("r"), Str(r#""x""#)]);
+        // A line break inside one does not start a block.
+        assert_eq!(
+            kinds("let s = f\"\"\"a\n  {x}\"\"\"\n"),
+            [Let, Ident("s"), Eq, FTStr("f\"\"\"a\n  {x}\"\"\""), Newline]
+        );
     }
 }

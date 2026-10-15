@@ -867,26 +867,103 @@ fn map_literals() {
 }
 
 #[test]
-fn fstring_formats_and_debug_form() {
-    let ExprKind::FString(parts) =
-        ok_expr(r#"f"{x:.2f}|{y=}|{z=:>5}|{a == b}|{m["k"]}|{xs[1:2]}""#)
-    else {
+fn fstring_formats_conversions_and_debug_form() {
+    let ExprKind::FString(parts) = ok_expr(
+        r#"f"{x:.2f}|{y=}|{z=:>5}|{a == b}|{m["k"]}|{xs[1:2]}|{s!r}|{s!s}|{n:>{w}}|{q = }""#,
+    ) else {
         panic!()
     };
-    let FPart::Expr(first) = &parts[0] else {
-        panic!()
+    // A format keeps the value and the format apart; the format is a text.
+    let FPart::Fmt { expr, repr, spec } = &parts[0] else {
+        panic!("{:?}", parts[0])
     };
-    assert_eq!(show(first), r#"std.text.format(x, Lit(Str(".2f")))"#);
+    assert_eq!((show(expr).as_str(), *repr), ("x", false));
+    assert!(matches!(spec, Some(Spanned { node: ExprKind::Lit(Lit::Str(s)), .. }) if s == ".2f"));
+    // `{y=}` is the text `y=` and the value in quotes (`repr`); with a format it is not.
     assert!(matches!(&parts[2], FPart::Text(t) if t == "y="));
-    assert!(matches!(&parts[3], FPart::Expr(_)));
+    assert!(matches!(
+        &parts[3],
+        FPart::Fmt {
+            repr: true,
+            spec: None,
+            ..
+        }
+    ));
     assert!(matches!(&parts[5], FPart::Text(t) if t == "z="));
+    assert!(matches!(
+        &parts[6],
+        FPart::Fmt {
+            repr: false,
+            spec: Some(_),
+            ..
+        }
+    ));
     // `==` is a comparison, not the `=` form.
     assert!(
         parts
             .iter()
             .all(|p| !matches!(p, FPart::Text(t) if t == "a =="))
     );
-    assert_eq!(parts.len(), 13);
+    assert!(
+        parts
+            .iter()
+            .any(|p| matches!(p, FPart::Fmt { repr: true, spec: None, expr } if show(expr) == "s"))
+    );
+    assert!(
+        parts
+            .iter()
+            .any(|p| matches!(p, FPart::Expr(e) if show(e) == "s"))
+    );
+    // The text of `{q = }` keeps its spaces, and a format can hold an expression of its own.
+    assert!(
+        parts
+            .iter()
+            .any(|p| matches!(p, FPart::Text(t) if t == "q = "))
+    );
+    assert!(parts.iter().any(|p| matches!(
+        p,
+        FPart::Fmt {
+            spec: Some(Spanned {
+                node: ExprKind::FString(_),
+                ..
+            }),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn braces_are_written_twice() {
+    let ExprKind::FString(parts) = ok_expr(r#"f"a {{b}} {x} }}""#) else {
+        panic!()
+    };
+    assert!(matches!(&parts[0], FPart::Text(t) if t == "a {b} "));
+    assert!(matches!(&parts[2], FPart::Text(t) if t == " }"));
+    let message = |src: &str| {
+        let (_, errors) = parse_expr(src);
+        errors
+            .into_iter()
+            .next()
+            .map(|e| e.message)
+            .unwrap_or_default()
+    };
+    assert!(message(r#"f"a } b""#).contains("a `}` alone in an f-string"));
+    assert!(message(r#"f"a {} b""#).contains("needs an expression inside"));
+    assert!(message(r#"f"a {x""#).contains("unclosed `{`"));
+}
+
+#[test]
+fn f_strings_over_lines_and_raw_text() {
+    let ExprKind::FString(parts) = ok_expr("f\"\"\"a {x}\n  b {{y}}\"\"\"") else {
+        panic!()
+    };
+    assert!(matches!(&parts[0], FPart::Text(t) if t == "a "));
+    assert!(matches!(&parts[2], FPart::Text(t) if t == "\n  b {y}"));
+    assert!(
+        matches!(ok_expr(r#"r"a\nb \d{3}""#), ExprKind::Lit(Lit::Str(s)) if s == r"a\nb \d{3}")
+    );
+    // `r` is still a name when no quote follows it.
+    assert!(matches!(ok_expr("r + 1"), ExprKind::Binary { .. }));
 }
 
 #[test]

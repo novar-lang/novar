@@ -9,6 +9,7 @@ pub mod gpu;
 mod interp;
 #[cfg(feature = "live")]
 mod services;
+mod show;
 mod std_impl;
 mod table;
 mod tensor;

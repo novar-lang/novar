@@ -234,7 +234,11 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             Ok(Value::str(want_str(&args[0])?.repeat(n as usize)))
         }
         "std::text::to_text" => Ok(Value::str(args[0].to_string())),
-        "std::text::format" => Ok(Value::str(format_value(&args[0], &want_str(&args[1])?)?)),
+        "std::text::format" => Ok(Value::str(format_value(
+            &args[0],
+            &args[0].to_string(),
+            &want_str(&args[1])?,
+        )?)),
         "std::math::pow" => math_pow(&args[0], &args[1]),
         "std::math::floor_div" => math_floor_div(&args[0], &args[1]),
         "std::math::abs" => match &args[0] {
@@ -576,23 +580,39 @@ fn math_floor_div(a: &Value, b: &Value) -> Res {
     }
 }
 
-/// `{value:spec}` in an f-string: `[[fill]align][0][width][,][.precision][type]`, with the
-/// alignments `<`, `>` and `^` and the types `f`, `d`, `s`, `x`, `X`, `b` and `%`.
-fn format_value(v: &Value, spec: &str) -> Result<String, RuntimeError> {
+/// `{value:spec}` in an f-string: `[[fill]align][sign][#][0][width][grouping][.precision][type]`.
+/// The alignments are `<`, `>`, `^` and `=` (padding between the sign and the digits), the signs
+/// `+`, `-` and a space, the groupings `,` and `_`, and the types `s`, `d`, `f`, `F`, `e`, `E`,
+/// `g`, `G`, `x`, `X`, `o`, `b`, `c` and `%`. `shown` is how the value reads without a type.
+pub(crate) fn format_value(v: &Value, shown: &str, spec: &str) -> Result<String, RuntimeError> {
     let bad = || {
         RuntimeError::new(format!(
-            "`{spec}` is not a format; write for example `.2f`, `>8` or `05d`"
+            "`{spec}` is not a format; write for example `.2f`, `>8`, `05d`, `+.1e` or `,`"
         ))
     };
     let chars: Vec<char> = spec.chars().collect();
     let mut i = 0;
     let (mut fill, mut align) = (' ', None);
-    if chars.len() >= 2 && matches!(chars[1], '<' | '>' | '^') {
+    if chars.len() >= 2 && matches!(chars[1], '<' | '>' | '^' | '=') {
         (fill, align) = (chars[0], Some(chars[1]));
         i = 2;
-    } else if chars.first().is_some_and(|c| matches!(c, '<' | '>' | '^')) {
+    } else if chars
+        .first()
+        .is_some_and(|c| matches!(c, '<' | '>' | '^' | '='))
+    {
         align = Some(chars[0]);
         i = 1;
+    }
+    let sign = match chars.get(i) {
+        Some(&c @ ('+' | '-' | ' ')) => {
+            i += 1;
+            c
+        }
+        _ => '-',
+    };
+    let alternate = chars.get(i) == Some(&'#');
+    if alternate {
+        i += 1;
     }
     let zero = chars.get(i) == Some(&'0');
     if zero {
@@ -606,10 +626,13 @@ fn format_value(v: &Value, spec: &str) -> Result<String, RuntimeError> {
         chars[start..*i].iter().collect::<String>().parse().ok()
     };
     let width = number(&mut i).unwrap_or(0);
-    let group = chars.get(i) == Some(&',');
-    if group {
-        i += 1;
-    }
+    let group = match chars.get(i) {
+        Some(&c @ (',' | '_')) => {
+            i += 1;
+            Some(c)
+        }
+        _ => None,
+    };
     let precision = if chars.get(i) == Some(&'.') {
         i += 1;
         Some(number(&mut i).ok_or_else(bad)?)
@@ -620,64 +643,191 @@ fn format_value(v: &Value, spec: &str) -> Result<String, RuntimeError> {
     if i + usize::from(kind.is_some()) != chars.len() {
         return Err(bad());
     }
-    let numeric = matches!(v, Value::Int(_) | Value::Float(_));
-    let mut body = match (kind, v) {
-        (Some('f'), v) => format!("{:.*}", precision.unwrap_or(6), want_f64(v)?),
-        (Some('%'), v) => format!("{:.*}%", precision.unwrap_or(0), want_f64(v)? * 100.0),
-        (Some('d'), Value::Int(i)) => i.to_string(),
-        (Some('x'), Value::Int(i)) => format!("{i:x}"),
-        (Some('X'), Value::Int(i)) => format!("{i:X}"),
-        (Some('b'), Value::Int(i)) => format!("{i:b}"),
-        (Some('d' | 'x' | 'X' | 'b'), _) => {
-            return err(format!("`{spec}` needs an Int, found {}", v.type_name()));
+    let needs_int = |what: &str| RuntimeError::new(format!("`{spec}` needs an Int, found {what}",));
+    // The digits of the number (without its sign), and whether it is negative.
+    let (mut digits, negative, numeric) = match (kind, v) {
+        (Some('x' | 'X' | 'o' | 'b' | 'd' | 'c'), Value::Int(n)) => {
+            let magnitude = n.unsigned_abs();
+            let text = match kind {
+                Some('x') => format!("{magnitude:x}"),
+                Some('X') => format!("{magnitude:X}"),
+                Some('o') => format!("{magnitude:o}"),
+                Some('b') => format!("{magnitude:b}"),
+                Some('c') => {
+                    let c = u32::try_from(*n)
+                        .ok()
+                        .and_then(char::from_u32)
+                        .ok_or_else(|| RuntimeError::new(format!("{n} is not a character")))?;
+                    return Ok(pad(&c.to_string(), width, fill, align.unwrap_or('<')));
+                }
+                _ => magnitude.to_string(),
+            };
+            (text, *n < 0, true)
+        }
+        (Some('x' | 'X' | 'o' | 'b' | 'd' | 'c'), other) => {
+            return Err(needs_int(other.type_name()));
+        }
+        (Some(t @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G' | '%')), v) => {
+            let x = want_f64(v)?;
+            let x = if t == '%' { x * 100.0 } else { x };
+            let text = if !x.is_finite() {
+                if x.is_nan() { "nan" } else { "inf" }.to_string()
+            } else {
+                match t {
+                    'f' | 'F' | '%' => format!("{:.*}", precision.unwrap_or(6), x.abs()),
+                    'e' | 'E' => exponent_form(x.abs(), precision.unwrap_or(6)),
+                    _ => general_form(x.abs(), precision.unwrap_or(6), false),
+                }
+            };
+            let text = match t {
+                'F' | 'E' | 'G' => text.to_uppercase(),
+                '%' => format!("{text}%"),
+                _ => text,
+            };
+            (text, x.is_sign_negative() && !x.is_nan(), true)
         }
         (None | Some('s'), Value::Float(x)) if precision.is_some() => {
-            format!("{:.*}", precision.unwrap_or(0), x)
+            let mut text = general_form(x.abs(), precision.unwrap_or(6).max(1), true);
+            if !x.is_finite() {
+                text = if x.is_nan() { "nan" } else { "inf" }.to_string();
+            }
+            (text, x.is_sign_negative() && !x.is_nan(), true)
         }
         (None | Some('s'), Value::Str(s)) if precision.is_some() => {
-            s.chars().take(precision.unwrap_or(0)).collect()
+            let text: String = s.chars().take(precision.unwrap_or(0)).collect();
+            return Ok(pad(&text, width, fill, align.unwrap_or('<')));
         }
-        (None | Some('s'), v) => v.to_string(),
+        (None | Some('s'), Value::Int(n)) => (n.unsigned_abs().to_string(), *n < 0, true),
+        (None | Some('s'), Value::Float(x)) => {
+            let text = shown.strip_prefix('-').unwrap_or(shown).to_string();
+            (text, x.is_sign_negative() && !x.is_nan(), true)
+        }
+        (None | Some('s'), _) => {
+            return Ok(pad(shown, width, fill, align.unwrap_or('<')));
+        }
         _ => return Err(bad()),
     };
-    if group && numeric {
-        let (sign, rest) = body
-            .strip_prefix('-')
-            .map_or(("", body.as_str()), |r| ("-", r));
-        let (whole, tail) = rest.split_once('.').map_or((rest, ""), |(w, t)| (w, t));
-        let mut out = String::new();
-        for (n, c) in whole.chars().enumerate() {
-            if n > 0 && (whole.len() - n) % 3 == 0 {
-                out.push(',');
-            }
-            out.push(c);
+    if numeric && let Some(sep) = group {
+        digits = group_digits(&digits, sep, matches!(kind, Some('x' | 'X' | 'o' | 'b')));
+    }
+    let prefix = match (alternate, kind) {
+        (true, Some('x')) => "0x",
+        (true, Some('X')) => "0X",
+        (true, Some('o')) => "0o",
+        (true, Some('b')) => "0b",
+        _ => "",
+    };
+    let sign_text = if negative {
+        "-"
+    } else {
+        match sign {
+            '+' => "+",
+            ' ' => " ",
+            _ => "",
         }
-        body = format!(
-            "{sign}{out}{}{tail}",
-            if tail.is_empty() && !rest.contains('.') {
-                ""
-            } else {
-                "."
-            }
+    };
+    let head = format!("{sign_text}{prefix}");
+    let len = head.chars().count() + digits.chars().count();
+    if len >= width {
+        return Ok(format!("{head}{digits}"));
+    }
+    let gap = width - len;
+    // `0` pads with zeros between the sign and the digits, unless an alignment was asked for.
+    let (fill, align) = match (zero, align) {
+        (true, None) => ('0', '='),
+        (_, Some(a)) => (fill, a),
+        (_, None) => (fill, '>'),
+    };
+    let make = |n: usize| fill.to_string().repeat(n);
+    Ok(match align {
+        '<' => format!("{head}{digits}{}", make(gap)),
+        '^' => format!("{}{head}{digits}{}", make(gap / 2), make(gap - gap / 2)),
+        '=' => format!("{head}{}{digits}", make(gap)),
+        _ => format!("{}{head}{digits}", make(gap)),
+    })
+}
+
+fn pad(text: &str, width: usize, fill: char, align: char) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        return text.to_string();
+    }
+    let gap = width - len;
+    let make = |n: usize| fill.to_string().repeat(n);
+    match align {
+        '>' | '=' => format!("{}{text}", make(gap)),
+        '^' => format!("{}{text}{}", make(gap / 2), make(gap - gap / 2)),
+        _ => format!("{text}{}", make(gap)),
+    }
+}
+
+/// `1234567.5` with `,` or `_` between the groups of three digits of its whole part (four for
+/// hexadecimal, octal and binary).
+fn group_digits(text: &str, sep: char, wide: bool) -> String {
+    let size = if wide { 4 } else { 3 };
+    if wide && sep == ',' {
+        return text.to_string();
+    }
+    let split = text.find(['.', 'e', 'E', '%']).unwrap_or(text.len());
+    let (whole, rest) = text.split_at(split);
+    let mut out = String::new();
+    for (n, c) in whole.chars().enumerate() {
+        if n > 0 && (whole.len() - n) % size == 0 {
+            out.push(sep);
+        }
+        out.push(c);
+    }
+    format!("{out}{rest}")
+}
+
+/// `1.5e+03`: the form of `{x:e}`, with the exponent signed and at least two digits.
+fn exponent_form(x: f64, precision: usize) -> String {
+    let text = format!("{x:.precision$e}");
+    let (mantissa, exp) = text.split_once('e').unwrap_or((&text, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    format!(
+        "{mantissa}e{}{:02}",
+        if exp < 0 { '-' } else { '+' },
+        exp.abs()
+    )
+}
+
+/// The form of `{x:g}`: `precision` significant digits, in the exponent form when the number is
+/// very large or very small, and without trailing zeros. With `point` a whole number keeps a
+/// `.0` (what a float shows when no type was given).
+fn general_form(x: f64, precision: usize, point: bool) -> String {
+    let precision = precision.max(1);
+    if x == 0.0 {
+        return if point { "0.0" } else { "0" }.to_string();
+    }
+    let sci = format!("{:.*e}", precision - 1, x);
+    let exp: i32 = sci
+        .split_once('e')
+        .and_then(|(_, e)| e.parse().ok())
+        .unwrap_or(0);
+    let strip = |text: String| {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            text
+        }
+    };
+    if exp < -4 || exp >= precision as i32 {
+        let (mantissa, _) = sci.split_once('e').unwrap_or((&sci, "0"));
+        return format!(
+            "{}e{}{:02}",
+            strip(mantissa.to_string()),
+            if exp < 0 { '-' } else { '+' },
+            exp.abs()
         );
     }
-    let len = body.chars().count();
-    if len >= width {
-        return Ok(body);
+    let decimals = (precision as i32 - 1 - exp).max(0) as usize;
+    let text = strip(format!("{x:.decimals$}"));
+    if point && !text.contains('.') {
+        format!("{text}.0")
+    } else {
+        text
     }
-    let pad = width - len;
-    if zero && numeric && align.is_none() {
-        let (sign, digits) = body
-            .strip_prefix('-')
-            .map_or(("", body.as_str()), |r| ("-", r));
-        return Ok(format!("{sign}{}{digits}", "0".repeat(pad)));
-    }
-    let make = |n: usize| fill.to_string().repeat(n);
-    Ok(match align.unwrap_or(if numeric { '>' } else { '<' }) {
-        '<' => format!("{body}{}", make(pad)),
-        '>' => format!("{}{body}", make(pad)),
-        _ => format!("{}{body}{}", make(pad / 2), make(pad - pad / 2)),
-    })
 }
 
 fn arg(args: &[Value], i: usize) -> Result<&Value, RuntimeError> {

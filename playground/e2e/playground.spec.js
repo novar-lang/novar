@@ -79,7 +79,7 @@ fn main() -> i32:
 `,
   );
   await page.locator("#run").click();
-  await expect(page.locator("#output")).toContainText("area 12 and 2");
+  await expect(page.locator("#output")).toContainText("area 12.0 and 2");
 });
 
 test("picking another example loads and runs it", async ({ page }) => {

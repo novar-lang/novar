@@ -699,6 +699,15 @@ impl Interp {
         }
     }
 
+    /// `v` as text, knowing its type `ty`: an `f32` shows its own digits.
+    fn show(&self, v: &Value, ty: &Ty, quoted: bool) -> String {
+        let env = crate::show::TypeEnv {
+            structs: Some(&self.structs),
+            enums: Some(&self.enums),
+        };
+        crate::show::show(v, Some(ty), &env, quoted)
+    }
+
     fn eval(&self, e: &hir::Expr, ctx: &mut Ctx) -> Eval {
         use std::sync::atomic::Ordering::Relaxed;
         let fuel = self.fuel.load(Relaxed);
@@ -752,7 +761,24 @@ impl Interp {
                 for p in parts {
                     match p {
                         hir::FPart::Text(t) => out.push_str(t),
-                        hir::FPart::Expr(x) => out.push_str(&self.eval(x, ctx)?.to_string()),
+                        hir::FPart::Expr(x) => {
+                            let v = self.eval(x, ctx)?;
+                            out.push_str(&self.show(&v, &x.ty, false));
+                        }
+                        hir::FPart::Fmt { expr, repr, spec } => {
+                            let v = self.eval(expr, ctx)?;
+                            let shown = self.show(&v, &expr.ty, *repr);
+                            match spec {
+                                None => out.push_str(&shown),
+                                Some(spec) => {
+                                    let spec = self.eval(spec, ctx)?;
+                                    let Value::Str(spec) = spec else {
+                                        return fail("a format is a Text");
+                                    };
+                                    out.push_str(&std_impl::format_value(&v, &shown, &spec)?);
+                                }
+                            }
+                        }
                     }
                 }
                 Ok(Value::str(out))

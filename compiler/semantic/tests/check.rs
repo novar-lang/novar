@@ -3881,3 +3881,31 @@ fn enums_as_keys_and_in_comparisons() {
         "a `Map` key must be a `Text`, an integer, a `Bool` or an enum",
     );
 }
+
+#[test]
+fn a_text_and_a_number_point_to_the_f_string() {
+    let notes = |src: &str| -> Vec<String> {
+        let (ast, errs) = telvax_parser::parse(src);
+        assert!(errs.is_empty(), "{errs:?}");
+        lower(&ast.unwrap())
+            .1
+            .into_iter()
+            .flat_map(|d| d.notes)
+            .collect()
+    };
+    let plus = notes("fn f(n: Int) -> Text:\n    \"n=\" + n\n");
+    assert!(
+        plus.iter().any(|n| n.contains("write an f-string")),
+        "{plus:?}"
+    );
+    assert!(plus.iter().any(|n| n.contains("`str(x)`")), "{plus:?}");
+    let percent = notes("fn f(n: Int) -> Text:\n    \"%d items\" % n\n");
+    assert!(
+        percent
+            .iter()
+            .any(|n| n.contains("`%` does not format a text")),
+        "{percent:?}"
+    );
+    // Two numbers get no such note.
+    assert!(notes("fn f(a: Int, b: Float) -> Int:\n    a + b\n").is_empty());
+}

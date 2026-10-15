@@ -162,7 +162,7 @@ impl Linter {
             }
             ExprKind::FString(parts) => {
                 for p in parts {
-                    if let hir::FPart::Expr(x) = p {
+                    for x in p.exprs() {
                         self.expr(x);
                     }
                 }
