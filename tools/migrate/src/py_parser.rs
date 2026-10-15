@@ -1753,6 +1753,7 @@ where
         .map(|(name, fields)| Variant {
             name,
             fields: fields.unwrap_or_default(),
+            names: Vec::new(),
         });
     let enum_ = just(Token::Enum)
         .ignore_then(ident())

@@ -40,13 +40,15 @@ pub fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering, String> {
     }
 }
 
-/// A map key: strings, integers and booleans (what the checker allows), ordered so that
-/// iteration and JSON output are deterministic.
+/// A map key: strings, integers, booleans and the variants of an enum that hold no values (what
+/// the checker allows), ordered so that iteration and JSON output are deterministic.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MapKey {
     Bool(bool),
     Int(i64),
     Str(Arc<str>),
+    /// The enum and the variant.
+    Variant(Arc<str>, Arc<str>),
 }
 
 impl MapKey {
@@ -55,8 +57,15 @@ impl MapKey {
             Value::Bool(b) => Ok(MapKey::Bool(*b)),
             Value::Int(i) => Ok(MapKey::Int(*i)),
             Value::Str(s) => Ok(MapKey::Str(s.clone())),
+            Value::Enum(e) if e.name != "Option" && e.fields.is_empty() => Ok(MapKey::Variant(
+                e.name.as_str().into(),
+                e.variant.as_str().into(),
+            )),
+            Value::Enum(e) if e.name != "Option" => Err(format!(
+                "a Map key that is an enum cannot have values, found {v}"
+            )),
             other => Err(format!(
-                "a Map key must be a Text, an Int or a Bool, found {}",
+                "a Map key must be a Text, an Int, a Bool or a variant without values, found {}",
                 other.type_name()
             )),
         }
@@ -67,6 +76,11 @@ impl MapKey {
             MapKey::Bool(b) => Value::Bool(*b),
             MapKey::Int(i) => Value::Int(*i),
             MapKey::Str(s) => Value::Str(s.clone()),
+            MapKey::Variant(name, variant) => Value::Enum(Arc::new(EnumVal {
+                name: name.to_string(),
+                variant: variant.to_string(),
+                fields: Vec::new(),
+            })),
         }
     }
 
@@ -76,6 +90,7 @@ impl MapKey {
             MapKey::Bool(b) => b.to_string(),
             MapKey::Int(i) => i.to_string(),
             MapKey::Str(s) => s.to_string(),
+            MapKey::Variant(_, variant) => variant.to_string(),
         }
     }
 }
@@ -692,6 +707,17 @@ pub fn from_json(
                         k.parse()
                             .map_err(|_| format!("`{k}` is not an integer key"))?,
                     ),
+                    Ty::Enum(name) => {
+                        let known = enums
+                            .get(name)
+                            .is_some_and(|vs| vs.iter().any(|(v, f)| v == k && f.is_empty()));
+                        if !known {
+                            return Err(format!(
+                                "`{k}` is not a variant of `{name}` without values"
+                            ));
+                        }
+                        MapKey::Variant(name.as_str().into(), k.as_str().into())
+                    }
                     _ => MapKey::Str(k.as_str().into()),
                 };
                 entries.push((

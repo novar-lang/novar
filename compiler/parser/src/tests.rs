@@ -1074,3 +1074,71 @@ fn let_with_a_pattern_says_what_to_use() {
         "{messages:?}"
     );
 }
+
+#[test]
+fn an_enum_may_have_methods_and_a_trait() {
+    let p = ok_program(
+        "enum Shape(Named):\n    Circle(Float)\n    Empty\n\n    fn name(self) -> Text:\n        \"shape\"\n\n    fn big(self) -> Bool:\n        False\n",
+    );
+    let Item::Enum(e) = &p.items[0] else { panic!() };
+    assert_eq!(e.variants.len(), 2);
+    let Item::Impl(imp) = &p.items[1] else {
+        panic!("{:?}", p.items)
+    };
+    assert_eq!(imp.ty.node, "Shape");
+    assert_eq!(
+        imp.trait_name.as_ref().map(|t| t.node.as_str()),
+        Some("Named")
+    );
+    assert_eq!(imp.fns.len(), 2);
+    // Without methods or a trait there is no `impl`.
+    assert_eq!(ok_program("enum S:\n    A\n    B\n").items.len(), 1);
+    // Methods may come before the variants, and a generic enum's methods share its parameters.
+    let p = ok_program("enum M[T]:\n    fn f(self) -> Int:\n        1\n    J(T)\n    N\n");
+    let Item::Impl(imp) = &p.items[1] else {
+        panic!()
+    };
+    assert_eq!(imp.ty_args.len(), 1);
+    assert!(
+        parse_messages("enum S:\n    fn f(self) -> Int:\n        1\n")
+            .iter()
+            .any(|m| m.contains("needs at least one variant"))
+    );
+}
+
+#[test]
+fn variants_may_name_their_values() {
+    let p = ok_program("enum S:\n    Rect(w: Float, h: Float)\n    Circle(Float)\n    Empty\n");
+    let Item::Enum(e) = &p.items[0] else { panic!() };
+    let names: Vec<_> = e.variants[0]
+        .names
+        .iter()
+        .map(|n| n.node.as_str())
+        .collect();
+    assert_eq!(names, ["w", "h"]);
+    assert!(e.variants[1].names.is_empty() && e.variants[2].names.is_empty());
+    assert!(
+        parse_messages("enum S:\n    Rect(w: Float, Float)\n")
+            .iter()
+            .any(|m| m.contains("name every value of a variant or none"))
+    );
+}
+
+#[test]
+fn a_type_can_be_given_another_name() {
+    let p = ok_program("type Id = Int\ntype Pair[T] = (T, T)\ntype Handler = (Int) -> Int\n");
+    let Item::Alias(a) = &p.items[0] else {
+        panic!()
+    };
+    assert_eq!((a.name.node.as_str(), a.generics.len()), ("Id", 0));
+    let Item::Alias(b) = &p.items[1] else {
+        panic!()
+    };
+    assert_eq!((b.name.node.as_str(), b.generics.len()), ("Pair", 1));
+    assert_eq!(p.items.len(), 3);
+    // `type Name:` is still a type with fields.
+    assert!(matches!(
+        ok_program("type P:\n    x: Int\n").items[0],
+        Item::Struct(_)
+    ));
+}

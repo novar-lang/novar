@@ -1179,6 +1179,7 @@ where
                 .map(|(name, fields)| Variant {
                     name,
                     fields: fields.unwrap_or_default(),
+                    names: Vec::new(),
                 })
                 .separated_by(just(Token::Comma))
                 .allow_trailing()

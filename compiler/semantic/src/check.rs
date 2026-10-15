@@ -201,6 +201,13 @@ pub(crate) struct Checker {
     pending: Vec<Pending>,
     open_calls: Vec<OpenCall>,
     anon_enums: Vec<hir::EnumDef>,
+    /// The names of the values of the variants that have them (`Circle(r: Float)`), by enum as
+    /// declared (the generic one, for an instance) and variant.
+    enum_labels: HashMap<(String, String), Vec<String>>,
+    /// `type Id = Int`, by name, and the aliases being expanded right now (an alias that uses
+    /// itself would never end).
+    aliases: HashMap<String, ast::Alias>,
+    alias_stack: Vec<String>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
     fn_sigs: HashMap<String, (Vec<Ty>, Ty)>,
@@ -442,6 +449,17 @@ impl Checker {
                         );
                     }
                     self.generic_enums.insert(en.name.node.clone(), en.clone());
+                    self.record_labels(en);
+                }
+                ast::Item::Alias(a) => {
+                    if !declared.insert(a.name.node.clone()) {
+                        self.err(
+                            a.name.span.clone(),
+                            format!("`{}` is defined twice", a.name.node),
+                        );
+                    } else {
+                        self.aliases.insert(a.name.node.clone(), a.clone());
+                    }
                 }
                 _ => {}
             }
@@ -532,6 +550,7 @@ impl Checker {
             if !enum_done.insert(en.name.node.clone()) {
                 continue;
             }
+            self.record_labels(en);
             let mut variants: Vec<(String, Vec<Ty>)> = Vec::new();
             for v in &en.variants {
                 if variants.iter().any(|(n, _)| *n == v.name.node) {
@@ -601,10 +620,26 @@ impl Checker {
                 ast::Item::Impl(imp) => {
                     let ty = imp.ty.node.clone();
                     if !self.struct_fields.contains_key(&ty) && !self.enums.contains_key(&ty) {
-                        self.err(
-                            imp.ty.span.clone(),
-                            format!("cannot find the type or enum `{ty}` to extend"),
-                        );
+                        let message = if self.generic_structs.contains_key(&ty)
+                            || self.generic_enums.contains_key(&ty)
+                        {
+                            let params = self
+                                .generic_structs
+                                .get(&ty)
+                                .map(|s| &s.generics)
+                                .or_else(|| self.generic_enums.get(&ty).map(|e| &e.generics))
+                                .map(|g| {
+                                    g.iter()
+                                        .map(|p| p.name.node.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .unwrap_or_default();
+                            format!("`{ty}` has type parameters; write `extend {ty}[{params}]:`")
+                        } else {
+                            format!("cannot find the type or enum `{ty}` to extend")
+                        };
+                        self.err(imp.ty.span.clone(), message);
                         continue;
                     }
                     if let Some(tr) = &imp.trait_name {
@@ -864,6 +899,39 @@ impl Checker {
             }
         };
 
+        if let Some(alias) = self.aliases.get(name).cloned() {
+            if self.alias_stack.iter().any(|a| a == name) {
+                self.err(
+                    t.span.clone(),
+                    format!("`type {name}` is defined in terms of itself"),
+                );
+                return Ty::Unknown;
+            }
+            let args: Vec<Ty> = type_args.iter().map(|a| self.resolve_type(a)).collect();
+            if args.len() != alias.generics.len() {
+                self.err(
+                    t.span.clone(),
+                    format!(
+                        "`{name}` takes {} type argument(s), found {}",
+                        alias.generics.len(),
+                        args.len()
+                    ),
+                );
+                return Ty::Unknown;
+            }
+            let bind = alias
+                .generics
+                .iter()
+                .map(|g| g.name.node.clone())
+                .zip(args)
+                .collect();
+            let saved = std::mem::replace(&mut self.type_params, bind);
+            self.alias_stack.push(name.to_string());
+            let out = self.resolve_type(&alias.ty);
+            self.alias_stack.pop();
+            self.type_params = saved;
+            return out;
+        }
         if let Some(p) = Prim::from_name(name) {
             no_args(self);
             return Ty::Prim(p);
@@ -1782,7 +1850,10 @@ impl Checker {
                     span,
                 )
             }
-            K::Path(p) => self.path(p, expected, span),
+            K::Path(p) => match self.variant_then_fields(p, span) {
+                Some(chain) => self.expr(&chain, expected),
+                None => self.path(p, expected, span),
+            },
             K::FString(parts) => {
                 let parts = parts
                     .iter()
@@ -1943,11 +2014,25 @@ impl Checker {
                     Ty::Result(ok, err) => {
                         match &ret {
                             Ty::Result(_, ret_err) => {
+                                if !ret_err.accepts(err)
+                                    && let Some(variant) = self.error_conversion(ret_err, err)
+                                {
+                                    let converted =
+                                        Self::convert_error(inner, ret_err, &variant, span);
+                                    return self.expr(&converted, expected);
+                                }
                                 if !ret_err.accepts(err) {
+                                    let how = if matches!(**ret_err, Ty::Enum(_)) {
+                                        format!(
+                                            "; give `{ret_err}` one variant that holds a `{err}`, or write `match` and `Err(...)`"
+                                        )
+                                    } else {
+                                        String::new()
+                                    };
                                     self.err(
                                         span.clone(),
                                         format!(
-                                            "`?` cannot turn the error `{err}` into `{ret_err}`, the error type of this function"
+                                            "`?` cannot turn the error `{err}` into `{ret_err}`, the error type of this function{how}"
                                         ),
                                     );
                                 }
@@ -3371,6 +3456,84 @@ impl Checker {
         )
     }
 
+    fn record_labels(&mut self, en: &ast::Enum) {
+        for v in &en.variants {
+            if !v.names.is_empty() {
+                let names = v.names.iter().map(|n| n.node.clone()).collect();
+                self.enum_labels
+                    .insert((en.name.node.clone(), v.name.node.clone()), names);
+            }
+        }
+    }
+
+    /// The names of the values of `Enum.Variant`, for the enum as declared or one of its
+    /// instances (`Maybe<i64>`); empty when the values have no names.
+    fn labels_of(&self, enum_name: &str, variant: &str) -> Vec<String> {
+        let base = self
+            .instance_args
+            .get(enum_name)
+            .map_or(enum_name, |(b, _)| b.as_str());
+        self.enum_labels
+            .get(&(base.to_string(), variant.to_string()))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// `Shape.Rect(w: 1.0, h: 2.0)`: the values in the order the variant declares them.
+    fn order_variant_args(
+        &mut self,
+        enum_name: &str,
+        variant: &ast::Ident,
+        given: &[(ast::Ident, ast::Expr)],
+        span: &Span,
+    ) -> Option<Vec<ast::Expr>> {
+        let labels = self.labels_of(enum_name, &variant.node);
+        if labels.is_empty() {
+            self.err(
+                span.clone(),
+                format!(
+                    "the values of `{enum_name}.{}` have no names; write them in order, `{enum_name}.{}(a, b)`",
+                    variant.node, variant.node
+                ),
+            );
+            return None;
+        }
+        let mut slots: Vec<Option<ast::Expr>> = vec![None; labels.len()];
+        let mut ok = true;
+        for (name, value) in given {
+            match labels.iter().position(|l| *l == name.node) {
+                Some(i) if slots[i].is_none() => slots[i] = Some(value.clone()),
+                Some(_) => {
+                    self.err(name.span.clone(), format!("`{}` is given twice", name.node));
+                    ok = false;
+                }
+                None => {
+                    let hint =
+                        closest(&name.node, labels.iter().map(String::as_str)).map(str::to_string);
+                    self.err_hint(
+                        name.span.clone(),
+                        format!(
+                            "`{enum_name}.{}` has no value named `{}`",
+                            variant.node, name.node
+                        ),
+                        hint.as_deref(),
+                    );
+                    ok = false;
+                }
+            }
+        }
+        if let Some(i) = slots.iter().position(Option::is_none)
+            && ok
+        {
+            self.err(
+                span.clone(),
+                format!("`{enum_name}.{}` is missing `{}`", variant.node, labels[i]),
+            );
+            ok = false;
+        }
+        ok.then(|| slots.into_iter().flatten().collect())
+    }
+
     /// `Enum::Variant` or `Enum::Variant(args..)`.
     fn enum_ctor(
         &mut self,
@@ -3649,6 +3812,44 @@ impl Checker {
         fields: &[(ast::Ident, ast::Pattern)],
         ty: &Ty,
     ) -> hir::Pat {
+        // `Shape.Rect(w: a)`: a variant, by the names of its values.
+        if path.len() == 2 {
+            let enum_name = match ty {
+                Ty::Enum(k) => Some(k.clone()),
+                _ => None,
+            };
+            let labels = enum_name
+                .as_deref()
+                .map(|k| self.labels_of(k, &path[1].node))
+                .unwrap_or_default();
+            if !labels.is_empty() {
+                let mut args: Vec<ast::Pattern> = labels
+                    .iter()
+                    .map(|_| ast::Pattern {
+                        node: ast::PatKind::Wild,
+                        span: p.span.clone(),
+                    })
+                    .collect();
+                for (field, sub) in fields {
+                    match labels.iter().position(|l| *l == field.node) {
+                        Some(i) => args[i] = sub.clone(),
+                        None => {
+                            let hint = closest(&field.node, labels.iter().map(String::as_str))
+                                .map(str::to_string);
+                            self.err_hint(
+                                field.span.clone(),
+                                format!(
+                                    "`{}.{}` has no value named `{}`",
+                                    path[0].node, path[1].node, field.node
+                                ),
+                                hint.as_deref(),
+                            );
+                        }
+                    }
+                }
+                return self.variant_pattern(p, path, &args, ty);
+            }
+        }
         let name = path
             .iter()
             .map(|i| i.node.as_str())
@@ -4029,6 +4230,11 @@ impl Checker {
         let Some((first_ty, rest_tys)) = tys.split_first() else {
             return rows.is_empty();
         };
+        // Nothing left to rule a value out. Without this, the constructors of a type that holds
+        // itself (`Add(Expr, Expr)`) would be opened one level after another, without end.
+        if rows.is_empty() {
+            return true;
+        }
         let rows = expand_or(rows);
         let (q0, q_rest) = (q[0], &q[1..]);
         if let Some(hir::Pat::Or(alts)) = q0 {
@@ -4049,6 +4255,14 @@ impl Checker {
         };
         match q0 {
             None | Some(hir::Pat::Wild | hir::Pat::Bind(_)) => {
+                // No row looks at the first value (all of them take anything): the rest decides.
+                if rows
+                    .iter()
+                    .all(|r| matches!(r[0], None | Some(hir::Pat::Wild | hir::Pat::Bind(_))))
+                {
+                    let sub: Vec<Row> = rows.iter().map(|r| r[1..].to_vec()).collect();
+                    return self.useful(&sub, q_rest, rest_tys);
+                }
                 if let Some(ctors) = self.constructors_of(&first_ty) {
                     return ctors.iter().any(|(en, v, fields)| {
                         let sub = self.specialize(&rows, en.as_deref(), v, fields.len());
@@ -4503,6 +4717,18 @@ impl Checker {
                     }
                 }
             },
+            // An enum has the methods it declares (found above), and no others.
+            Ty::Enum(owner_name) => {
+                let own: Vec<String> = self
+                    .methods
+                    .iter()
+                    .filter(|(_, owner)| *owner == owner_name)
+                    .filter_map(|(full, _)| full.rsplit("::").next().map(str::to_string))
+                    .collect();
+                let own: Vec<&str> = own.iter().map(String::as_str).collect();
+                let shown = owner_name.clone();
+                self.no_method(name, &shown, &own)
+            }
             // Numbers and booleans have no methods of their own.
             Ty::Prim(_) | Ty::IntVar(_) | Ty::FloatVar(_) => {
                 let shown = self.resolve(&base.ty).to_string();
@@ -4512,6 +4738,115 @@ impl Checker {
         }
     }
 
+    /// The variant that `?` wraps an error of type `from` in, so a function that returns an
+    /// error enum can use `?` on the errors of what it calls: the one variant of `to` that holds
+    /// exactly one value, of that type.
+    fn error_conversion(&self, to: &Ty, from: &Ty) -> Option<String> {
+        let Ty::Enum(name) = self.resolve(to) else {
+            return None;
+        };
+        if self.instance_args.contains_key(&name) {
+            return None;
+        }
+        let from = self.resolve(from);
+        let mut found = self.enums.get(&name)?.iter().filter(|(_, fields)| {
+            fields.len() == 1 && fields[0].accepts(&from) && from.accepts(&fields[0])
+        });
+        let (variant, _) = found.next()?;
+        found.next().is_none().then(|| variant.clone())
+    }
+
+    /// `x?` where the error is wrapped: `match x: case Ok(v): v; case Err(e): return Err(Enum.Variant(e))`.
+    fn convert_error(inner: &ast::Expr, to: &Ty, variant: &str, span: &Span) -> ast::Expr {
+        let Ty::Enum(enum_name) = to else {
+            unreachable!("a conversion target is an enum")
+        };
+        let ident = |name: &str| ast::Ident {
+            node: name.to_string(),
+            span: span.clone(),
+        };
+        let expr = |node: ast::ExprKind| ast::Expr {
+            node,
+            span: span.clone(),
+        };
+        let path = |names: &[&str]| {
+            expr(ast::ExprKind::Path(
+                names.iter().map(|n| ident(n)).collect(),
+            ))
+        };
+        let (value, error) = (
+            format!("__try_value{}", span.start),
+            format!("__try_error{}", span.start),
+        );
+        let wrapped = expr(ast::ExprKind::Call {
+            callee: Box::new(path(&["Err"])),
+            args: vec![expr(ast::ExprKind::Call {
+                callee: Box::new(path(&[enum_name.as_str(), variant])),
+                args: vec![path(&[error.as_str()])],
+            })],
+        });
+        let arm = |name: &str, bound: &str, body: ast::Expr| ast::Arm {
+            pat: ast::Pattern {
+                node: ast::PatKind::Variant {
+                    path: vec![ident(name)],
+                    args: vec![ast::Pattern {
+                        node: ast::PatKind::Bind(bound.to_string()),
+                        span: span.clone(),
+                    }],
+                },
+                span: span.clone(),
+            },
+            guard: None,
+            body,
+        };
+        expr(ast::ExprKind::Match {
+            scrutinee: Box::new(inner.clone()),
+            arms: vec![
+                arm("Ok", &value, path(&[value.as_str()])),
+                arm(
+                    "Err",
+                    &error,
+                    expr(ast::ExprKind::Return(Some(Box::new(wrapped)))),
+                ),
+            ],
+        })
+    }
+
+    /// A path such as `Shape.Empty.area` or `Shape.Empty.size`: the variant `Shape.Empty`, then
+    /// field reads and method calls on it. The parser cannot tell, because it reads any path that
+    /// starts with a capital as one name.
+    fn variant_then_fields(&self, p: &[ast::Ident], span: &Span) -> Option<ast::Expr> {
+        if p.len() < 3 || self.lookup_local(&p[0].node).is_some() {
+            return None;
+        }
+        let first = p[0].node.as_str();
+        let has_variant = self
+            .enums
+            .get(first)
+            .is_some_and(|vs| vs.iter().any(|(v, _)| *v == p[1].node))
+            || self
+                .generic_enums
+                .get(first)
+                .is_some_and(|en| en.variants.iter().any(|v| v.name.node == p[1].node));
+        if !has_variant {
+            return None;
+        }
+        let mut chain = ast::Expr {
+            node: ast::ExprKind::Path(p[..2].to_vec()),
+            span: span.clone(),
+        };
+        for name in &p[2..] {
+            chain = ast::Expr {
+                node: ast::ExprKind::Field {
+                    base: Box::new(chain),
+                    name: name.clone(),
+                },
+                span: span.clone(),
+            };
+        }
+        Some(chain)
+    }
+
     fn call(
         &mut self,
         callee: &ast::Expr,
@@ -4519,6 +4854,12 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        // `Shape.Empty.area()`: a method of a variant that has no values.
+        if let ast::ExprKind::Path(p) = &callee.node
+            && let Some(chain) = self.variant_then_fields(p, &callee.span)
+        {
+            return self.call(&chain, args, expected, span);
+        }
         // `first[Int](xs)`: the types a generic function is called with, written down.
         if let ast::ExprKind::Index { base, index } = &callee.node
             && let ast::ExprKind::Path(p) = &base.node
@@ -5082,7 +5423,9 @@ impl Checker {
                 }
             }
             Lt | LtEq | Gt | GtEq => {
-                if compatible && !is_num(&l.ty) && l.ty != Ty::str() {
+                let unit_enum = matches!(&l.ty, Ty::Enum(name)
+                    if self.enums.get(name).is_some_and(|vs| vs.iter().all(|(_, f)| f.is_empty())));
+                if compatible && !is_num(&l.ty) && l.ty != Ty::str() && !unit_enum {
                     self.err(
                         span.clone(),
                         format!("cannot order values of type `{}`", l.ty),
@@ -5251,6 +5594,35 @@ impl Checker {
         expected: Option<&Ty>,
         span: &Span,
     ) -> hir::Expr {
+        // `Shape.Rect(w: 1.0, h: 2.0)`: a variant with named values.
+        if path.len() == 2 {
+            let first = if path[0].node == "Self" {
+                self.impl_ty.clone().unwrap_or_default()
+            } else {
+                path[0].node.clone()
+            };
+            let is_variant = self
+                .enums
+                .get(&first)
+                .is_some_and(|vs| vs.iter().any(|(v, _)| *v == path[1].node))
+                || self
+                    .generic_enums
+                    .get(&first)
+                    .is_some_and(|en| en.variants.iter().any(|v| v.name.node == path[1].node));
+            if is_variant {
+                let Some(args) = self.order_variant_args(&first, &path[1], fields, span) else {
+                    for (_, e) in fields {
+                        let _ = self.expr(e, None);
+                    }
+                    return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
+                };
+                let callee = ast::Expr {
+                    node: ast::ExprKind::Path(path.to_vec()),
+                    span: span.clone(),
+                };
+                return self.call(&callee, &args, expected, span);
+            }
+        }
         let mut name = path
             .iter()
             .map(|i| i.node.as_str())

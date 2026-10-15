@@ -2389,3 +2389,176 @@ fn f() -> Text:
 "#;
     assert_eq!(shown(src), "6 12345 21 31 012,134, [6, 15]");
 }
+
+#[test]
+fn recursive_enums_and_methods() {
+    let src = r#"
+enum Expr:
+    Num(Int)
+    Add(Expr, Expr)
+    Mul(Expr, Expr)
+    Neg(Expr)
+
+    fn eval(self) -> Int:
+        match self:
+            case Expr.Num(n):
+                n
+            case Expr.Add(a, b):
+                a.eval() + b.eval()
+            case Expr.Mul(a, b):
+                a.eval() * b.eval()
+            case Expr.Neg(a):
+                0 - a.eval()
+
+fn simplify(e: Expr) -> Expr:
+    match e:
+        case Expr.Add(Expr.Num(0), x):
+            simplify(x)
+        case Expr.Mul(Expr.Num(1), x):
+            simplify(x)
+        case Expr.Neg(Expr.Neg(x)):
+            simplify(x)
+        case _:
+            e
+
+fn f() -> Text:
+    let e = Expr.Add(Expr.Num(2), Expr.Mul(Expr.Num(3), Expr.Neg(Expr.Num(4))))
+    let s = simplify(Expr.Neg(Expr.Neg(Expr.Add(Expr.Num(0), Expr.Num(7)))))
+    f"{e.eval()} {s.eval()}"
+"#;
+    assert_eq!(shown(src), "-10 7");
+}
+
+#[test]
+fn enums_with_traits_and_named_values() {
+    let src = r#"
+trait Describe:
+    fn describe(self) -> Text: ...
+
+enum Shape(Describe):
+    Circle(r: Float)
+    Rect(w: Float, h: Float)
+    Empty
+
+    fn describe(self) -> Text:
+        match self:
+            case Shape.Circle(r: r):
+                f"circle {r}"
+            case Shape.Rect(h: h, w: w):
+                f"rect {w}x{h}"
+            case Shape.Empty:
+                "empty"
+
+extend Shape:
+    fn unit() -> Shape:
+        Shape.Rect(w: 1.0, h: 1.0)
+
+enum Maybe[T]:
+    Just(value: T)
+    Nothing
+
+    fn or_else(self, d: T) -> T:
+        match self:
+            case Maybe.Just(value: v):
+                v
+            case Maybe.Nothing:
+                d
+
+fn f() -> Text:
+    let m: Maybe[Int] = Maybe.Just(value: 4)
+    let n: Maybe[Int] = Maybe.Nothing
+    f"{Shape.Rect(h: 2.0, w: 3.0).describe()}|{Shape.Circle(r: 1.5).describe()}|{Shape.Empty.describe()}|{Shape.unit().describe()}|{m.or_else(0)}{n.or_else(9)}|{Shape.Rect(1.0, 2.0)}"
+"#;
+    assert_eq!(
+        shown(src),
+        "rect 3x2|circle 1.5|empty|rect 1x1|49|Shape.Rect(1, 2)"
+    );
+}
+
+#[test]
+fn aliases_and_converted_errors() {
+    let src = r#"
+type Id = Int
+type Pair[T] = (T, T)
+type Names = Map[Id, Text]
+
+enum AppError:
+    Parse(Text)
+    Range(Int)
+
+fn parse(s: Text) -> Result[Id, Text]:
+    match s.to_int():
+        case Some(n):
+            Ok(n)
+        case None:
+            Err(f"not a number: {s}")
+
+fn check(n: Id) -> Result[Id, Int]:
+    if n > 10:
+        return Err(n)
+    Ok(n)
+
+fn run(s: Text) -> Result[Id, AppError]:
+    let n = parse(s)?
+    let m = check(n)?
+    Ok(m * 2)
+
+fn swap(p: Pair[Id]) -> Pair[Id]:
+    (p.1, p.0)
+
+fn show(r: Result[Id, AppError]) -> Text:
+    match r:
+        case Ok(v):
+            f"ok {v}"
+        case Err(AppError.Parse(t)):
+            f"parse: {t}"
+        case Err(AppError.Range(n)):
+            f"range {n}"
+
+fn f() -> Text:
+    let names: Names = {1: "one"}
+    f"{show(run("4"))}|{show(run("x"))}|{show(run("40"))}|{swap((1, 2))}|{names[1]}"
+"#;
+    assert_eq!(
+        shown(src),
+        "ok 8|parse: not a number: x|range 40|(2, 1)|one"
+    );
+}
+
+#[test]
+fn enums_as_map_keys_and_in_comparisons() {
+    let src = r#"
+enum Level:
+    Low
+    Mid
+    High
+
+fn f() -> Text:
+    var counts = {Level.High: 1, Level.Low: 2}
+    counts[Level.Mid] = 5
+    counts[Level.High] = counts[Level.High] + 10
+    var out = ""
+    for k in counts:
+        out = out + f"{k}={counts[k]},"
+    f"{out} {Level.Low < Level.High} {Level.High <= Level.Mid} {Level.Mid > Level.Low} {Level.Low >= Level.Low} {counts.get(Level.Low) ?? 0} {counts.contains_key(Level.Mid)}"
+"#;
+    assert_eq!(
+        shown(src),
+        "Level.High=11,Level.Low=2,Level.Mid=5, True False True True 2 True"
+    );
+    let src = r#"
+enum Shape:
+    Circle(Int)
+    Empty
+
+fn f() -> u64:
+    let m = {Shape.Circle(1): 1}
+    m.len()
+"#;
+    let e = load(src).call("f", vec![]).unwrap_err();
+    assert!(
+        e.message
+            .contains("a Map key that is an enum cannot have values"),
+        "{e}"
+    );
+}

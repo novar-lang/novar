@@ -305,6 +305,9 @@ impl Loader<'_> {
                 Item::Enum(e) => {
                     out.insert(e.name.node.clone(), e.is_pub);
                 }
+                Item::Alias(a) => {
+                    out.insert(a.name.node.clone(), a.is_pub);
+                }
                 Item::Trait(t) => {
                     out.insert(t.name.node.clone(), t.is_pub);
                 }
@@ -479,6 +482,7 @@ impl Loader<'_> {
                     Item::Fn(f) => &f.name,
                     Item::Struct(s) => &s.name,
                     Item::Enum(e) => &e.name,
+                    Item::Alias(a) => &a.name,
                     Item::Trait(t) => &t.name,
                     Item::Impl(_) => continue,
                     Item::Let(l) => &l.name,

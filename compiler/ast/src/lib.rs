@@ -29,6 +29,8 @@ pub enum Item {
     Let(Let),
     Struct(Struct),
     Enum(Enum),
+    /// `type Id = Int`: another name for a type.
+    Alias(Alias),
     Impl(Impl),
     Trait(Trait),
     Fn(Fn),
@@ -52,6 +54,16 @@ pub struct Let {
     pub name: Ident,
     pub ty: Option<Type>,
     pub init: Expr,
+    pub span: Span,
+}
+
+/// `type Id = Int` or `type Pair[T] = (T, T)`: a name that stands for a type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alias {
+    pub is_pub: bool,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub ty: Type,
     pub span: Span,
 }
 
@@ -111,6 +123,8 @@ pub struct Variant {
     pub name: Ident,
     /// Payload types, in order (empty for a unit variant).
     pub fields: Vec<Type>,
+    /// `Circle(r: Float)`: the name of each value, or empty when the values have no names.
+    pub names: Vec<Ident>,
 }
 
 /// One `pattern => body` arm of a `match`.
