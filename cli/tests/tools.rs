@@ -180,6 +180,42 @@ fn doctor_reports_the_build_and_an_unknown_command_is_named() {
 }
 
 #[test]
+fn run_defaults_to_main_and_reads_arguments_by_their_declared_type() {
+    let src = "fn main() -> i32:\n    7\n\nfn add(a: Int, b: Int) -> Int:\n    a + b\n\nfn shout(s: Text) -> Text:\n    s\n\nfn total(xs: List[Int]) -> Int:\n    var t = 0\n    for x in xs:\n        t += x\n    t\n";
+    let file = scratch("runargs", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["run", path]);
+    assert!(ok && out.trim() == "7", "{out}{err}");
+    // The check that comes before is silent: only `telvax check` says "ok".
+    assert!(!err.contains(" ok"), "{err}");
+    let (ok, out, _) = run(&["run", path, "--allow", "none"]);
+    assert!(ok && out.trim() == "7", "{out}");
+    // A `Text` parameter keeps the word as it is.
+    let (ok, out, _) = run(&["run", path, "shout", "123"]);
+    assert!(ok && out.trim() == "123", "{out}");
+    let (ok, out, _) = run(&["run", path, "total", "[1,2,3]"]);
+    assert!(ok && out.trim() == "6", "{out}");
+    let (ok, _, err) = run(&["run", path, "add", "1", "x"]);
+    assert!(
+        !ok && err.contains("argument `b` of `add` is Int, and `x` is not a value"),
+        "{err}"
+    );
+    let (ok, _, err) = run(&["run", path, "add", "1"]);
+    assert!(
+        !ok && err.contains("takes 2 argument(s) (a: Int, b: Int), got 1"),
+        "{err}"
+    );
+    let (ok, _, err) = run(&["run", path, "nope"]);
+    assert!(
+        !ok && err.contains("has no function `nope`; it has: add, main, shout, total"),
+        "{err}"
+    );
+    let (ok, _, err) = run(&["check", path]);
+    assert!(ok && err.contains(" ok"), "{err}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
 fn deeply_nested_programs_are_checked_not_crashed() {
     // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
     // recurses once per level and used to overflow the 8 MB stack of a main thread.
