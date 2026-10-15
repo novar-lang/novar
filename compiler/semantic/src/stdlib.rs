@@ -556,7 +556,8 @@ fn iter_range(args: &[Ty]) -> Result<Ty, String> {
 fn map_key_ok(t: &Ty) -> bool {
     match t {
         Ty::Prim(p) => !p.is_float(),
-        Ty::IntVar(_) | Ty::Unknown | Ty::Never => true,
+        // The variants of an enum, when none of them holds a value (checked when the map is used).
+        Ty::Enum(_) | Ty::IntVar(_) | Ty::Unknown | Ty::Never => true,
         _ => false,
     }
 }
@@ -565,7 +566,7 @@ fn map_from_entries(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     match elem(args, 0)? {
         Ty::Tuple(parts) if parts.len() == 2 && !map_key_ok(&parts[0]) => Err(format!(
-            "a `Map` key must be a `Text`, an integer or a `Bool`, found `{}`",
+            "a `Map` key must be a `Text`, an integer, a `Bool` or an enum, found `{}`",
             parts[0]
         )),
         Ty::Tuple(parts) if parts.len() == 2 => Ok(Ty::Map(

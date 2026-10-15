@@ -3520,11 +3520,11 @@ fn f() -> Int:
     );
     assert_err(
         "fn f():\n    let v = {[1]: 2}\n",
-        "a `Map` key must be a `Text`, an integer or a `Bool`",
+        "a `Map` key must be a `Text`, an integer, a `Bool` or an enum",
     );
     assert_err(
         "fn f():\n    let v = {1.5: 2}\n",
-        "a `Map` key must be a `Text`, an integer or a `Bool`",
+        "a `Map` key must be a `Text`, an integer, a `Bool` or an enum",
     );
     // Slices, comprehensions and `??` need a value that has them.
     assert_err(
@@ -3749,4 +3749,123 @@ fn match_as_a_value_and_nested_tuples() {
     assert_clean(&with_types(
         "fn f(o: Int?) -> Int:\n    if o is Some(n) and n > 3:\n        return n\n    0\n",
     ));
+}
+
+const EXPR: &str = "enum Expr:\n    Num(Int)\n    Add(Expr, Expr)\n    Neg(Expr)\n\n";
+
+#[test]
+fn matches_on_types_that_hold_themselves() {
+    // Used to run out of stack: the variants of `Expr` were opened again and again.
+    assert_clean(&format!(
+        "{EXPR}fn eval(e: Expr) -> Int:\n    match e:\n        case Expr.Num(n):\n            n\n        case Expr.Add(a, b):\n            eval(a) + eval(b)\n        case Expr.Neg(a):\n            0 - eval(a)\n"
+    ));
+    assert_clean(&format!(
+        "{EXPR}fn f(e: Expr) -> Int:\n    match e:\n        case Expr.Add(Expr.Num(_), _):\n            1\n        case _:\n            2\n"
+    ));
+    assert_clean(&format!(
+        "{EXPR}fn f(e: Expr) -> Int:\n    match e:\n        case _:\n            1\n"
+    ));
+    assert_err(
+        &format!(
+            "{EXPR}fn f(e: Expr) -> Int:\n    match e:\n        case Expr.Num(n):\n            n\n        case Expr.Add(a, b):\n            1\n"
+        ),
+        "non-exhaustive `match`: missing `Expr.Neg`",
+    );
+    assert_err(
+        &format!(
+            "{EXPR}fn f(e: Expr) -> Int:\n    match e:\n        case Expr.Add(Expr.Num(_), _):\n            1\n        case Expr.Num(_) | Expr.Neg(_):\n            2\n"
+        ),
+        "non-exhaustive `match`: missing `Expr.Add`",
+    );
+}
+
+#[test]
+fn enums_have_methods_traits_and_named_values() {
+    assert_clean(
+        "trait Named:\n    fn name(self) -> Text: ...\n\nenum S(Named):\n    A\n    B(Int)\n\n    fn name(self) -> Text:\n        \"s\"\n\nextend S:\n    fn make(n: Int) -> S:\n        S.B(n)\n\nfn f() -> Text:\n    let a = S.A.name()\n    S.make(1).name() + a\n",
+    );
+    assert_clean(
+        "trait Named:\n    fn name(self) -> Text: ...\n\nenum S:\n    A\n\nextend S(Named):\n    fn name(self) -> Text:\n        \"s\"\n\nfn f() -> Text:\n    S.A.name()\n",
+    );
+    assert_err(
+        "enum S:\n    A\n\n    fn size(self) -> Int:\n        1\n\nfn f() -> Int:\n    S.A.weight()\n",
+        "no method `weight`",
+    );
+    let shape = "enum Shape:\n    Circle(r: Float)\n    Rect(w: Float, h: Float)\n    Empty\n\n";
+    assert_clean(&format!(
+        "{shape}fn f(s: Shape) -> Float:\n    let a = Shape.Rect(h: 2.0, w: 3.0)\n    match s:\n        case Shape.Circle(r: r):\n            r\n        case Shape.Rect(h: h):\n            h\n        case Shape.Empty:\n            0.0\n"
+    ));
+    assert_clean(
+        "enum M[T]:\n    J(value: T)\n    N\n\nfn f() -> Int:\n    let m: M[Int] = M.J(value: 3)\n    match m:\n        case M.J(value: v):\n            v\n        case M.N:\n            0\n",
+    );
+    for (call, message) in [
+        ("Shape.Rect(w: 1.0)", "`Shape.Rect` is missing `h`"),
+        ("Shape.Rect(w: 1.0, z: 2.0)", "has no value named `z`"),
+        ("Shape.Rect(w: 1.0, w: 2.0, h: 1.0)", "`w` is given twice"),
+        ("Shape.Rect(w: 1, h: \"a\")", "mismatched types"),
+    ] {
+        assert_err(&format!("{shape}fn f():\n    let s = {call}\n"), message);
+    }
+    assert_err(
+        "enum S:\n    P(Int)\n\nfn f():\n    let s = S.P(x: 1)\n",
+        "the values of `S.P` have no names",
+    );
+    assert_err(
+        &format!(
+            "{shape}fn f(s: Shape) -> Float:\n    match s:\n        case Shape.Rect(q: 1.0):\n            1.0\n        case _:\n            2.0\n"
+        ),
+        "`Shape.Rect` has no value named `q`",
+    );
+}
+
+#[test]
+fn type_aliases() {
+    assert_clean(
+        "type Id = Int\ntype Pair[T] = (T, T)\ntype Scores = Map[Text, List[Float]]\ntype Handler = (Int) -> Int\n\ntype Row:\n    id: Id\n\nfn f(p: Pair[Id], h: Handler, s: Scores, r: Row) -> Id:\n    h(p.0 + r.id)\n",
+    );
+    assert_err(
+        "type A = B\ntype B = A\n\nfn f(x: A):\n    pass\n",
+        "`type A` is defined in terms of itself",
+    );
+    assert_err(
+        "type P[T] = (T, T)\n\nfn f(x: P):\n    pass\n",
+        "`P` takes 1 type argument(s), found 0",
+    );
+    assert_err("type Id = Int\ntype Id = Text\n", "`Id` is defined twice");
+    assert_err(
+        "enum Opt[T]:\n    S(T)\n    N\n\nextend Opt:\n    fn f(self) -> Int:\n        1\n",
+        "`Opt` has type parameters; write `extend Opt[T]:`",
+    );
+}
+
+#[test]
+fn question_mark_wraps_the_error_in_an_enum() {
+    let src = "enum AppError:\n    Parse(Text)\n    Range(Int)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn check() -> Result[Int, Int]:\n    Ok(1)\n\n";
+    assert_clean(&format!(
+        "{src}fn f() -> Result[Int, AppError]:\n    let a = parse()?\n    let b = check()?\n    Ok(a + b)\n"
+    ));
+    // Two variants that hold a `Text` leave no way to tell which one is meant.
+    assert_err(
+        "enum E:\n    A(Text)\n    B(Text)\n\nfn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn f() -> Result[Int, E]:\n    let a = parse()?\n    Ok(a)\n",
+        "give `E` one variant that holds a `Text`",
+    );
+    assert_err(
+        "fn parse() -> Result[Int, Text]:\n    Ok(1)\n\nfn f() -> Result[Int, Int]:\n    let a = parse()?\n    Ok(a)\n",
+        "`?` cannot turn the error `Text` into `Int`",
+    );
+}
+
+#[test]
+fn enums_as_keys_and_in_comparisons() {
+    assert_clean(
+        "enum Level:\n    Low\n    High\n\nfn f() -> Bool:\n    var m = {Level.Low: 1}\n    m[Level.High] = 2\n    Level.Low < Level.High and m[Level.Low] == 1\n",
+    );
+    assert_err(
+        "enum S:\n    A(Int)\n    B\n\nfn f() -> Bool:\n    S.B < S.B\n",
+        "cannot order values of type `S`",
+    );
+    assert_err(
+        "fn f():\n    let m = {[1]: 2}\n",
+        "a `Map` key must be a `Text`, an integer, a `Bool` or an enum",
+    );
 }

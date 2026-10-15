@@ -1026,6 +1026,23 @@ impl Interp {
                 Gt => a > b,
                 _ => a >= b,
             })),
+            // Variants without values are ordered as the enum declares them.
+            (Lt | LtEq | Gt | GtEq, Value::Enum(a), Value::Enum(b)) if a.name == b.name => {
+                let position = |variant: &str| {
+                    self.enums
+                        .get(&a.name)
+                        .and_then(|vs| vs.iter().position(|(v, _)| v == variant))
+                };
+                match (position(&a.variant), position(&b.variant)) {
+                    (Some(x), Some(y)) => Ok(Value::Bool(match op {
+                        Lt => x < y,
+                        LtEq => x <= y,
+                        Gt => x > y,
+                        _ => x >= y,
+                    })),
+                    _ => fail(format!("cannot order {} and {}", l, r)),
+                }
+            }
             _ => fail(format!(
                 "cannot apply {op:?} to {} and {}",
                 l.type_name(),

@@ -62,6 +62,10 @@ impl<'a> Rewriter<'a> {
                     }
                 }
             }
+            Item::Alias(a) => {
+                self.rename(&mut a.name);
+                self.ty(&mut a.ty);
+            }
             Item::Trait(t) => {
                 self.rename(&mut t.name);
                 for f in &mut t.fns {

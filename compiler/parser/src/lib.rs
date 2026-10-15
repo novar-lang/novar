@@ -2592,6 +2592,22 @@ where
             .then(just(Token::Newline))
             .to(Member::Nothing),
     ));
+    // `type Id = Int`
+    let alias = word("type")
+        .ignore_then(ident())
+        .then(generics())
+        .then_ignore(just(Token::Eq))
+        .then(type_())
+        .then_ignore(just(Token::Newline))
+        .map_with(|((name, generics), ty), e| {
+            vec![Item::Alias(Alias {
+                is_pub: is_public(&name.node),
+                name,
+                generics,
+                ty,
+                span: rng(e.span()),
+            })]
+        });
     let class = word("type")
         .ignore_then(ident())
         .then(generics())
@@ -2676,10 +2692,14 @@ where
             })]
         });
 
-    // `enum Shape:` followed by one variant per line.
+    // `enum Shape:` followed by one variant per line. A value may have a name: `Circle(r: Float)`.
+    let variant_field = ident()
+        .then_ignore(just(Token::Colon))
+        .or_not()
+        .then(type_());
     let variant = ident()
         .then(
-            type_()
+            variant_field
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .collect::<Vec<_>>()
@@ -2687,15 +2707,37 @@ where
                 .or_not(),
         )
         .then_ignore(just(Token::Newline))
-        .map(|(name, fields)| Variant {
-            name,
-            fields: fields.unwrap_or_default(),
+        .validate(|(name, fields), e, emitter| {
+            let fields = fields.unwrap_or_default();
+            let named = fields.iter().filter(|(n, _)| n.is_some()).count();
+            if named != 0 && named != fields.len() {
+                emitter.emit(Rich::custom(
+                    e.span(),
+                    "name every value of a variant or none: `Rect(w: Float, h: Float)`",
+                ));
+            }
+            let (names, fields): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
+            Variant {
+                name,
+                fields,
+                names: names.into_iter().flatten().collect(),
+            }
         });
+    // Variants, then methods (`fn size(self) -> Int:`), in any order.
+    let enum_member = func
+        .clone()
+        .map(|f| (None, Some(f)))
+        .or(variant.map(|v| (Some(v), None)));
     let enum_ = just(Token::Enum)
         .ignore_then(ident())
         .then(generics())
         .then(
-            variant
+            ident()
+                .delimited_by(just(Token::LParen), just(Token::RParen))
+                .or_not(),
+        )
+        .then(
+            enum_member
                 .repeated()
                 .at_least(1)
                 .collect::<Vec<_>>()
@@ -2706,14 +2748,38 @@ where
                     just(Token::Dedent),
                 ),
         )
-        .map_with(|((name, generics), variants), e| {
-            vec![Item::Enum(Enum {
+        .validate(|(((name, generics), trait_name), members), e, emitter| {
+            let span = rng(e.span());
+            let mut variants = Vec::new();
+            let mut fns = Vec::new();
+            for (variant, method) in members {
+                variants.extend(variant);
+                fns.extend(method);
+            }
+            if variants.is_empty() {
+                emitter.emit(Rich::custom(
+                    e.span(),
+                    "an `enum` needs at least one variant, one per line: `Name` or `Name(Type)`",
+                ));
+            }
+            let mut items = vec![Item::Enum(Enum {
                 is_pub: is_public(&name.node),
-                name,
-                generics,
+                name: name.clone(),
+                generics: generics.clone(),
                 variants,
-                span: rng(e.span()),
-            })]
+                span: span.clone(),
+            })];
+            if !fns.is_empty() || trait_name.is_some() {
+                items.push(Item::Impl(Impl {
+                    ty_args: type_params_as_args(&generics),
+                    generics,
+                    ty: name,
+                    trait_name,
+                    fns,
+                    span,
+                }));
+            }
+            items
         });
 
     // A name set at the top of the file: `embedder = OllamaEmbedder.new("x")`.
@@ -2749,6 +2815,7 @@ where
     choice((
         import.map(|i| vec![i]),
         from.map(|i| vec![i]),
+        alias,
         class,
         enum_,
         extend,

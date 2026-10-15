@@ -251,6 +251,15 @@ impl<'a> Printer<'a> {
                     self.class(s, &impls);
                 }
                 Item::Enum(e) => self.enum_(e),
+                Item::Alias(a) => {
+                    let generics = self.generics_text(&a.generics);
+                    let ty = self.ty(&a.ty);
+                    self.line(
+                        0,
+                        &format!("type {}{generics} = {ty}", a.name.node),
+                        a.span.start,
+                    );
+                }
                 Item::Impl(im) => self.extend(im),
                 Item::Trait(t) => self.trait_(t),
                 Item::Fn(f) => self.func(f, 0, true),
@@ -375,7 +384,15 @@ impl<'a> Printer<'a> {
             let text = if v.fields.is_empty() {
                 v.name.node.clone()
             } else {
-                let tys: Vec<_> = v.fields.iter().map(|t| self.ty(t)).collect();
+                let tys: Vec<_> = v
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| match v.names.get(i) {
+                        Some(n) => format!("{}: {}", n.node, self.ty(t)),
+                        None => self.ty(t),
+                    })
+                    .collect();
                 format!("{}({})", v.name.node, tys.join(", "))
             };
             self.line(1, &text, v.name.span.start);

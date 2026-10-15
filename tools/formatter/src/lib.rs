@@ -546,4 +546,13 @@ mod tests {
             "let a = b * c\nlet d = [x * 2 for x in xs]\n"
         );
     }
+
+    #[test]
+    fn enums_with_methods_and_aliases() {
+        let src = "type Id=Int\ntype Pair[T]=(T,T)\nenum S(Named):\n    Rect(w:Float,h:Float)\n    Empty\n\n    fn name(self)->Text:\n        \"s\"\n";
+        assert_eq!(
+            fmt(src),
+            "type Id = Int\ntype Pair[T] = (T, T)\nenum S(Named):\n    Rect(w: Float, h: Float)\n    Empty\n\n    fn name(self) -> Text:\n        \"s\"\n"
+        );
+    }
 }
