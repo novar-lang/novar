@@ -3008,3 +3008,77 @@ fn one_mistake_is_reported_once() {
         "wrong value type in Ok"
     );
 }
+
+#[test]
+fn a_function_without_arrow_returns_its_final_expression() {
+    assert_clean(
+        r#"
+fn dbl(x: Int):
+    x * 2
+
+fn quad(x: Int):
+    dbl(dbl(x))
+
+fn name(n: Int):
+    if n > 0:
+        "pos"
+    else:
+        "neg"
+
+fn early(n: Int):
+    if n > 100:
+        return 100
+    n
+
+fn fact(n: Int):
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+
+fn pair(a: Int):
+    (a, "x")
+
+fn show(x: Int):
+    print(f"{x}")
+
+fn main() -> i32:
+    let a: Int = quad(2)
+    let s: Text = name(3)
+    let e: Int = early(5)
+    let f: Int = fact(4)
+    let q: Int = pair(1).0
+    show(a)
+    0
+"#,
+    );
+    let (hir, _) = check("fn dbl(x: Int):\n    x * 2\n");
+    assert_eq!(hir.fns[0].ret, Ty::Prim(telvax_hir::Prim::I64));
+    assert_err(
+        "fn dbl(x: Int):\n    x * 2\n\nfn f():\n    let t: Text = dbl(1)\n",
+        "expected `Text`, found `Int`",
+    );
+}
+
+#[test]
+fn main_tests_and_methods_keep_returning_nothing() {
+    let (hir, errs) = check(
+        r#"
+fn main():
+    1 + 1
+
+fn test_it():
+    1 + 1
+
+type P:
+    x: Int
+
+    fn get(self):
+        self.x
+"#,
+    );
+    assert!(errs.is_empty(), "{errs:?}");
+    for f in &hir.fns {
+        assert_eq!(f.ret, Ty::Unit, "{}", f.name);
+    }
+}

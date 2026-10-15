@@ -15,13 +15,14 @@ type Span = std::ops::Range<usize>;
 type Constructor = (Option<String>, String, Vec<Ty>);
 
 /// A generic function (or method) instance waiting to have its body checked.
+#[derive(Clone)]
 struct Pending {
     f: ast::Fn,
     impl_ty: Option<String>,
     subst: HashMap<String, Ty>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Checker {
     diags: Vec<Diagnostic>,
     /// Imported name -> its full path.
@@ -502,6 +503,8 @@ impl Checker {
             }
         }
 
+        self.infer_returns(&mut fns);
+
         let mut lowered = HashSet::new();
         for (f, impl_ty) in &fns {
             if f.required {
@@ -524,6 +527,51 @@ impl Checker {
         out.structs.append(&mut self.anon_structs);
         out.enums.append(&mut self.anon_enums);
         out
+    }
+
+    /// Gives a function that has no `->` the type of its final expression, so `fn double(x: Int):
+    /// x * 2` returns an `Int`. Each body is checked in a copy of the checker; a function that
+    /// calls another one without `->` waits for it, so this repeats until nothing changes.
+    /// Functions that need their signature written (`main`, tests, endpoints, generics, methods)
+    /// and bodies with errors keep returning nothing.
+    fn infer_returns(&mut self, fns: &mut [(ast::Fn, Option<String>)]) {
+        let mut open: Vec<usize> = (0..fns.len())
+            .filter(|&i| {
+                let (f, impl_ty) = &fns[i];
+                impl_ty.is_none()
+                    && f.ret.is_none()
+                    && !f.required
+                    && f.generics.is_empty()
+                    && f.attrs.is_empty()
+                    && f.name.node != "main"
+                    && !f.name.node.starts_with("test_")
+                    && self.fn_sigs.contains_key(&f.name.node)
+            })
+            .collect();
+        loop {
+            let before = open.len();
+            open.retain(|&i| {
+                let mut f = fns[i].0.clone();
+                telvax_ast::tail::tailify_block(&mut f.body);
+                let mut copy = self.clone();
+                let known = copy.diags.len();
+                if let Some(sig) = copy.fn_sigs.get_mut(&f.name.node) {
+                    sig.1 = Ty::Unknown;
+                }
+                let ty = copy.lower_fn(&f).body.ty;
+                if copy.diags.len() > known || matches!(ty, Ty::Unit | Ty::Never | Ty::Unknown) {
+                    return true;
+                }
+                if let Some(sig) = self.fn_sigs.get_mut(&f.name.node) {
+                    sig.1 = ty;
+                }
+                fns[i].0 = f;
+                false
+            });
+            if open.len() == before {
+                break;
+            }
+        }
     }
 
     // ---- types -------------------------------------------------------------------------

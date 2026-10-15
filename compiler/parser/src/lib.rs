@@ -2,10 +2,8 @@
 //!
 //! The surface syntax reads like Python (blocks by indentation, `elif`, `and` / `or` / `not`,
 //! `from a.b import C`) with its own words: `fn`, `let` / `var`, `type`, `x => x + 1`, `Int?`. Everything is rewritten into the same tree the compiler
-//! always used, so nothing after the parser knows about the surface: see `desugar` for the
+//! always used, so nothing after the parser knows about the surface: see `telvax_ast::tail` for the
 //! rewrites that need more than one statement to decide (declarations and `return`).
-
-mod desugar;
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -1358,7 +1356,7 @@ where
             .then_ignore(just(Token::Arrow).ignore_then(type_()).or_not())
             .then(block.clone())
             .map_with(|((name, params), mut body), e| {
-                desugar::tailify_block(&mut body);
+                telvax_ast::tail::tailify_block(&mut body);
                 let (names, types): (Vec<_>, Vec<_>) = params.into_iter().unzip();
                 let body_span = body.span.clone();
                 BlockItem::Let(Let {
@@ -1891,9 +1889,9 @@ where
         let mut items: Vec<Item> = groups.into_iter().flatten().collect();
         for item in &mut items {
             match item {
-                Item::Fn(f) => desugar::finish_fn(f),
-                Item::Impl(i) => i.fns.iter_mut().for_each(desugar::finish_fn),
-                Item::Trait(t) => t.fns.iter_mut().for_each(desugar::finish_fn),
+                Item::Fn(f) => telvax_ast::tail::finish_fn(f),
+                Item::Impl(i) => i.fns.iter_mut().for_each(telvax_ast::tail::finish_fn),
+                Item::Trait(t) => t.fns.iter_mut().for_each(telvax_ast::tail::finish_fn),
                 _ => {}
             }
         }
