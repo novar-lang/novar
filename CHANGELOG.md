@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **`--allow` limits what a program may do:** `telvax run`, `test` and `serve` take
+  `--allow fs.read,fs.write,fs,env,net,all,none`. A call that needs a capability that was not listed
+  stops with a message that names the word to add. Without the flag everything is allowed, as before.
+  The check happens when the program runs; it is not part of the types.
 * **Built-in macros:** `assert!(cond)` quotes the condition when it fails, `assert!(cond, "message")`,
   `dbg!(value)` prints `value = result` to stderr and gives the value back, and `todo!()`,
   `unreachable!()` and `panic!("message")` stop the program (and fit any type). An unknown `name!(...)`

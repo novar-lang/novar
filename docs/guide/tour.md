@@ -199,6 +199,30 @@ fn first_over(limit: i32) -> i32:
 variant is its name (`"Empty"`), one with values is `{"Circle": 2.0}` or `{"Rect": [2.0, 3.0]}`.
 Enums run in the interpreter; the native backend does not compile them yet.
 
+## Limiting what a program may do
+
+A program can read and write files, read environment variables and reach the network. `--allow`
+on `run`, `test` and `serve` lists what it may do; without the flag everything is allowed.
+
+```sh
+telvax run job.tvx main --allow fs.read          # may read files, nothing else
+telvax test app.tvx --allow none                 # may touch nothing outside itself
+telvax serve app.tvx --live --allow net,env
+```
+
+| Word | Allows |
+|---|---|
+| `fs.read` | `std.fs.read`, `std.fs.exists`, `read_csv`, `read_parquet` |
+| `fs.write` | `std.fs.write`, `write_csv`, `write_parquet` |
+| `fs` | `fs.read` and `fs.write` |
+| `env` | `std.env.get` |
+| `net` | the Ollama, OpenAI and PostgreSQL clients, when `--live` |
+| `all`, `none` | everything, nothing |
+
+A call that is not allowed stops the program and says which word to add:
+`` `std.fs.read` needs the `fs.read` capability; run with `--allow fs.read` ``. The limit is checked when
+the program runs, not when it is compiled, and `std.io.print` and `std.time` are always allowed.
+
 ## Tests
 
 A function called `test_...` without arguments is a test. `assert(cond)` and `assert_eq(a, b)` stop

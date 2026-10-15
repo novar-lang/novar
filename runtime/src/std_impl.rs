@@ -70,6 +70,7 @@ fn status(code: u16, args: &[Value]) -> Res {
 }
 
 pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, result: &Ty) -> Res {
+    interp.require(path)?;
     if path.starts_with("std::tensor::") {
         return crate::tensor::call(path, &args, result, interp.quantization(), interp.device());
     }
@@ -1252,5 +1253,37 @@ mod tests {
         assert!(e.to_string().contains("is not implemented by the runtime"));
         let e = call_function(&interp, "std::tensor::nothing", Vec::new(), &Ty::Unknown);
         assert!(e.is_err());
+    }
+
+    #[test]
+    fn io_needs_its_capability() {
+        use crate::{Capability, Caps};
+        let none =
+            Interp::with_caps(telvax_hir::hir::Program::default(), false, Caps::NONE).unwrap();
+        let path = Value::str("/tmp/telvax-caps-test");
+        for function in ["std::fs::exists", "std::fs::read", "std::table::read_csv"] {
+            let e = call_function(&none, function, vec![path.clone()], &Ty::Unknown)
+                .expect_err(function);
+            assert!(e.to_string().contains("`fs.read` capability"), "{e}");
+        }
+        let e = call_function(
+            &none,
+            "std::env::get",
+            vec![Value::str("HOME")],
+            &Ty::Unknown,
+        )
+        .expect_err("env");
+        assert!(e.to_string().contains("--allow env"), "{e}");
+        // What touches nothing outside the program is never refused, and neither is a client of
+        // the offline stand-ins.
+        assert!(call_function(&none, "std::math::abs", vec![Value::Int(-1)], &Ty::Unknown).is_ok());
+        assert!(none.require("std::ai::llm::OpenAIClient::new").is_ok());
+        let only_read = Caps::parse("fs.read").unwrap();
+        let some =
+            Interp::with_caps(telvax_hir::hir::Program::default(), false, only_read).unwrap();
+        assert!(some.require("std::fs::read").is_ok());
+        let e = some.require("std::fs::write").unwrap_err();
+        assert!(e.to_string().contains("`fs.write`"), "{e}");
+        assert!(only_read.allows(Capability::FsRead));
     }
 }

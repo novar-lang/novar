@@ -15,18 +15,20 @@ pub struct Options {
     pub port: u16,
     pub seed: Option<String>,
     pub live: bool,
+    pub allow: telvax_runtime::Caps,
     pub quantize: telvax_hir::Quantization,
     pub device: telvax_runtime::Device,
 }
 
 impl Options {
-    /// Parses `--port N`, `--host H`, `--seed FILE` and `--live`.
+    /// Parses `--port N`, `--host H`, `--seed FILE`, `--live` and `--allow LIST`.
     pub fn parse(default_host: &str, flags: &[&str]) -> Result<Options, CliError> {
         let mut opts = Options {
             host: default_host.to_string(),
             port: 8080,
             seed: None,
             live: false,
+            allow: telvax_runtime::Caps::ALL,
             quantize: telvax_hir::Quantization::None,
             device: telvax_runtime::Device::Cpu,
         };
@@ -34,6 +36,11 @@ impl Options {
         while let Some(flag) = it.next() {
             if *flag == "--live" {
                 opts.live = true;
+                continue;
+            }
+            if *flag == "--allow" {
+                let (c, _) = crate::take_allow(&["--allow", it.next().copied().unwrap_or("")])?;
+                opts.allow = c;
                 continue;
             }
             if *flag == "--quantize" {
@@ -103,8 +110,9 @@ pub fn run(
     if routes.is_empty() {
         return failed("no `@endpoint` functions found, nothing to serve");
     }
-    let interp =
-        Arc::new(Interp::with_live(program, opts.live).or_else(|e| failed(e.to_string()))?);
+    let interp = Arc::new(
+        Interp::with_caps(program, opts.live, opts.allow).or_else(|e| failed(e.to_string()))?,
+    );
     interp.set_quantization(opts.quantize);
     interp.set_device(opts.device);
     if let Some((workers, image)) = cluster {

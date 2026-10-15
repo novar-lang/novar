@@ -14,15 +14,17 @@ usage:
   telvax check <file.tvx>
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
-  telvax test <file.tvx> [name]                             run the `test_*` functions
-  telvax run <file.tvx> <function> [args...] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
+  telvax run <file.tvx> <function> [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
-  telvax serve <file.tvx> [--port N] [--host H] [--seed docs.jsonl] [--live] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax serve <file.tvx> [--port N] [--host H] [--seed docs.jsonl] [--live] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax build --serve <file.tvx> [-o out] [--dockerfile]   single-binary server (+ Dockerfile)
   telvax jit <file.tvx> <function> [args...]                 (native, needs --features llvm)
   telvax build <file.tvx> [-o out] [--emit exe|obj|llvm-ir|mlir|ptx|stablehlo] [-O 0-3] [--sm sm_80]
-                                                    (all but stablehlo need --features llvm)";
+                                                    (all but stablehlo need --features llvm)
+
+--allow takes a list of fs.read, fs.write, fs, env, net, all, none. Without it everything is allowed.";
 
 /// Stack for the thread that does the work. Checking and running recurse once per level of a
 /// program's nesting (a sum of a few hundred terms, calls inside calls), and the 8 MB of a main
@@ -79,8 +81,14 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         }
         ["check", file] => check(file).map(|_| ()),
         ["run", file, func, rest @ ..] => run(file, func, rest),
-        ["test", file] => test(file, None),
-        ["test", file, filter] => test(file, Some(filter)),
+        ["test", file, rest @ ..] => {
+            let (caps, rest) = take_allow(rest)?;
+            match rest.as_slice() {
+                [] => test(file, None, caps),
+                [filter] => test(file, Some(filter), caps),
+                _ => Err(CliError::Usage),
+            }
+        }
         ["serve", file, rest @ ..] => {
             let (workers, rest) = take_workers(rest);
             let opts = serve::Options::parse("127.0.0.1", &rest)?;
@@ -194,6 +202,24 @@ pub fn take_device<'a>(
     Ok((device, rest))
 }
 
+/// Splits `--allow fs.read,net,...` out of `args`. Without it everything is allowed.
+pub fn take_allow<'a>(args: &[&'a str]) -> Result<(telvax_runtime::Caps, Vec<&'a str>), CliError> {
+    let mut caps = telvax_runtime::Caps::ALL;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if *a == "--allow" {
+            let Some(list) = it.next() else {
+                return failed("--allow takes a list such as `fs.read,net`, or `none`");
+            };
+            caps = telvax_runtime::Caps::parse(list).or_else(failed)?;
+        } else {
+            rest.push(*a);
+        }
+    }
+    Ok((caps, rest))
+}
+
 /// Splits `--quantize int8|int8-channel|int4-channel|none` out of `args`.
 pub fn take_quantize<'a>(
     args: &[&'a str],
@@ -296,7 +322,7 @@ fn parse_arg(raw: &str) -> Value {
 
 /// `telvax test <file> [name]`: runs every function called `test_*` that takes no arguments. A
 /// test passes when it returns and fails when it stops with an error (`assert`, `assert_eq`, ...).
-fn test(file: &str, filter: Option<&str>) -> Result<(), CliError> {
+fn test(file: &str, filter: Option<&str>, caps: telvax_runtime::Caps) -> Result<(), CliError> {
     let checked = check_project(file)?;
     let mut names: Vec<String> = checked
         .hir
@@ -312,7 +338,7 @@ fn test(file: &str, filter: Option<&str>) -> Result<(), CliError> {
             "no test functions found (a test is a function named `test_...` without arguments)",
         );
     }
-    let interp = Interp::new(checked.hir).or_else(|e| failed(e.to_string()))?;
+    let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
     let mut failures = 0;
     for name in &names {
         match interp.call(name, vec![]) {
@@ -328,11 +354,12 @@ fn test(file: &str, filter: Option<&str>) -> Result<(), CliError> {
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
-    let (quant, args) = take_quantize(args)?;
+    let (caps, args) = take_allow(args)?;
+    let (quant, args) = take_quantize(&args)?;
     let (device, args) = take_device(&args)?;
     let (workers, args) = take_workers(&args);
     let checked = check_project(file)?;
-    let interp = Interp::new(checked.hir).or_else(|e| failed(e.to_string()))?;
+    let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
     interp.set_quantization(quant);
     interp.set_device(device);
     if let Some(workers) = workers {

@@ -118,6 +118,36 @@ fn an_unknown_macro_names_the_ones_that_exist() {
 }
 
 #[test]
+fn allow_limits_what_a_program_may_touch() {
+    let src = "import std.fs\n\nfn has(path: Text) -> Bool:\n    std.fs.exists(path)\n\nfn test_has():\n    assert(has(\"/\"))\n\nfn add(a: Int, b: Int) -> Int:\n    a + b\n";
+    let file = scratch("caps", src);
+    let path = file.to_str().unwrap();
+    // Everything is allowed unless `--allow` says otherwise.
+    let (ok, out, _) = run(&["run", path, "has", "/"]);
+    assert!(ok && out.contains("True"), "{out}");
+    let (ok, _, err) = run(&["run", path, "has", "/", "--allow", "none"]);
+    assert!(!ok);
+    assert!(
+        err.contains("`std.fs.exists` needs the `fs.read` capability")
+            && err.contains("--allow fs.read"),
+        "{err}"
+    );
+    let (ok, out, _) = run(&["run", path, "has", "/", "--allow", "fs.read"]);
+    assert!(ok && out.contains("True"), "{out}");
+    // A function that does no I/O is not affected.
+    let (ok, out, _) = run(&["run", path, "add", "1", "2", "--allow", "none"]);
+    assert!(ok && out.contains('3'), "{out}");
+    let (ok, out, _) = run(&["test", path, "--allow", "env"]);
+    assert!(
+        !ok && out.contains("FAILED  test_has") && out.contains("--allow fs.read"),
+        "{out}"
+    );
+    let (ok, _, err) = run(&["run", path, "add", "1", "2", "--allow", "disk"]);
+    assert!(!ok && err.contains("unknown capability `disk`"), "{err}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
 fn deeply_nested_programs_are_checked_not_crashed() {
     // Calls inside calls, within the limit on brackets, and a sum of many terms: the checker
     // recurses once per level and used to overflow the 8 MB stack of a main thread.

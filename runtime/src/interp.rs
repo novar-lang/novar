@@ -97,6 +97,7 @@ pub struct Interp {
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     out: Mutex<Box<dyn std::io::Write + Send>>,
     live: std::sync::atomic::AtomicBool,
+    caps: std::sync::atomic::AtomicU8,
     /// Remaining evaluation steps; `u64::MAX` means unlimited.
     fuel: std::sync::atomic::AtomicU64,
     quantization: std::sync::atomic::AtomicU8,
@@ -125,6 +126,16 @@ impl Interp {
 
     /// Like [`Interp::new`], choosing real services (`live`) before the globals are evaluated.
     pub fn with_live(program: hir::Program, live: bool) -> Result<Interp, RuntimeError> {
+        Self::with_caps(program, live, crate::Caps::ALL)
+    }
+
+    /// Like [`Interp::with_live`], also limiting what the program may do outside itself. The
+    /// limit is in force while the globals are evaluated.
+    pub fn with_caps(
+        program: hir::Program,
+        live: bool,
+        caps: crate::Caps,
+    ) -> Result<Interp, RuntimeError> {
         let interp = Interp {
             structs: program
                 .structs
@@ -145,6 +156,7 @@ impl Interp {
             dbs: Mutex::new(HashMap::new()),
             out: Mutex::new(Box::new(std::io::stdout())),
             live: std::sync::atomic::AtomicBool::new(live),
+            caps: std::sync::atomic::AtomicU8::new(caps.bits()),
             fuel: std::sync::atomic::AtomicU64::new(u64::MAX),
             quantization: std::sync::atomic::AtomicU8::new(0),
             executor: RwLock::new(None),
@@ -294,6 +306,24 @@ impl Interp {
             1 => Device::Gpu,
             _ => Device::Cpu,
         }
+    }
+
+    /// Fails unless the program may call the standard library function `path`. Reaching the
+    /// network only counts when the services are live; the offline stand-ins touch nothing.
+    pub(crate) fn require(&self, path: &str) -> Result<(), RuntimeError> {
+        let Some(need) = crate::Capability::of_function(path) else {
+            return Ok(());
+        };
+        let caps = crate::Caps::from_bits(self.caps.load(std::sync::atomic::Ordering::Relaxed));
+        if caps.allows(need) || (need == crate::Capability::Net && !self.is_live()) {
+            return Ok(());
+        }
+        Err(RuntimeError::new(format!(
+            "`{}` needs the `{}` capability; run with `--allow {}`",
+            path.replace("::", "."),
+            need.name(),
+            need.name()
+        )))
     }
 
     pub fn is_live(&self) -> bool {
