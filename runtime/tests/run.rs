@@ -1967,3 +1967,41 @@ fn run() -> Int:
     // total 12, width 3, apply 104
     assert_eq!(int(run(src, "run", vec![])), 12 * 10 + 3 + 104);
 }
+
+#[test]
+fn methods_without_an_arrow_return_their_last_expression() {
+    let src = r#"
+trait Shape:
+    fn area(self) -> Int: ...
+
+type Sq(Shape):
+    s: Int
+
+    fn area(self):
+        self.s * self.s
+
+type P:
+    n: Int
+
+    fn double(self):
+        self.n * 2
+
+    fn make(k: Int):
+        P(n: k)
+
+extend P:
+    fn triple(self):
+        self.n * 3
+
+let base = twice(5)
+
+fn twice(x: Int):
+    x * 2
+
+fn run() -> Int:
+    let p = P.make(4)
+    Sq(s: 3).area() + p.double() + p.triple() + base
+"#;
+    // 9 + 8 + 12 + 10
+    assert_eq!(int(run(src, "run", vec![])), 39);
+}
