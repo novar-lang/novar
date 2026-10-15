@@ -633,3 +633,24 @@ fn words_from_other_languages_get_a_hint() {
     let (_, errs) = parse("fn f(def: Int) -> Int:\n    def\n");
     assert!(errs.is_empty(), "{errs:?}");
 }
+
+#[test]
+fn function_types_and_typed_closure_parameters() {
+    let f = only_fn(
+        "fn f(g: (Int, Text) -> Bool, h: () -> (), k: (Int) -> (Int) -> Int) -> Int:\n    1\n",
+    );
+    let name = |t: &Type| t.path[0].node.clone();
+    assert_eq!(name(&f.params[0].ty), "(fn)");
+    assert_eq!(f.params[0].ty.args.len(), 3);
+    assert_eq!(name(&f.params[1].ty), "(fn)");
+    assert_eq!(f.params[1].ty.args.len(), 1);
+    // The return type of a function type is the rest: `(Int) -> (Int) -> Int` curries.
+    assert_eq!(f.params[2].ty.args.len(), 2);
+    // A tuple is still a tuple.
+    let f = only_fn("fn f(p: (Int, Text)) -> Int:\n    1\n");
+    assert_eq!(f.params[0].ty.path[0].node, "(tuple)");
+    let ExprKind::Closure { types, .. } = ok_expr("(x: Int, y) => x") else {
+        panic!("not a closure")
+    };
+    assert!(types[0].is_some() && types[1].is_none());
+}

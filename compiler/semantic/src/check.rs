@@ -715,6 +715,12 @@ impl Checker {
                     Ty::Unknown
                 }
             },
+            "(unit)" => Ty::Unit,
+            "(fn)" => {
+                let mut tys: Vec<Ty> = type_args.iter().map(|a| self.resolve_type(a)).collect();
+                let ret = tys.pop().unwrap_or(Ty::Unit);
+                Ty::Fn(tys, Box::new(ret))
+            }
             "(tuple)" => Ty::Tuple(type_args.iter().map(|a| self.resolve_type(a)).collect()),
             "Option" => match type_args.as_slice() {
                 [inner] if t.args.len() == 1 => Ty::Option(Box::new(self.resolve_type(inner))),

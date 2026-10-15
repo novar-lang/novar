@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Function types:** `(Int, Int) -> Int` is a type, so a function can be a parameter, a field, a list
+  element or a return value (`fn adder(n: Int) -> (Int) -> Int: x => x + n`). `() -> ()` stands for no
+  value. A field that holds a function can be called (`handler.run(5)`), and a closure parameter can
+  carry its type: `(x: Int) => x + 1`.
 * **Methods on `Result` and `Option`:** `Result` has `is_ok`, `is_err`, `unwrap`, `expect`,
   `unwrap_or`, `unwrap_or_else`, `map`, `map_err`, `and_then`, `ok` and `err`; `Option` gains `map`,
   `and_then`, `filter`, `ok_or`, `unwrap_or_else` and `expect`. They are checked: a method that does not

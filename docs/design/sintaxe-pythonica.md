@@ -60,7 +60,7 @@ fn handle(q: Query) -> Result[Reply, Status]:
 |---|---|
 | função | `fn f(a: Int, b: Int = 1) -> Int:` (o último valor é o resultado; `return` sai antes) |
 | variável | `let x = 1` (fixa), `var x = 1` (muda), `let a, b = par` |
-| tipos | `Int`, `Float`, `Text`, `Bool`, `List[T]`, `Map[K, V]`, `T?`, `Result[T, E]`, `Tensor[f32, 2, 3]`, `Table[Row]`, tuplas `(A, B)`; números de tamanho fixo `i8`..`i64`, `u8`..`u64`, `f32`, `f64` |
+| tipos | `Int`, `Float`, `Text`, `Bool`, `List[T]`, `Map[K, V]`, `T?`, `Result[T, E]`, `Tensor[f32, 2, 3]`, `Table[Row]`, tuplas `(A, B)`, funções `(A, B) -> C` (`() -> C`; `(A) -> ()` quando não devolve nada); números de tamanho fixo `i8`..`i64`, `u8`..`u64`, `f32`, `f64` |
 | tipo próprio | `type P:` com campos (`x: Float`, `n: Int = 5`) e métodos; `type C(Trait):`; `type Pilha[T]:` |
 | enum, trait, extensão | `enum E:` (uma variante por linha), `trait T:` (`fn f(self) -> Int: ...` é obrigatório), `extend P:` |
 | construção | `P(x: 1.0, y: 2.0)` |
