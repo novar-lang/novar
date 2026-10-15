@@ -702,3 +702,71 @@ fn type_arguments_after_a_function_name() {
     };
     assert!(matches!(index.node, ExprKind::Path(_)));
 }
+
+#[test]
+fn nesting_has_a_limit_instead_of_overflowing_the_stack() {
+    let blocks = |n: usize| {
+        let mut s = String::from("fn f():\n");
+        for level in 0..n {
+            s.push_str(&format!("{}if True:\n", "    ".repeat(level + 1)));
+        }
+        s.push_str(&format!("{}pass\n", "    ".repeat(n + 1)));
+        s
+    };
+    // A realistic depth is fine; a silly one is an error that says why.
+    let (program, errs) = parse(&blocks(20));
+    assert!(errs.is_empty() && program.is_some(), "{errs:?}");
+    let (program, errs) = parse(&blocks(10_000));
+    assert!(program.is_none());
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert!(errs[0].message.contains("nested too deeply"), "{errs:?}");
+    let deep = format!("let x = {}1{}\n", "[".repeat(10_000), "]".repeat(10_000));
+    let (_, errs) = parse(&deep);
+    assert!(
+        errs.iter()
+            .any(|e| e.message.contains("brackets are nested too deeply"))
+    );
+}
+
+#[test]
+fn nested_parentheses_take_linear_time() {
+    // Each level used to be read twice, so twenty levels took seconds and forty never ended.
+    let start = std::time::Instant::now();
+    for depth in [20usize, 60, 150] {
+        let exprs = format!("let x = {}1{}\n", "(".repeat(depth), ")".repeat(depth));
+        let tuples = format!("let x = {}1, 2{}\n", "(".repeat(depth), ")".repeat(depth));
+        let mut nested = String::from("Int");
+        for _ in 0..depth {
+            nested = format!("({nested}, Int)");
+        }
+        let types = format!("fn f(a: {nested}):\n    pass\n");
+        for src in [exprs, tuples, types] {
+            let (program, errs) = parse(&src);
+            assert!(program.is_some(), "depth {depth}: {errs:?}");
+        }
+    }
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+}
+
+#[test]
+fn parentheses_still_mean_group_tuple_and_function_type() {
+    assert!(matches!(ok_expr("(1)"), ExprKind::Lit(_)));
+    assert!(matches!(ok_expr("(1, 2)"), ExprKind::Tuple(items) if items.len() == 2));
+    assert!(matches!(ok_expr("(1, 2,)"), ExprKind::Tuple(items) if items.len() == 2));
+    assert!(matches!(ok_expr("((1, 2), 3)"), ExprKind::Tuple(items) if items.len() == 2));
+    // A trailing comma does not make a one-element tuple.
+    let (_, errs) = parse_expr("(1,)");
+    assert!(!errs.is_empty());
+    let f = only_fn(
+        "fn f(a: (Int, Text), b: (Int) -> Int, c: () -> (), d: ((Int, Int)) -> Int) -> Int:\n    1\n",
+    );
+    let heads: Vec<&str> = f
+        .params
+        .iter()
+        .map(|p| p.ty.path[0].node.as_str())
+        .collect();
+    assert_eq!(heads, ["(tuple)", "(fn)", "(fn)", "(fn)"]);
+    // A single type in parentheses is neither.
+    let (_, errs) = parse("fn f(a: (Int)):\n    pass\n");
+    assert!(!errs.is_empty());
+}

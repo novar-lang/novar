@@ -138,6 +138,52 @@ fn lex_message(text: &str) -> Diagnostic {
     }
 }
 
+/// The deepest nesting of blocks and of brackets the parser reads. Each level is a few frames of
+/// recursion, so a text nested a million deep would overflow the stack and end the process
+/// instead of reporting an error; nothing a person writes comes near these.
+const MAX_BLOCK_DEPTH: usize = 64;
+const MAX_BRACKET_DEPTH: usize = 200;
+
+/// An error for a text nested more deeply than `MAX_BLOCK_DEPTH` / `MAX_BRACKET_DEPTH`.
+fn nesting_error(tokens: &[(Token<'_>, std::ops::Range<usize>)]) -> Option<Diagnostic> {
+    let (mut blocks, mut brackets) = (0usize, 0usize);
+    for (token, span) in tokens {
+        match token {
+            Token::Indent => {
+                blocks += 1;
+                if blocks > MAX_BLOCK_DEPTH {
+                    return Some(
+                        Diagnostic::error(
+                            span.clone(),
+                            format!(
+                                "blocks are nested too deeply (at most {MAX_BLOCK_DEPTH} levels)"
+                            ),
+                        )
+                        .with_note("move the inner part into a function of its own"),
+                    );
+                }
+            }
+            Token::Dedent => blocks = blocks.saturating_sub(1),
+            Token::LParen | Token::LBracket | Token::LBrace => {
+                brackets += 1;
+                if brackets > MAX_BRACKET_DEPTH {
+                    return Some(Diagnostic::error(
+                        span.clone(),
+                        format!(
+                            "brackets are nested too deeply (at most {MAX_BRACKET_DEPTH} levels)"
+                        ),
+                    ));
+                }
+            }
+            Token::RParen | Token::RBracket | Token::RBrace => {
+                brackets = brackets.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Words from other languages that start a line, with what to write in Telvax.
 fn foreign_word(word: &str) -> Option<&'static str> {
     Some(match word {
@@ -205,10 +251,17 @@ pub fn parse(src: &str) -> (Option<Program>, Vec<Diagnostic>) {
 /// Like [`parse`], with every span shifted by `base`. Lets several files share one offset space,
 /// so a single span identifies a place in a whole multi-file program.
 pub fn parse_at(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
+    telvax_ast::stack::with_big_stack(|| parse_here(src, base))
+}
+
+fn parse_here(src: &str, base: usize) -> (Option<Program>, Vec<Diagnostic>) {
     let (mut tokens, lex_errors) = telvax_lexer::tokenize(src);
     let heads: Heads = Rc::new(import_heads(&tokens));
     for (_, span) in &mut tokens {
         *span = span.start + base..span.end + base;
+    }
+    if let Some(error) = nesting_error(&tokens) {
+        return (None, vec![error]);
     }
     let first_words: Vec<(String, std::ops::Range<usize>)> = {
         let mut out = Vec::new();
@@ -381,60 +434,40 @@ where
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket));
-        // `(Int, Text)`: a tuple type is spelled with a name no program can write.
-        let tuple_ty = ty
-            .clone()
-            .separated_by(just(Token::Comma))
-            .at_least(2)
-            .allow_trailing()
-            .collect::<Vec<_>>()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map_with(|items, e| {
-                let span = rng(e.span());
-                Type {
-                    path: vec![Ident {
-                        node: "(tuple)".into(),
-                        span: span.clone(),
-                    }],
-                    args: items.into_iter().map(TypeArg::Type).collect(),
-                    span,
-                }
-            });
-        // `(Int, Int) -> Int`, `() -> Text`: the type of a function. The same spelling as a
-        // function header's return type, with the parameter types in parentheses. `()` is the
-        // type of a function that returns nothing: `(Int) -> ()`.
-        let unit_ty = just(Token::LParen)
-            .then(just(Token::RParen))
-            .map_with(|_, e| {
-                let span = rng(e.span());
-                Type {
-                    path: vec![Ident {
-                        node: "(unit)".into(),
-                        span: span.clone(),
-                    }],
-                    args: Vec::new(),
-                    span,
-                }
-            });
-        let fn_ty = ty
+        // `(Int, Text)` is a tuple, `(Int, Int) -> Int` a function, `()` nothing. The types in
+        // parentheses are read once and what follows decides which, so nesting does not multiply
+        // the work. A tuple type is spelled with a name no program can write.
+        let paren_ty = ty
             .clone()
             .separated_by(just(Token::Comma))
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .then_ignore(just(Token::Arrow))
-            .then(ty.clone())
-            .map_with(|(mut params, ret), e| {
-                let span = rng(e.span());
-                params.push(ret);
-                Type {
+            .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
+            .try_map(|(mut items, ret), span| {
+                let span = rng(span);
+                let (name, args) = match ret {
+                    Some(ret) => {
+                        items.push(ret);
+                        ("(fn)", items)
+                    }
+                    None if items.is_empty() => ("(unit)", items),
+                    None if items.len() >= 2 => ("(tuple)", items),
+                    None => {
+                        return Err(Rich::custom(
+                            SimpleSpan::from(span),
+                            "a type in parentheses is a function type, `(Int) -> Int`, or a tuple of two or more",
+                        ));
+                    }
+                };
+                Ok(Type {
                     path: vec![Ident {
-                        node: "(fn)".into(),
+                        node: name.into(),
                         span: span.clone(),
                     }],
-                    args: params.into_iter().map(TypeArg::Type).collect(),
+                    args: args.into_iter().map(TypeArg::Type).collect(),
                     span,
-                }
+                })
             });
         let named = path().then(args.or_not()).map_with(|(mut path, args), e| {
             if path.len() == 1 {
@@ -452,9 +485,7 @@ where
             }
         });
         // `T?` is `Option<T>`.
-        fn_ty
-            .or(tuple_ty)
-            .or(unit_ty)
+        paren_ty
             .or(named)
             .then(just(Token::Question).or_not())
             .map_with(|(base, optional), e| match optional {
@@ -775,28 +806,28 @@ where
                     .map_err(|e| Rich::custom(SimpleSpan::from(e.span), e.message))
             });
 
-        // `(a, b)` is a tuple; `(a)` is just `a` in parentheses.
-        let tuple = expr
+        // `(a, b)` is a tuple; `(a)` is just `a` in parentheses. The first expression is read once
+        // and what follows it decides which, so nesting does not multiply the work.
+        let paren = expr
             .clone()
             .then(
                 just(Token::Comma)
                     .ignore_then(expr.clone())
                     .repeated()
                     .at_least(1)
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>()
+                    .then_ignore(just(Token::Comma).or_not())
+                    .or_not(),
             )
-            .then_ignore(just(Token::Comma).or_not())
             .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|(first, rest)| {
-                let mut items = vec![first];
-                items.extend(rest);
-                ExprKind::Tuple(items)
-            });
-        let paren = tuple
-            .or(expr
-                .clone()
-                .delimited_by(just(Token::LParen), just(Token::RParen))
-                .map(|e| e.node))
+            .map(|(first, rest): (Expr, Option<Vec<Expr>>)| match rest {
+                None => first.node,
+                Some(rest) => {
+                    let mut items = vec![first];
+                    items.extend(rest);
+                    ExprKind::Tuple(items)
+                }
+            })
             .recover_with(via_parser(nested_delimiters(
                 Token::LParen,
                 Token::RParen,

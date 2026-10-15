@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+pub mod stack;
 pub mod tail;
 
 pub type Span = Range<usize>;

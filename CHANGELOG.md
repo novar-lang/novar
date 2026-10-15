@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Deeply nested code no longer hangs or crashes the compiler:** parentheses inside parentheses were
+  read twice per level, so twenty levels took seconds and forty never finished; they now take linear
+  time. Blocks nested past 64 levels and brackets past 200 are an error that says so, and the parser and
+  the checker run on a stack of their own, so a long sum or calls inside calls are checked instead of
+  overflowing the stack and ending the process.
 * **Methods with type parameters of their own:** `fn map[U](self, f: (T) -> U) -> Stack[U]` in a generic
   or a plain `type`, or in an `extend`. The parameters are inferred from the call and may have limits
   (`[N: Num]`). Before, they were an error ("not supported yet").
