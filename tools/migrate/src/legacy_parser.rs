@@ -1180,6 +1180,7 @@ where
                     name,
                     fields: fields.unwrap_or_default(),
                     names: Vec::new(),
+                    from: false,
                 })
                 .separated_by(just(Token::Comma))
                 .allow_trailing()

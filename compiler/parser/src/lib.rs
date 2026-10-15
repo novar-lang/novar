@@ -2697,7 +2697,9 @@ where
         .then_ignore(just(Token::Colon))
         .or_not()
         .then(type_());
-    let variant = ident()
+    let variant = just(Token::From)
+        .or_not()
+        .then(ident())
         .then(
             variant_field
                 .separated_by(just(Token::Comma))
@@ -2707,7 +2709,7 @@ where
                 .or_not(),
         )
         .then_ignore(just(Token::Newline))
-        .validate(|(name, fields), e, emitter| {
+        .validate(|((from, name), fields), e, emitter| {
             let fields = fields.unwrap_or_default();
             let named = fields.iter().filter(|(n, _)| n.is_some()).count();
             if named != 0 && named != fields.len() {
@@ -2721,6 +2723,7 @@ where
                 name,
                 fields,
                 names: names.into_iter().flatten().collect(),
+                from: from.is_some(),
             }
         });
     // Variants, then methods (`fn size(self) -> Int:`), in any order.

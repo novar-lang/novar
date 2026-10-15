@@ -2483,8 +2483,8 @@ type Pair[T] = (T, T)
 type Names = Map[Id, Text]
 
 enum AppError:
-    Parse(Text)
-    Range(Int)
+    from Parse(Text)
+    from Range(Int)
 
 fn parse(s: Text) -> Result[Id, Text]:
     match s.to_int():
@@ -2544,7 +2544,7 @@ fn f() -> Text:
 "#;
     assert_eq!(
         shown(src),
-        "Level.High=11,Level.Low=2,Level.Mid=5, True False True True 2 True"
+        "Level.Low=2,Level.Mid=5,Level.High=11, True False True True 2 True"
     );
     let src = r#"
 enum Shape:

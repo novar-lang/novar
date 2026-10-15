@@ -1142,3 +1142,11 @@ fn a_type_can_be_given_another_name() {
         Item::Struct(_)
     ));
 }
+
+#[test]
+fn a_variant_can_take_the_errors_of_question_mark() {
+    let p = ok_program("enum E:\n    from Parse(Text)\n    Other(Text)\n");
+    let Item::Enum(e) = &p.items[0] else { panic!() };
+    assert!(e.variants[0].from && !e.variants[1].from);
+    assert_eq!(e.variants[0].name.node, "Parse");
+}

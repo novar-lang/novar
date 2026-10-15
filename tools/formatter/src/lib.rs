@@ -555,4 +555,12 @@ mod tests {
             "type Id = Int\ntype Pair[T] = (T, T)\nenum S(Named):\n    Rect(w: Float, h: Float)\n    Empty\n\n    fn name(self) -> Text:\n        \"s\"\n"
         );
     }
+
+    #[test]
+    fn from_variants() {
+        assert_eq!(
+            fmt("enum E:\n    from  Parse(Text)\n    Other\n"),
+            "enum E:\n    from Parse(Text)\n    Other\n"
+        );
+    }
 }
