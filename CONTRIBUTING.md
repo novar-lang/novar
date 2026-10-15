@@ -66,6 +66,9 @@ cargo deny check
 * Keep commits short and in the imperative, with the existing prefixes: `feat:`, `fix:`, `docs:`,
   `test:`, `refactor:`, `style:`, `ci:`, `build:`, `chore:`.
 * If a change alters the language, update `docs/guide/tour.md` and `CHANGELOG.md`.
+* The programs in `tests/editions/` are frozen (see `docs/guide/stability.md`). A change must not make
+  one fail, and must not edit one. If it cannot avoid that, it is a breaking change: a new edition and
+  a `feat!:` title. New syntax gets a new frozen program and a line in that directory's `CHECKSUMS`.
 * `docs/design/status.md` says what has and has not been run on real hardware. Keep it honest: do
   not mark something as working because it compiles.
 

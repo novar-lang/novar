@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **The syntax is stable from here on:** programs in `tests/editions/2026/` are frozen and must keep
+  passing `check`, `fmt --check` and their tests; a test fails if one is edited. `telvax.toml` takes
+  `edition = "2026"` (`tvpm new` writes it; an unknown edition is an error). A change that would break
+  an old program becomes a new edition. The rules are in `docs/guide/stability.md`.
 * **`--allow` limits what a program may do:** `telvax run`, `test` and `serve` take
   `--allow fs.read,fs.write,fs,env,net,all,none`. A call that needs a capability that was not listed
   stops with a message that names the word to add. Without the flag everything is allowed, as before.

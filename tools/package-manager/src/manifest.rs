@@ -4,6 +4,7 @@
 //! [package]
 //! name = "app"
 //! version = "0.1.0"
+//! edition = "2026"                     # the syntax the package is written in
 //!
 //! [dependencies]
 //! mathx = "^1.2"                       # from the registry
@@ -18,6 +19,13 @@ use serde::{Deserialize, Serialize};
 
 pub const MANIFEST: &str = "telvax.toml";
 
+/// The syntax editions this compiler reads. A syntax that changes in a way old programs cannot
+/// follow is a new edition; the old ones keep working (see `docs/guide/stability.md`).
+pub const EDITIONS: &[&str] = &["2026"];
+
+/// The edition a package without an `edition` line is read as, and the one `tvpm new` writes.
+pub const CURRENT_EDITION: &str = "2026";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     pub package: PackageInfo,
@@ -29,6 +37,9 @@ pub struct Manifest {
 pub struct PackageInfo {
     pub name: String,
     pub version: Version,
+    /// The syntax edition of the package's source; `CURRENT_EDITION` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// The file that `telvax run` / `serve` start from; defaults to `src/main.tvx`, then `src/lib.tvx`.
@@ -105,6 +116,20 @@ impl Manifest {
         let m: Manifest = toml::from_str(text)
             .map_err(|e| ManifestError(format!("invalid {MANIFEST}: {}", e.message())))?;
         validate_name(&m.package.name)?;
+        if let Some(edition) = &m.package.edition
+            && !EDITIONS.contains(&edition.as_str())
+        {
+            return Err(ManifestError(format!(
+                "this telvax reads the syntax edition{} {}, not `{edition}`; \
+                 change `edition` in {MANIFEST}, or update telvax if the package is newer",
+                if EDITIONS.len() == 1 { "" } else { "s" },
+                EDITIONS
+                    .iter()
+                    .map(|e| format!("`{e}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
         for (name, dep) in &m.dependencies {
             validate_name(name).map_err(|e| ManifestError(format!("dependency: {}", e.0)))?;
             if let Dependency::Detailed {

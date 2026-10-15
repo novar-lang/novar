@@ -30,7 +30,8 @@ fn handle(payload: QueryPayload) -> Result[Tensor[f32, 768], Status]:
 The full RAG service from the specification is in [`examples/rag-service.tvx`](examples/rag-service.tvx).
 
 > **Status: 0.0.4, an early alpha.** Good for trying the language and giving feedback; expect
-> bugs and breaking changes. What works, and what has not been run on real hardware, is listed in
+> bugs and breaking changes in the library and tools; the syntax of edition 2026 is frozen
+> ([`docs/guide/stability.md`](docs/guide/stability.md)). What works, and what has not been run on real hardware, is listed in
 > [`docs/design/status.md`](docs/design/status.md). Bug reports and ideas are welcome in the issues.
 
 ## What you can build
