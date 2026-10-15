@@ -76,6 +76,8 @@ struct Fixed {
 
 struct Solver<'a> {
     registry: Option<&'a dyn Registry>,
+    /// Versions to keep when they still satisfy every requirement (the locked ones, in `update`).
+    prefer: &'a HashMap<String, Version>,
     fixed: HashMap<String, Fixed>,
     cache: RefCell<HashMap<String, Vec<IndexEntry>>>,
 }
@@ -137,7 +139,13 @@ impl Solver<'_> {
             .filter(|e| !e.yanked && next.req.matches(&e.vers))
             .cloned()
             .collect();
-        candidates.sort_by(|a, b| b.vers.cmp(&a.vers));
+        // Newest first, except that a preferred version goes in front of the rest.
+        let keep = self.prefer.get(&next.name);
+        candidates.sort_by(|a, b| {
+            (keep != Some(&a.vers))
+                .cmp(&(keep != Some(&b.vers)))
+                .then(b.vers.cmp(&a.vers))
+        });
         if candidates.is_empty() {
             let mut available: Vec<String> = all
                 .iter()
@@ -243,6 +251,17 @@ pub fn resolve(
     root: &Manifest,
     registry: Option<&dyn Registry>,
 ) -> Result<Resolution, String> {
+    resolve_preferring(root_dir, root, registry, &HashMap::new())
+}
+
+/// Like [`resolve`], but a package in `prefer` stays at that version unless a requirement rules it
+/// out. With nothing preferred every package gets the newest version that fits.
+pub fn resolve_preferring(
+    root_dir: &Path,
+    root: &Manifest,
+    registry: Option<&dyn Registry>,
+    prefer: &HashMap<String, Version>,
+) -> Result<Resolution, String> {
     let mut fixed = HashMap::new();
     let mut reqs = Vec::new();
     collect_fixed(root_dir, root, &mut fixed, &mut reqs)?;
@@ -260,6 +279,7 @@ pub fn resolve(
     }
     let solver = Solver {
         registry,
+        prefer,
         fixed,
         cache: RefCell::new(HashMap::new()),
     };

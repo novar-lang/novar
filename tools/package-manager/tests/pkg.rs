@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use semver::Version;
 use telvax_pkg::manifest::Manifest;
+use telvax_pkg::project::Change;
 use telvax_pkg::registry::{self, DirRegistry, Registry};
 use telvax_pkg::{Lock, Project};
 
@@ -142,6 +143,62 @@ fn the_edition_is_checked_and_defaults_to_the_current_one() {
         .0;
     assert!(
         e.contains("`2026`, not `2031`") && e.contains("update telvax"),
+        "{e}"
+    );
+}
+
+#[test]
+fn update_moves_only_what_it_is_asked_to() {
+    let reg = Dir::new("update-reg");
+    for name in ["a", "b"] {
+        publish(&reg, name, "1.0.0", &[], "fn f() -> Int:\n    1\n");
+    }
+    let work = Dir::new("update-app");
+    work.write(
+        "telvax.toml",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\na = \"^1\"\nb = \"^1\"\n",
+    );
+    let project = Project::discover(&work.0).unwrap().unwrap();
+    let registry = DirRegistry::new(&reg.0);
+    let at = |name: &str| {
+        Lock::read(&work.0)
+            .unwrap()
+            .unwrap()
+            .get(name)
+            .unwrap()
+            .version
+            .to_string()
+    };
+    let v = |s: &str| Some(Version::parse(s).unwrap());
+    // No lock yet: everything is added.
+    let changes = project.update(Some(&registry), &[]).unwrap();
+    let change = |name: &str, from: Option<Version>, to: Option<Version>| Change {
+        name: name.into(),
+        from,
+        to,
+    };
+    assert_eq!(
+        changes,
+        [change("a", None, v("1.0.0")), change("b", None, v("1.0.0"))]
+    );
+    assert!(project.update(Some(&registry), &[]).unwrap().is_empty());
+    for name in ["a", "b"] {
+        publish(&reg, name, "1.1.0", &[], "fn f() -> Int:\n    1\n");
+    }
+    publish(&reg, "a", "2.0.0", &[], "fn f() -> Int:\n    1\n");
+    // Naming `a` moves `a` (to the newest that `^1` allows) and leaves `b` at its locked version.
+    let changes = project.update(Some(&registry), &["a".to_string()]).unwrap();
+    assert_eq!(changes, [change("a", v("1.0.0"), v("1.1.0"))]);
+    assert_eq!((at("a"), at("b")), ("1.1.0".into(), "1.0.0".into()));
+    // Without names everything moves.
+    let changes = project.update(Some(&registry), &[]).unwrap();
+    assert_eq!(changes, [change("b", v("1.0.0"), v("1.1.0"))]);
+    // A name that is not locked says what is.
+    let e = project
+        .update(Some(&registry), &["zed".to_string()])
+        .unwrap_err();
+    assert!(
+        e.contains("`zed` is not a registry package") && e.contains("a, b"),
         "{e}"
     );
 }

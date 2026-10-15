@@ -133,6 +133,7 @@ tvpm new app && cd app
 tvpm add mathx --registry ~/registry     # or --path ../mathx
 tvpm install --registry ~/registry       # resolves, writes telvax.lock, downloads
 tvpm run                                  # runs src/main.tvx with the dependencies
+tvpm update                               # newest versions that fit; `tvpm update mathx` moves only mathx
 ```
 
 ## Distribution

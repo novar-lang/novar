@@ -25,6 +25,15 @@ pub fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".tvpm"))
 }
 
+/// A registry package whose locked version changed: `from` is empty for one that was added and
+/// `to` for one that was removed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Change {
+    pub name: String,
+    pub from: Option<semver::Version>,
+    pub to: Option<semver::Version>,
+}
+
 impl Project {
     /// The project containing `start` (a file or directory): the nearest ancestor with a `telvax.toml`.
     pub fn discover(start: &Path) -> Result<Option<Project>, String> {
@@ -82,6 +91,70 @@ impl Project {
         let lock = resolution.to_lock(&self.manifest);
         lock.write(&self.dir)?;
         Ok((resolution, lock))
+    }
+
+    /// Re-resolves the dependencies and writes `telvax.lock`. With `names`, only those packages move
+    /// to the newest version that fits; every other registry package stays where the lock has it
+    /// unless a requirement forces it. Returns what changed.
+    pub fn update(
+        &self,
+        registry: Option<&dyn Registry>,
+        names: &[String],
+    ) -> Result<Vec<Change>, String> {
+        let old = Lock::read(&self.dir)?;
+        let registry_pkgs = |lock: &Lock| -> std::collections::BTreeMap<String, semver::Version> {
+            lock.packages
+                .iter()
+                .filter(|p| p.source.as_deref() == Some("registry"))
+                .map(|p| (p.name.clone(), p.version.clone()))
+                .collect()
+        };
+        let before = old.as_ref().map(registry_pkgs).unwrap_or_default();
+        for name in names {
+            if !before.contains_key(name) {
+                return Err(format!(
+                    "`{name}` is not a registry package in {LOCKFILE}{}",
+                    if before.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "; it has: {}",
+                            before.keys().cloned().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                ));
+            }
+        }
+        let prefer: std::collections::HashMap<_, _> = if names.is_empty() {
+            Default::default()
+        } else {
+            before
+                .iter()
+                .filter(|(n, _)| !names.contains(n))
+                .map(|(n, v)| (n.clone(), v.clone()))
+                .collect()
+        };
+        let resolution =
+            resolver::resolve_preferring(&self.dir, &self.manifest, registry, &prefer)?;
+        let lock = resolution.to_lock(&self.manifest);
+        lock.write(&self.dir)?;
+        let after = registry_pkgs(&lock);
+        let mut changes = Vec::new();
+        for name in before
+            .keys()
+            .chain(after.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            let (from, to) = (before.get(name), after.get(name));
+            if from != to {
+                changes.push(Change {
+                    name: name.clone(),
+                    from: from.cloned(),
+                    to: to.cloned(),
+                });
+            }
+        }
+        Ok(changes)
     }
 
     /// Where an installed package's modules live.
