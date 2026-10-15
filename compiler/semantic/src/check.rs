@@ -207,6 +207,8 @@ pub(crate) struct Checker {
     /// `type Id = Int`, by name, and the aliases being expanded right now (an alias that uses
     /// itself would never end).
     aliases: HashMap<String, ast::Alias>,
+    /// The variants marked `from`, by enum and variant: where `?` wraps an error.
+    enum_from: HashSet<(String, String)>,
     alias_stack: Vec<String>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
@@ -562,6 +564,30 @@ impl Checker {
                 }
                 let tys = v.fields.iter().map(|t| self.resolve_type(t)).collect();
                 variants.push((v.name.node.clone(), tys));
+            }
+            // `?` has to know which variant takes an error of a type.
+            let marked: Vec<(&ast::Variant, &Ty)> = en
+                .variants
+                .iter()
+                .filter(|v| v.from && v.fields.len() == 1)
+                .filter_map(|v| {
+                    variants
+                        .iter()
+                        .find(|(n, _)| *n == v.name.node)
+                        .and_then(|(_, tys)| tys.first())
+                        .map(|t| (v, t))
+                })
+                .collect();
+            for (i, (v, t)) in marked.iter().enumerate() {
+                if marked[..i]
+                    .iter()
+                    .any(|(_, u)| u.accepts(t) && t.accepts(u))
+                {
+                    self.err(
+                        v.name.span.clone(),
+                        format!("two variants marked `from` hold a `{t}`; `?` could not tell which one to use"),
+                    );
+                }
             }
             self.enums.insert(en.name.node.clone(), variants.clone());
             out.enums.push(hir::EnumDef {
@@ -2024,7 +2050,7 @@ impl Checker {
                                 if !ret_err.accepts(err) {
                                     let how = if matches!(**ret_err, Ty::Enum(_)) {
                                         format!(
-                                            "; give `{ret_err}` one variant that holds a `{err}`, or write `match` and `Err(...)`"
+                                            "; mark a variant of `{ret_err}` that holds a `{err}` with `from` (`from Name({err})`), or write `match` and `Err(...)`"
                                         )
                                     } else {
                                         String::new()
@@ -3458,6 +3484,25 @@ impl Checker {
 
     fn record_labels(&mut self, en: &ast::Enum) {
         for v in &en.variants {
+            if v.from {
+                if !en.generics.is_empty() {
+                    self.err(
+                        v.name.span.clone(),
+                        "a generic enum cannot mark a variant `from`",
+                    );
+                } else if v.fields.len() != 1 {
+                    self.err(
+                        v.name.span.clone(),
+                        format!(
+                            "a variant marked `from` holds one value: `from {}(Type)`",
+                            v.name.node
+                        ),
+                    );
+                } else {
+                    self.enum_from
+                        .insert((en.name.node.clone(), v.name.node.clone()));
+                }
+            }
             if !v.names.is_empty() {
                 let names = v.names.iter().map(|n| n.node.clone()).collect();
                 self.enum_labels
@@ -4739,8 +4784,8 @@ impl Checker {
     }
 
     /// The variant that `?` wraps an error of type `from` in, so a function that returns an
-    /// error enum can use `?` on the errors of what it calls: the one variant of `to` that holds
-    /// exactly one value, of that type.
+    /// error enum can use `?` on the errors of what it calls: the variant of `to` marked `from`
+    /// that holds a value of that type.
     fn error_conversion(&self, to: &Ty, from: &Ty) -> Option<String> {
         let Ty::Enum(name) = self.resolve(to) else {
             return None;
@@ -4749,11 +4794,13 @@ impl Checker {
             return None;
         }
         let from = self.resolve(from);
-        let mut found = self.enums.get(&name)?.iter().filter(|(_, fields)| {
-            fields.len() == 1 && fields[0].accepts(&from) && from.accepts(&fields[0])
-        });
-        let (variant, _) = found.next()?;
-        found.next().is_none().then(|| variant.clone())
+        let (variant, _) = self.enums.get(&name)?.iter().find(|(variant, fields)| {
+            self.enum_from.contains(&(name.clone(), variant.clone()))
+                && fields.len() == 1
+                && fields[0].accepts(&from)
+                && from.accepts(&fields[0])
+        })?;
+        Some(variant.clone())
     }
 
     /// `x?` where the error is wrapped: `match x: case Ok(v): v; case Err(e): return Err(Enum.Variant(e))`.

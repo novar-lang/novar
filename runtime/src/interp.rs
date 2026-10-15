@@ -886,9 +886,15 @@ impl Interp {
                 for a in args {
                     fields.push(self.eval(a, ctx)?);
                 }
+                let index = self
+                    .enums
+                    .get(enum_name)
+                    .and_then(|vs| vs.iter().position(|(v, _)| v == variant))
+                    .unwrap_or(0);
                 Ok(Value::Enum(Arc::new(crate::value::EnumVal {
                     name: enum_name.clone(),
                     variant: variant.clone(),
+                    index: index as u32,
                     fields,
                 })))
             }
@@ -1028,20 +1034,13 @@ impl Interp {
             })),
             // Variants without values are ordered as the enum declares them.
             (Lt | LtEq | Gt | GtEq, Value::Enum(a), Value::Enum(b)) if a.name == b.name => {
-                let position = |variant: &str| {
-                    self.enums
-                        .get(&a.name)
-                        .and_then(|vs| vs.iter().position(|(v, _)| v == variant))
-                };
-                match (position(&a.variant), position(&b.variant)) {
-                    (Some(x), Some(y)) => Ok(Value::Bool(match op {
-                        Lt => x < y,
-                        LtEq => x <= y,
-                        Gt => x > y,
-                        _ => x >= y,
-                    })),
-                    _ => fail(format!("cannot order {} and {}", l, r)),
-                }
+                let (x, y) = (a.index, b.index);
+                Ok(Value::Bool(match op {
+                    Lt => x < y,
+                    LtEq => x <= y,
+                    Gt => x > y,
+                    _ => x >= y,
+                }))
             }
             _ => fail(format!(
                 "cannot apply {op:?} to {} and {}",

@@ -125,6 +125,8 @@ pub struct Variant {
     pub fields: Vec<Type>,
     /// `Circle(r: Float)`: the name of each value, or empty when the values have no names.
     pub names: Vec<Ident>,
+    /// `from Parse(Text)`: `?` turns an error of the type this variant holds into this variant.
+    pub from: bool,
 }
 
 /// One `pattern => body` arm of a `match`.
