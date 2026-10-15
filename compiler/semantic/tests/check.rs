@@ -3354,3 +3354,71 @@ fn f() -> Int:
         "`empty[Type](..)`",
     );
 }
+
+#[test]
+fn methods_can_have_type_parameters_of_their_own() {
+    assert_clean(
+        r#"
+type Stack[T]:
+    items: List[T]
+
+    fn map[U](self, f: (T) -> U) -> Stack[U]:
+        let out: List[U] = []
+        for x in self.items:
+            out.push(f(x))
+        Stack(items: out)
+
+    fn fold[A](self, init: A, f: (A, T) -> A) -> A:
+        var acc = init
+        for x in self.items:
+            acc = f(acc, x)
+        acc
+
+    fn twice[N: Num](self, k: N) -> N:
+        k + k
+
+type Plain:
+    n: Int
+
+    fn pair[U](self, other: U) -> (Int, U):
+        (self.n, other)
+
+enum Maybe[T]:
+    Just(T)
+    Nothing
+
+extend Maybe[T]:
+    fn or_default[D](self, d: D, f: (T) -> D) -> D:
+        match self:
+            case Maybe.Just(v):
+                f(v)
+            case Maybe.Nothing:
+                d
+
+fn main() -> i32:
+    let s: Stack[Int] = Stack(items: [1, 2, 3])
+    let t: Stack[Text] = s.map(x => x * 2).map(x => f"<{x}>")
+    let total: Int = s.fold(0, (a, x) => a + x)
+    let words: Text = s.fold("", (a, x) => a + f"{x}")
+    let f: Float = s.twice(2.5)
+    let p: (Int, Text) = Plain(n: 1).pair("a")
+    let m: Maybe[Int] = Maybe.Just(4)
+    let r: Text = m.or_default("none", x => f"v{x}")
+    0
+"#,
+    );
+    let base = "type Stack[T]:\n    items: List[T]\n\n    fn map[U](self, f: (T) -> U) -> Stack[U]:\n        Stack(items: [])\n\n    fn twice[N: Num](self, k: N) -> N:\n        k\n\nfn f():\n    let s = Stack(items: [1])\n";
+    assert_err(&format!("{base}    s.map(1)\n"), "expected `(i32) -> U`");
+    assert_err(
+        &format!("{base}    s.map()\n"),
+        "expected 1 argument(s), found 0",
+    );
+    assert_err(
+        &format!("{base}    s.twice(\"x\")\n"),
+        "`Text` does not implement `Num`",
+    );
+    assert_err(
+        "trait T:\n    fn go(self) -> Int: ...\n\ntype A(T):\n    x: Int\n\n    fn go[U](self) -> Int:\n        1\n",
+        "cannot have type parameters of its own",
+    );
+}

@@ -372,6 +372,9 @@ A `type` lists its fields, then its methods. `type Circle(Shape)` says the type 
 trait; a method without a body (`: ...`) is required, one with a body is a default. `extend Circle:`
 adds methods to a type declared elsewhere. Call a function that has no `self` as `Circle.new(1.0)`.
 `[T]` after a name declares a type parameter; `T: Shape` limits it to types that implement `Shape`.
+A method can have type parameters of its own, besides those of its type:
+`fn map[U](self, f: (T) -> U) -> Stack[U]`. They are inferred from the call (`s.map(x => x * 2)`), and
+each different choice makes its own instance. A method of a trait cannot have them.
 A generic function is called with its types inferred from the arguments. When they cannot be (a
 function that takes nothing), or to be explicit, write them before the parentheses:
 `empty[Text]()`, `pair[Int, Text](1, "a")`. The types are names such as `Int` or `List[Text]`.

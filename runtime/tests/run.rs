@@ -1931,3 +1931,39 @@ fn sum() -> Int:
     // 6 + 6 + 9 + 4 + 102 + 8
     assert_eq!(int(run(src, "sum", vec![])), 135);
 }
+
+#[test]
+fn methods_with_type_parameters_of_their_own() {
+    let src = r#"
+type Stack[T]:
+    items: List[T]
+
+    fn map[U](self, f: (T) -> U) -> Stack[U]:
+        let out: List[U] = []
+        for x in self.items:
+            out.push(f(x))
+        Stack(items: out)
+
+    fn fold[A](self, init: A, f: (A, T) -> A) -> A:
+        var acc = init
+        for x in self.items:
+            acc = f(acc, x)
+        acc
+
+type Plain:
+    n: Int
+
+    fn apply[U](self, f: (Int) -> U) -> U:
+        f(self.n)
+
+fn run() -> Int:
+    let s: Stack[Int] = Stack(items: [1, 2, 3])
+    let doubled = s.map(x => x * 2)
+    let labels = s.map(x => f"<{x}>")
+    let total: Int = doubled.fold(0, (a, x) => a + x)
+    let width: Int = labels.fold(0, (a, x) => a + 1)
+    total * 10 + width + Plain(n: 4).apply(x => x + 100)
+"#;
+    // total 12, width 3, apply 104
+    assert_eq!(int(run(src, "run", vec![])), 12 * 10 + 3 + 104);
+}
