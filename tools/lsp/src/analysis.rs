@@ -972,6 +972,9 @@ impl Collector {
                 self.expr(scrutinee);
                 for arm in arms {
                     self.pattern(&arm.pat);
+                    if let Some(g) = &arm.guard {
+                        self.expr(g);
+                    }
                     self.expr(&arm.body);
                 }
             }
@@ -981,10 +984,22 @@ impl Collector {
     fn pattern(&mut self, p: &hir::Pat) {
         match p {
             hir::Pat::Bind(l) => self.local(l),
-            hir::Pat::Variant { args, .. } | hir::Pat::Tuple(args) => {
+            hir::Pat::Variant { args, .. } | hir::Pat::Tuple(args) | hir::Pat::Or(args) => {
                 args.iter().for_each(|a| self.pattern(a));
             }
-            hir::Pat::Wild | hir::Pat::Lit(_) => {}
+            hir::Pat::List {
+                before,
+                rest,
+                after,
+            } => {
+                before
+                    .iter()
+                    .chain(rest.as_deref())
+                    .chain(after)
+                    .for_each(|a| self.pattern(a));
+            }
+            hir::Pat::Struct { fields, .. } => fields.iter().for_each(|(_, a)| self.pattern(a)),
+            hir::Pat::Wild | hir::Pat::Lit(_) | hir::Pat::NegInt(_) => {}
         }
     }
 }

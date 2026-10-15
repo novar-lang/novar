@@ -427,7 +427,12 @@ fn walk(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::Match { scrutinee, arms } => {
             walk(scrutinee, f);
-            arms.iter_mut().for_each(|a| walk(&mut a.body, f));
+            for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard {
+                    walk(g, f);
+                }
+                walk(&mut arm.body, f);
+            }
         }
         ExprKind::FString(parts) => {
             for p in parts {

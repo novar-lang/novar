@@ -1109,6 +1109,7 @@ fn if_let(
             scrutinee: Box::new(scrutinee),
             arms: vec![
                 Arm {
+                    guard: None,
                     pat,
                     body: Spanned {
                         node: ExprKind::Block(then),
@@ -1116,6 +1117,7 @@ fn if_let(
                     },
                 },
                 Arm {
+                    guard: None,
                     pat: spanned(PatKind::Wild, span),
                     body: otherwise
                         .unwrap_or_else(|| spanned(ExprKind::Block(unit_block(span)), span)),
@@ -1139,6 +1141,7 @@ fn while_let(pat: Pattern, scrutinee: Expr, body: Block, span: SimpleSpan) -> Ex
             scrutinee: Box::new(scrutinee),
             arms: vec![
                 Arm {
+                    guard: None,
                     pat,
                     body: Spanned {
                         node: ExprKind::Block(body),
@@ -1146,6 +1149,7 @@ fn while_let(pat: Pattern, scrutinee: Expr, body: Block, span: SimpleSpan) -> Ex
                     },
                 },
                 Arm {
+                    guard: None,
                     pat: spanned(PatKind::Wild, span),
                     body: spanned(ExprKind::Block(leave), span),
                 },
@@ -1295,6 +1299,7 @@ where
             .ignore_then(pattern)
             .then(block.clone())
             .map_with(|(pat, body), e| Arm {
+                guard: None,
                 pat,
                 body: spanned(ExprKind::Block(body), e.span()),
             });

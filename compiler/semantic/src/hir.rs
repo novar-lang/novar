@@ -194,7 +194,11 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arm {
     pub pat: Pat,
+    /// The `if` of `case x if x > 3:`.
+    pub guard: Option<Expr>,
     pub body: Expr,
+    /// Written by the user, and no arm before it can leave a value for it (`telvax lint` reports it).
+    pub unreachable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,8 +206,23 @@ pub enum Pat {
     Wild,
     Bind(Local),
     Lit(Lit),
+    /// A negative integer literal: the number without its sign.
+    NegInt(u64),
     /// `(a, b)`
     Tuple(Vec<Pat>),
+    /// `1 | 2`; the alternatives bind no names.
+    Or(Vec<Pat>),
+    /// `[a, *rest, z]`: `before`, the optional `*rest` (a `Bind` or `Wild`), then `after`.
+    List {
+        before: Vec<Pat>,
+        rest: Option<Box<Pat>>,
+        after: Vec<Pat>,
+    },
+    /// A value of a `type`, by the fields the pattern names.
+    Struct {
+        name: String,
+        fields: Vec<(String, Pat)>,
+    },
     /// A variant of a user enum (`enum_name` is `Some`) or `Ok` / `Err` of a `Result` (`None`).
     Variant {
         enum_name: Option<String>,

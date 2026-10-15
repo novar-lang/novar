@@ -679,7 +679,11 @@ impl<'a> Printer<'a> {
                 self.line(indent, &format!("match {s}:"), e.span.start);
                 for arm in arms {
                     let p = self.pat(&arm.pat);
-                    self.line(indent + 1, &format!("case {p}:"), arm.pat.span.start);
+                    let guard = match &arm.guard {
+                        Some(g) => format!(" if {}", self.expr(g, 0)),
+                        None => String::new(),
+                    };
+                    self.line(indent + 1, &format!("case {p}{guard}:"), arm.pat.span.start);
                     self.arm_body(&arm.body, indent + 2, value);
                 }
             }
@@ -825,6 +829,35 @@ impl<'a> Printer<'a> {
                     let parts: Vec<_> = args.iter().map(|i| self.pat(i)).collect();
                     format!("{name}({})", parts.join(", "))
                 }
+            }
+            PatKind::NegLit(l) => format!("-{}", lit(l)),
+            PatKind::Or(alts) => {
+                let parts: Vec<_> = alts.iter().map(|i| self.pat(i)).collect();
+                parts.join(" | ")
+            }
+            PatKind::List {
+                before,
+                rest,
+                after,
+            } => {
+                let mut parts: Vec<String> = before.iter().map(|i| self.pat(i)).collect();
+                if let Some(r) = rest {
+                    parts.push(format!("*{}", self.pat(r)));
+                }
+                parts.extend(after.iter().map(|i| self.pat(i)));
+                format!("[{}]", parts.join(", "))
+            }
+            PatKind::Struct { path, fields } => {
+                let name = path
+                    .iter()
+                    .map(|p| p.node.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let parts: Vec<_> = fields
+                    .iter()
+                    .map(|(n, i)| format!("{}: {}", n.node, self.pat(i)))
+                    .collect();
+                format!("{name}({})", parts.join(", "))
             }
         }
     }

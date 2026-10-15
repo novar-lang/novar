@@ -258,6 +258,10 @@
           "match": "\\*\\*|//|[-+*/%]"
         },
         {
+          "name": "keyword.operator.alternative.telvax",
+          "match": "\\|(?!>)"
+        },
+        {
           "name": "keyword.operator.coalesce.telvax",
           "match": "\\?\\?"
         },

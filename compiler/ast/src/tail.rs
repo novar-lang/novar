@@ -85,3 +85,8 @@ fn tailify_branches(e: &mut Expr) {
         _ => {}
     }
 }
+
+/// Gives a `match` (or `if`) used as a value the value of each branch: the last line of every arm.
+pub fn tailify_value(e: &mut Expr) {
+    tailify_branches(e);
+}

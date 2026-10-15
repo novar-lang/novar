@@ -545,6 +545,7 @@ where
                             scrutinee: Box::new(scrutinee),
                             arms: vec![
                                 Arm {
+                                    guard: None,
                                     pat,
                                     body: Spanned {
                                         node: ExprKind::Block(then),
@@ -552,6 +553,7 @@ where
                                     },
                                 },
                                 Arm {
+                                    guard: None,
                                     pat: spanned(PatKind::Wild, span),
                                     body: otherwise.unwrap_or_else(unit),
                                 },
@@ -716,6 +718,7 @@ where
                         scrutinee: Box::new(scrutinee),
                         arms: vec![
                             Arm {
+                                guard: None,
                                 pat,
                                 body: Spanned {
                                     node: ExprKind::Block(body),
@@ -723,6 +726,7 @@ where
                                 },
                             },
                             Arm {
+                                guard: None,
                                 pat: spanned(PatKind::Wild, span),
                                 body: spanned(ExprKind::Block(leave), span),
                             },
@@ -808,7 +812,11 @@ where
                 pattern
                     .then_ignore(just(Token::FatArrow))
                     .then(expr.clone())
-                    .map(|(pat, body)| Arm { pat, body })
+                    .map(|(pat, body)| Arm {
+                        pat,
+                        guard: None,
+                        body,
+                    })
                     .then_ignore(just(Token::Comma).or_not())
                     .repeated()
                     .collect::<Vec<_>>()
