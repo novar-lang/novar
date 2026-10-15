@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **A generic that grows forever is an error:** `fn f[T](x: T): f([x])` is instantiated for `T`, then
+  `List[T]`, then `List[List[T]]`, and so on; the checker never finished and used all the memory. A type
+  of more than 200 parts in an instance is now an error that says the types keep growing.
 * **Deeply nested code no longer hangs or crashes the compiler:** parentheses inside parentheses were
   read twice per level, so twenty levels took seconds and forty never finished; they now take linear
   time. Blocks nested past 64 levels and brackets past 200 are an error that says so, and the parser and
