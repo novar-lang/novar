@@ -322,7 +322,7 @@ fn main():
     let m = messages(&p, &[]);
     assert!(
         m.iter()
-            .any(|m| m.contains("cannot find the module `crate.nope`")),
+            .any(|m| m.contains("cannot find the module `nope`")),
         "{m:?}"
     );
 
@@ -613,4 +613,65 @@ extend Rect:
     );
     // `area` the method, `area` the function of each module, and the one in main do not clash.
     assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "17");
+}
+
+#[test]
+fn imports_can_be_renamed_with_as() {
+    let p = Project::new("alias");
+    p.file(
+        "main.tvx",
+        r#"
+from util import double as twice, Pt as Point
+import util.shout as loud
+from std.text import trim as strip
+
+fn main() -> Text:
+    let p = Point(x: 4)
+    loud(strip(f"{twice(p.x)} "))
+"#,
+    )
+    .file(
+        "util.tvx",
+        r#"
+type Pt:
+    x: Int
+
+fn double(x: Int) -> Int:
+    x * 2
+
+fn shout(s: Text) -> Text:
+    std.text.uppercase(s)
+"#,
+    );
+    assert_eq!(ok(&load(&p.path("main.tvx"), &[]).unwrap()), "8");
+}
+
+#[test]
+fn import_errors_say_what_to_write() {
+    let p = Project::new("errors");
+    p.file(
+        "main.tvx",
+        "import util\nfrom util import nothing\nfrom missing import x\n\nfn main() -> i32:\n    0\n",
+    )
+    .file("util.tvx", "fn double(x: Int) -> Int:\n    x * 2\n");
+    let loaded = load(&p.path("main.tvx"), &[]).unwrap();
+    let messages: Vec<&str> = loaded
+        .diagnostics
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        messages.contains(&"`util` is a module, not a function or type"),
+        "{messages:#?}"
+    );
+    assert!(
+        messages.contains(&"module `util` has no function or type `nothing`"),
+        "{messages:#?}"
+    );
+    assert!(
+        messages.contains(&"cannot find the module `missing`"),
+        "{messages:#?}"
+    );
+    let note = loaded.diagnostics[0].notes.join(" ");
+    assert!(note.contains("from util import name"), "{note}");
 }

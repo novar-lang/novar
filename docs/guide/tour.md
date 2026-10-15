@@ -109,7 +109,10 @@ from util import clamp  # ./util.tvx
 from mathx.vec import dot  # dependency `mathx`, file vec.tvx
 ```
 
-`import util.clamp` brings in the same name. Names from `std` need no import: `std.text.trim(s)`.
+`import util.clamp` brings in the same name. A name can be renamed with `as`:
+`from util import clamp as limit`, `import util.clamp as limit`, `from std.text import trim as strip`.
+Names from `std` need no import: `std.text.trim(s)`. A module is not a name: `import util` is an error
+that says to write `from util import name`.
 
 ```sh
 tvpm new app && cd app

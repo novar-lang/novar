@@ -245,27 +245,28 @@ impl Checker {
         for item in &program.items {
             if let ast::Item::Import(i) = item {
                 let base: Vec<String> = i.path.iter().map(|s| s.node.clone()).collect();
-                let mut bring_in = |this: &mut Self, name: &ast::Ident, full: Vec<String>| {
-                    let joined = full.join("::");
-                    let is_std = full.first().is_some_and(|f| f == "std");
-                    let known = stdlib::function(&joined).is_some()
-                        || stdlib::is_type(&joined)
-                        || stdlib::is_module(&joined);
-                    if is_std && !known {
-                        this.err(name.span.clone(), format!("unresolved import `{joined}`"));
-                    }
-                    this.imports.insert(name.node.clone(), full.clone());
-                    out.imports.push(full);
-                };
+                let mut bring_in =
+                    |this: &mut Self, name: &ast::Ident, local: &ast::Ident, full: Vec<String>| {
+                        let joined = full.join("::");
+                        let is_std = full.first().is_some_and(|f| f == "std");
+                        let known = stdlib::function(&joined).is_some()
+                            || stdlib::is_type(&joined)
+                            || stdlib::is_module(&joined);
+                        if is_std && !known {
+                            this.err(name.span.clone(), format!("unresolved import `{joined}`"));
+                        }
+                        this.imports.insert(local.node.clone(), full.clone());
+                        out.imports.push(full);
+                    };
                 if i.group.is_empty() {
                     if let Some(last) = i.path.last() {
-                        bring_in(self, last, base);
+                        bring_in(self, last, &i.local_name(0, last), base);
                     }
                 } else {
-                    for name in &i.group {
+                    for (n, name) in i.group.iter().enumerate() {
                         let mut full = base.clone();
                         full.push(name.node.clone());
-                        bring_in(self, name, full);
+                        bring_in(self, name, &i.local_name(n, name), full);
                     }
                 }
             }
