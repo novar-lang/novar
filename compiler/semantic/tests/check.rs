@@ -3082,3 +3082,53 @@ type P:
         assert_eq!(f.ret, Ty::Unit, "{}", f.name);
     }
 }
+
+#[test]
+fn a_generic_call_waits_for_the_use_of_its_literals() {
+    assert_clean(
+        r#"
+fn id[T](x: T) -> T:
+    x
+
+fn twice[T](x: T) -> (T, T):
+    (x, x)
+
+fn main() -> i32:
+    let a = id(3)
+    let n: Int = a
+    let b = id(2.5)
+    let f: f32 = b
+    let t = twice(1)
+    let u: (i64, i64) = t
+    let free = id(7)
+    let s = id("x")
+    0
+"#,
+    );
+    // Without a use, the literal still gets its default.
+    let (hir, errs) = check("fn id[T](x: T) -> T:\n    x\n\nfn f():\n    let a = id(3)\n");
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!(hir.fns.iter().any(|f| f.name == "id<i32>"));
+    assert!(!hir.fns.iter().any(|f| f.name == "id<Int>"));
+    // Different uses make different instances.
+    let (hir, errs) = check(
+        "fn id[T](x: T) -> T:\n    x\n\nfn f():\n    let a: Int = id(3)\n    let b: u8 = id(3)\n",
+    );
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!(hir.fns.iter().any(|f| f.name == "id<Int>"));
+    assert!(hir.fns.iter().any(|f| f.name == "id<u8>"));
+    // The trait bound is still checked once the type is known.
+    assert_err(
+        r#"
+trait Shape:
+    fn area(self) -> Float: ...
+
+fn big[T: Shape](a: T) -> T:
+    a
+
+fn f():
+    let a = big(3)
+"#,
+        "Shape",
+    );
+}

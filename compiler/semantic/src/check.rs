@@ -14,6 +14,22 @@ type Span = std::ops::Range<usize>;
 /// A variant (or `Ok` / `Err`) with its enum name and payload types, for exhaustiveness checks.
 type Constructor = (Option<String>, String, Vec<Ty>);
 
+/// Prefix of the name given to a call of a generic function whose instance is not chosen yet.
+const OPEN_CALL: &str = "\u{0}open";
+
+/// A call of a generic function that still has a literal of unknown type among its arguments.
+/// The instance is chosen when the enclosing function is finished (see `close_generic_call`).
+#[derive(Clone)]
+struct OpenCall {
+    name: String,
+    decl: ast::Fn,
+    generics: Vec<ast::GenericParam>,
+    params: Vec<Ty>,
+    ret: Ty,
+    bind: HashMap<String, Ty>,
+    span: Span,
+}
+
 /// A generic function (or method) instance waiting to have its body checked.
 #[derive(Clone)]
 struct Pending {
@@ -52,6 +68,7 @@ pub(crate) struct Checker {
     instance_args: HashMap<String, (String, Vec<Ty>)>,
     /// Instances whose bodies still have to be checked.
     pending: Vec<Pending>,
+    open_calls: Vec<OpenCall>,
     anon_enums: Vec<hir::EnumDef>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
@@ -999,6 +1016,7 @@ impl Checker {
         e.ty = self.finalize_ty(&e.ty);
         use hir::ExprKind as K;
         match &mut e.kind {
+            K::Fn(name) if name.starts_with(OPEN_CALL) => *name = self.close_generic_call(name),
             K::Lit(_) | K::Local(_) | K::Global(_) | K::Fn(_) | K::Extern(_) | K::Error => {}
             K::Call { callee, args } => {
                 self.finalize_expr(callee);
@@ -2342,16 +2360,26 @@ impl Checker {
             let ret = self.subst_params(&decl_ret, &bind);
             self.unify(want, &ret);
         }
+        // A literal that nothing has pinned yet keeps a free function's call open: the instance
+        // is chosen when the enclosing function is finished, so `let a = id(3)` can still be
+        // used as an `Int`.
+        let open = owner.is_none() && bind.values().any(|t| self.has_literal_var(t));
         let bind: HashMap<String, Ty> = bind
             .into_iter()
             .map(|(k, v)| {
-                let v = self.finalize_ty(&v);
+                let v = if open {
+                    self.resolve(&v)
+                } else {
+                    self.finalize_ty(&v)
+                };
                 (k, v)
             })
             .collect();
-        for g in &generics {
-            let ty = bind[&g.name.node].clone();
-            self.check_bounds(g, &ty, span);
+        if !open {
+            for g in &generics {
+                let ty = bind[&g.name.node].clone();
+                self.check_bounds(g, &ty, span);
+            }
         }
         let params: Vec<Ty> = decl_params
             .iter()
@@ -2377,26 +2405,19 @@ impl Checker {
                     _ => return Self::mk(hir::ExprKind::Error, Ty::Unknown, span),
                 }
             }
-            _ => {
-                let shown: Vec<String> = generics
-                    .iter()
-                    .map(|g| bind[&g.name.node].to_string())
-                    .collect();
-                let key = format!("{name}<{}>", shown.join(", "));
-                if !self.fn_sigs.contains_key(&key) {
-                    self.fn_sigs
-                        .insert(key.clone(), (params.clone(), ret.clone()));
-                    let mut renamed = decl.clone();
-                    renamed.name.node = key.clone();
-                    renamed.generics = Vec::new();
-                    self.pending.push(Pending {
-                        f: renamed,
-                        impl_ty: None,
-                        subst: bind.clone(),
-                    });
-                }
-                key
+            _ if open => {
+                self.open_calls.push(OpenCall {
+                    name: name.to_string(),
+                    decl: decl.clone(),
+                    generics: generics.clone(),
+                    params: decl_params.clone(),
+                    ret: decl_ret.clone(),
+                    bind: bind.clone(),
+                    span: span.clone(),
+                });
+                format!("{OPEN_CALL}{}", self.open_calls.len() - 1)
             }
+            _ => self.fn_instance(name, &decl, &generics, &bind, &params, &ret),
         };
         let args: Vec<hir::Expr> = checked
             .into_iter()
@@ -2419,6 +2440,73 @@ impl Checker {
             ret,
             span,
         )
+    }
+
+    /// Whether a literal variable (`{integer}`, `{float}`) is still free somewhere in `ty`.
+    fn has_literal_var(&self, ty: &Ty) -> bool {
+        match self.resolve(ty) {
+            Ty::IntVar(_) | Ty::FloatVar(_) => true,
+            Ty::Vec(t) | Ty::Option(t) => self.has_literal_var(&t),
+            Ty::Result(a, b) | Ty::Map(a, b) => {
+                self.has_literal_var(&a) || self.has_literal_var(&b)
+            }
+            Ty::Tuple(items) => items.iter().any(|t| self.has_literal_var(t)),
+            Ty::Fn(ps, r) => ps.iter().any(|p| self.has_literal_var(p)) || self.has_literal_var(&r),
+            _ => false,
+        }
+    }
+
+    /// The instance of the generic function `name` for `bind`, queued for checking the first time.
+    fn fn_instance(
+        &mut self,
+        name: &str,
+        decl: &ast::Fn,
+        generics: &[ast::GenericParam],
+        bind: &HashMap<String, Ty>,
+        params: &[Ty],
+        ret: &Ty,
+    ) -> String {
+        let shown: Vec<String> = generics
+            .iter()
+            .map(|g| bind[&g.name.node].to_string())
+            .collect();
+        let key = format!("{name}<{}>", shown.join(", "));
+        if !self.fn_sigs.contains_key(&key) {
+            self.fn_sigs
+                .insert(key.clone(), (params.to_vec(), ret.clone()));
+            let mut renamed = decl.clone();
+            renamed.name.node = key.clone();
+            renamed.generics = Vec::new();
+            self.pending.push(Pending {
+                f: renamed,
+                impl_ty: None,
+                subst: bind.clone(),
+            });
+        }
+        key
+    }
+
+    /// Picks the instance of a call left open by `generic_call`, now that its literals are
+    /// pinned to what the function used them as (or to their defaults).
+    fn close_generic_call(&mut self, placeholder: &str) -> String {
+        let index: usize = placeholder[OPEN_CALL.len()..].parse().unwrap_or(0);
+        let call = self.open_calls[index].clone();
+        let bind: HashMap<String, Ty> = call
+            .bind
+            .iter()
+            .map(|(k, v)| (k.clone(), self.finalize_ty(v)))
+            .collect();
+        for g in &call.generics {
+            let ty = bind[&g.name.node].clone();
+            self.check_bounds(g, &ty, &call.span);
+        }
+        let params: Vec<Ty> = call
+            .params
+            .iter()
+            .map(|p| self.subst_params(p, &bind))
+            .collect();
+        let ret = self.subst_params(&call.ret, &bind);
+        self.fn_instance(&call.name, &call.decl, &call.generics, &bind, &params, &ret)
     }
 
     /// The full name (`Point::norm`) of the method `name` of a struct or enum type, if there is one.
