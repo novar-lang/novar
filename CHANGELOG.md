@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **The `|>` operator follows one rule:** `x |> stage` is the call `stage` with `x` as its first argument.
+  Names and defaults now count that argument (`1 |> scale(k: 3)` and `1 |> scale` used to fail with
+  "missing the argument" and "expected 2 argument(s)"), and a suffix after the stage applies to the
+  result of the call (`s |> parse()?`, `n |> make().field`, `n |> items()[0]`; the first two were errors).
+  `|>` binds looser than every operator, and the error for `x |> f == 1` says to write `(x |> f()) == 1`.
 * **A generic that grows forever is an error:** `fn f[T](x: T): f([x])` is instantiated for `T`, then
   `List[T]`, then `List[List[T]]`, and so on; the checker never finished and used all the memory. A type
   of more than 200 parts in an instance is now an error that says the types keep growing.

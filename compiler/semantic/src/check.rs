@@ -1655,7 +1655,7 @@ impl Checker {
                 )
             }
             K::Call { callee, args } => self.call(callee, args, expected, span),
-            K::Pipe { lhs, rhs } => self.pipe(lhs, rhs, expected, span),
+            K::Pipe { lhs, rhs } => self.pipe(lhs, rhs, span),
             K::Unary { op, expr } => {
                 let inner = self.expr(expr, expected);
                 let shown = self.resolve(&inner.ty);
@@ -4365,45 +4365,22 @@ impl Checker {
     }
 
     /// `lhs |> f(a, b)` is checked as `f(lhs, a, b)`; `lhs |> f` as `f(lhs)`.
-    fn pipe(
-        &mut self,
-        lhs: &ast::Expr,
-        rhs: &ast::Expr,
-        expected: Option<&Ty>,
-        span: &Span,
-    ) -> hir::Expr {
-        use ast::ExprKind as K;
-        let call = match &rhs.node {
-            K::Call { callee, args } => {
-                let mut all = Vec::with_capacity(args.len() + 1);
-                all.push(lhs.clone());
-                all.extend(args.iter().cloned());
-                K::Call {
-                    callee: callee.clone(),
-                    args: all,
-                }
-            }
-            K::Path(_) | K::Field { .. } | K::Closure { .. } => K::Call {
-                callee: Box::new(rhs.clone()),
-                args: vec![lhs.clone()],
-            },
-            _ => {
-                self.diags.push(
-                    Diagnostic::error(
-                        rhs.span.clone(),
-                        "the right side of `|>` must be a function or a call",
-                    )
-                    .with_note("write `x |> f()` or `x |> f`"),
-                );
-                let _ = self.expr(lhs, None);
-                return Self::mk(hir::ExprKind::Error, Ty::Unknown, span);
-            }
-        };
-        let desugared = ast::Spanned {
-            node: call,
-            span: span.clone(),
-        };
-        self.expr(&desugared, expected)
+    fn pipe(&mut self, lhs: &ast::Expr, rhs: &ast::Expr, span: &Span) -> hir::Expr {
+        // `named` turns every pipe with a function or a call on the right into a call, so what
+        // arrives here is a right side that is neither.
+        let mut d = Diagnostic::error(
+            rhs.span.clone(),
+            "the right side of `|>` must be a function or a call",
+        )
+        .with_note("write `x |> f()` or `x |> f`");
+        if matches!(rhs.node, ast::ExprKind::Binary { .. }) {
+            d = d.with_note(
+                "`|>` binds looser than every operator, so `x |> f == 1` pipes into `f == 1`: write `(x |> f()) == 1`",
+            );
+        }
+        self.diags.push(d);
+        let _ = self.expr(lhs, None);
+        Self::mk(hir::ExprKind::Error, Ty::Unknown, span)
     }
 
     /// `a + b` and friends when at least one side is a tensor.
