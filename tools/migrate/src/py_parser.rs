@@ -1608,6 +1608,7 @@ where
             let span = rng(e.span());
             Fn {
                 attrs,
+                is_async: false,
                 is_pub: is_public(&name.node),
                 name,
                 generics,

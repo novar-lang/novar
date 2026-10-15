@@ -353,6 +353,27 @@ fn std_call(tail: &[&str], args: Vec<Expr>, span: Span) -> Expr {
     }
 }
 
+/// `await x`, with the `?`s after `x` applied to the value that comes out.
+fn await_expr(operand: Expr, span: Span) -> Expr {
+    let mut tries = 0;
+    let mut core = operand;
+    while let ExprKind::Try(inner) = core.node {
+        core = *inner;
+        tries += 1;
+    }
+    let mut out = Spanned {
+        node: ExprKind::Await(Box::new(core)),
+        span: span.clone(),
+    };
+    for _ in 0..tries {
+        out = Spanned {
+            node: ExprKind::Try(Box::new(out)),
+            span: span.clone(),
+        };
+    }
+    out
+}
+
 /// `base.name(args)`
 fn method_call(base: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
     let callee = Spanned {
@@ -1655,17 +1676,20 @@ where
             },
         );
 
+        // `-x` and `await task`. A `?` after the awaited call is for the value it gives:
+        // `await fetch(1)?` is `(await fetch(1))?`.
         let negated = |operand: Boxed<'a, 'a, I, Expr, Extra<'a, 's>>| {
-            select! { Token::Minus => UnOp::Neg }
+            select! { Token::Minus => None, Token::Await => Some(()) }
                 .repeated()
-                .foldr_with(operand, |op, rhs, e| {
-                    spanned(
+                .foldr_with(operand, |op, rhs, e| match op {
+                    None => spanned(
                         ExprKind::Unary {
-                            op,
+                            op: UnOp::Neg,
                             expr: Box::new(rhs),
                         },
                         e.span(),
-                    )
+                    ),
+                    Some(()) => await_expr(rhs, rng(e.span())),
                 })
         };
         // `a ** b` is `std.math.pow(a, b)`. It binds tighter than a minus on its left
@@ -2585,6 +2609,7 @@ where
     let func = attr
         .repeated()
         .collect::<Vec<_>>()
+        .then(just(Token::Async).or_not())
         .then_ignore(just(Token::Fn))
         .then(ident())
         .then(generics())
@@ -2603,31 +2628,34 @@ where
                 .ignore_then(just(Token::Newline))
                 .to(None)),
         )
-        .map_with(|(((((attrs, name), generics), params), ret), body), e| {
-            let span = rng(e.span());
-            let (params, lets): (Vec<Param>, Vec<Vec<Let>>) = params.into_iter().unzip();
-            let mut body = body;
-            if let Some(body) = &mut body {
-                let mut stmts: Vec<Stmt> = lets.into_iter().flatten().map(Stmt::Let).collect();
-                stmts.append(&mut body.stmts);
-                body.stmts = stmts;
-            }
-            Fn {
-                attrs,
-                is_pub: is_public(&name.node),
-                name,
-                generics,
-                params,
-                ret,
-                required: body.is_none(),
-                body: body.unwrap_or(Block {
-                    stmts: Vec::new(),
-                    tail: None,
-                    span: span.clone(),
-                }),
-                span,
-            }
-        });
+        .map_with(
+            |((((((attrs, is_async), name), generics), params), ret), body), e| {
+                let span = rng(e.span());
+                let (params, lets): (Vec<Param>, Vec<Vec<Let>>) = params.into_iter().unzip();
+                let mut body = body;
+                if let Some(body) = &mut body {
+                    let mut stmts: Vec<Stmt> = lets.into_iter().flatten().map(Stmt::Let).collect();
+                    stmts.append(&mut body.stmts);
+                    body.stmts = stmts;
+                }
+                Fn {
+                    attrs,
+                    is_pub: is_public(&name.node),
+                    name,
+                    is_async: is_async.is_some(),
+                    generics,
+                    params,
+                    ret,
+                    required: body.is_none(),
+                    body: body.unwrap_or(Block {
+                        stmts: Vec::new(),
+                        tail: None,
+                        span: span.clone(),
+                    }),
+                    span,
+                }
+            },
+        );
 
     // The members of a block that holds only functions (`trait`, `extend`).
     let fns_block = func
@@ -2873,6 +2901,7 @@ where
         Token::Extend,
         Token::Trait,
         Token::Fn,
+        Token::Async,
         Token::Let,
         Token::At,
     ])

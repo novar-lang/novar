@@ -3909,3 +3909,67 @@ fn a_text_and_a_number_point_to_the_f_string() {
     // Two numbers get no such note.
     assert!(notes("fn f(a: Int, b: Float) -> Int:\n    a + b\n").is_empty());
 }
+
+#[test]
+fn async_functions_give_tasks_and_await_runs_them() {
+    assert_clean(
+        "async fn fetch(id: Int) -> Result[Text, Text]:\n    await std.task.sleep(1)\n    Ok(f\"item {id}\")\n\n\
+         async fn both(a: Int, b: Int) -> Result[List[Text], Text]:\n    let x = await fetch(a)?\n    let y = await fetch(b)?\n    let rest = await std.task.gather([fetch(1), fetch(2)])\n    Ok([x, y])\n\n\
+         async fn main():\n    let t: Task[Result[Text, Text]] = fetch(1)\n    let v = await t\n    let n: Int = std.task.run(count())\n\n\
+         async fn count() -> Int:\n    1\n\n\
+         fn sync_code() -> Int:\n    std.task.run(count())\n",
+    );
+    // A task from `gather` holds the list of values.
+    assert_clean(
+        "async fn f() -> Int:\n    1\n\nasync fn g() -> List[Int]:\n    await std.task.gather([f(), f()])\n",
+    );
+    assert_err(
+        "async fn f() -> Int:\n    1\n\nfn g():\n    let x = await f()\n",
+        "`await` can only be used inside an `async fn`",
+    );
+    assert_err(
+        "async fn f() -> Int:\n    let x = await 5\n    x\n",
+        "`await` needs a task, found `{integer}`",
+    );
+    assert_err(
+        "async fn f() -> Int:\n    1\n\nasync fn g() -> Int:\n    let h = () => await f()\n    1\n",
+        "`await` can only be used inside an `async fn`",
+    );
+    assert_err(
+        "async fn f[T](x: T) -> T:\n    x\n",
+        "an `async fn` cannot have type parameters yet",
+    );
+    assert_err(
+        "fn main():\n    let t = std.task.gather([1, 2])\n",
+        "`gather` needs a list of tasks",
+    );
+    assert_err(
+        "async fn f() -> Int:\n    1\n\nasync fn g() -> Int:\n    f() + 1\n",
+        "mismatched operand types: `Task[Int]` and `{integer}`",
+    );
+    // Leaving the `await` out of a value that is wanted says what to write.
+    let (ast, _) = telvax_parser::parse(
+        "async fn f() -> Int:\n    1\n\nasync fn g() -> Int:\n    let x: Int = f()\n    x\n",
+    );
+    let (_, diags) = lower(&ast.unwrap());
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("expected `Int`, found `Task[Int]`")
+                && d.notes.iter().any(|n| n.contains("write `await`")))
+    );
+}
+
+#[test]
+fn async_methods_work_in_types_traits_and_enums() {
+    assert_clean(
+        "trait Source:\n    async fn load(self) -> Int: ...\n\ntype A(Source):\n    n: Int\n\n    async fn load(self) -> Int:\n        self.n\n\n\
+         enum E:\n    X\n\n    async fn size(self) -> Int:\n        1\n\n\
+         async fn total(s: Source, e: E) -> Int:\n    let a = await s.load()\n    let b = await e.size()\n    let c = await E.X.size()\n    a + b + c\n",
+    );
+    // A trait's method and its implementation both say `async`, or neither.
+    assert_err(
+        "trait Source:\n    async fn load(self) -> Int: ...\n\ntype A(Source):\n    n: Int\n\n    fn load(self) -> Int:\n        self.n\n",
+        "load",
+    );
+}

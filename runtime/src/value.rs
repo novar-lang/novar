@@ -270,7 +270,20 @@ pub enum Value {
     Closure(Arc<Closure>),
     /// A reference to a top-level function, by name (callable, and shippable to other machines).
     Func(Arc<str>),
+    /// What an `async fn` gives: work that has not run yet. `await` runs it.
+    Task(Arc<TaskVal>),
     Native(Native),
+}
+
+/// The work a `Task` stands for.
+#[derive(Debug)]
+pub enum TaskVal {
+    /// A call of an `async fn`, with its arguments.
+    Call { name: String, args: Vec<Value> },
+    /// `std.task.sleep(ms)`
+    Sleep(u64),
+    /// `std.task.gather(tasks)`: every task at the same time, the values in the same order.
+    Gather(Vec<Value>),
 }
 
 impl Value {
@@ -395,6 +408,7 @@ impl Value {
             Value::Ok(_) | Value::Err(_) => "Result",
             Value::Status(..) => "Status",
             Value::Closure(_) | Value::Func(_) => "function",
+            Value::Task(_) => "Task",
             Value::Native(_) => "object",
         }
     }
@@ -486,6 +500,7 @@ impl Value {
             Value::Err(v) => serde_json::json!({ "error": v.to_json() }),
             Value::Status(code, msg) => serde_json::json!({ "status": code, "message": &**msg }),
             Value::Closure(_) | Value::Func(_) => Json::String("<function>".into()),
+            Value::Task(_) => Json::String("<task>".into()),
             Value::Native(_) => Json::String("<object>".into()),
         }
     }
@@ -522,6 +537,7 @@ impl Value {
             Value::Table(t) => format!("Table[{} rows]", t.rows()),
             Value::Status(code, msg) => format!("{code}: {msg}"),
             Value::Closure(_) => "<function>".to_string(),
+            Value::Task(_) => "<task>".to_string(),
             Value::Func(name) => format!("<fn {name}>"),
             Value::Native(_) => "<object>".to_string(),
             other => other.to_string(),

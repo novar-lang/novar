@@ -28,6 +28,7 @@ fn is_value(e: &Expr) -> bool {
             | ExprKind::StructLit { .. }
             | ExprKind::Closure { .. }
             | ExprKind::Try(_)
+            | ExprKind::Await(_)
             | ExprKind::If { .. }
     )
 }

@@ -27,6 +27,10 @@ pub enum Token<'src> {
     From,
     #[token("fn")]
     Fn,
+    #[token("async")]
+    Async,
+    #[token("await")]
+    Await,
     #[token("let")]
     Let,
     #[token("var")]
@@ -189,6 +193,8 @@ impl std::fmt::Display for Token<'_> {
             Import => "import",
             From => "from",
             Fn => "fn",
+            Async => "async",
+            Await => "await",
             Let => "let",
             Var => "var",
             Enum => "enum",
@@ -660,6 +666,30 @@ mod tests {
         assert_eq!(
             kinds("let s = f\"\"\"a\n  {x}\"\"\"\n"),
             [Let, Ident("s"), Eq, FTStr("f\"\"\"a\n  {x}\"\"\""), Newline]
+        );
+    }
+
+    #[test]
+    fn async_and_await_are_words_of_their_own() {
+        assert_eq!(
+            flat("async fn f(): await g()"),
+            [
+                Async,
+                Fn,
+                Ident("f"),
+                LParen,
+                RParen,
+                Colon,
+                Await,
+                Ident("g"),
+                LParen,
+                RParen
+            ]
+        );
+        // They are only words when they stand alone.
+        assert_eq!(
+            flat("asynchronous awaiting"),
+            [Ident("asynchronous"), Ident("awaiting")]
         );
     }
 }

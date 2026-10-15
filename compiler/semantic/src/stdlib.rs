@@ -553,6 +553,43 @@ fn iter_range(args: &[Ty]) -> Result<Ty, String> {
     Ok(vec_of(ty.clone()))
 }
 
+fn task_gather(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    match elem(args, 0)? {
+        Ty::Task(t) => Ok(Ty::Task(Box::new(vec_of(*t)))),
+        Ty::Unknown => Ok(Ty::Task(Box::new(vec_of(Ty::Unknown)))),
+        other => Err(format!(
+            "`gather` needs a list of tasks, the values of calls of `async fn`s, found a list of `{other}`"
+        )),
+    }
+}
+
+fn task_run(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    match &args[0] {
+        Ty::Task(t) => Ok((**t).clone()),
+        t if is_dynamic(t) => Ok(Ty::Unknown),
+        other => Err(format!("argument 1 must be a task, found `{other}`")),
+    }
+}
+
+fn task_sleep(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_int(args, 0)?;
+    Ok(Ty::Task(Box::new(Ty::Unit)))
+}
+
+fn time_sleep(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    want_int(args, 0)?;
+    Ok(Ty::Unit)
+}
+
+fn time_now(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 0)?;
+    Ok(Ty::Prim(Prim::F64))
+}
+
 fn map_key_ok(t: &Ty) -> bool {
     match t {
         Ty::Prim(p) => !p.is_float(),
@@ -1341,6 +1378,11 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::iter::skip", sig(skip)),
     ("std::iter::take", sig(take)),
     ("std::iter::count", sig(count)),
+    ("std::task::gather", sig(task_gather)),
+    ("std::task::run", sig(task_run)),
+    ("std::task::sleep", sig(task_sleep)),
+    ("std::time::sleep", sig(time_sleep)),
+    ("std::time::now", sig(time_now)),
     ("std::iter::slice", sig(iter_slice)),
     ("std::iter::concat", sig(iter_concat)),
     ("std::iter::range", sig(iter_range)),

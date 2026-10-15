@@ -286,6 +286,13 @@ fn unsupported_features_are_diagnosed_not_miscompiled() {
     let cases = [
         (
             r#"
+async fn f() -> i32:
+    1
+"#,
+            "`async fn`",
+        ),
+        (
+            r#"
 fn f() -> i32:
     let g = x => x
     1

@@ -2643,3 +2643,138 @@ fn f() -> Text:
         "{x} {3} }|Dear bo,\n  you have   3 items {kept}\n  total: 00006|a\\nb|^\\d{3}-\\d{4}$ 13"
     );
 }
+
+#[test]
+fn async_functions_run_when_awaited() {
+    let src = r#"
+async fn fetch(id: Int) -> Result[Text, Text]:
+    await std.task.sleep(1)
+    if id < 0:
+        return Err(f"bad id {id}")
+    Ok(f"item {id}")
+
+async fn twice(id: Int) -> Result[Text, Text]:
+    let a = await fetch(id)?
+    let b = await fetch(id + 1)?
+    Ok(f"{a}+{b}")
+
+async fn fact(n: Int) -> Int:
+    if n <= 1:
+        return 1
+    n * await fact(n - 1)
+
+async fn run() -> Text:
+    let one = await fetch(1)
+    let both = await twice(5)
+    let bad = await twice(-1)
+    f"{one} {both} {bad} {await fact(10)}"
+
+fn sync_run() -> Int:
+    std.task.run(fact(5))
+"#;
+    assert_eq!(
+        shown(&src.replace("async fn run()", "async fn f()")),
+        "Ok(\"item 1\") Ok(\"item 5+item 6\") Err(\"bad id -1\") 3628800"
+    );
+    assert_eq!(int(run(src, "sync_run", vec![])), 120);
+    // A call that is not awaited does not run.
+    let src = r#"
+async fn boom() -> Int:
+    assert(False)
+    1
+
+fn f() -> Int:
+    let t = boom()
+    7
+"#;
+    assert_eq!(int(run(src, "f", vec![])), 7);
+}
+
+#[test]
+fn gather_runs_tasks_at_the_same_time() {
+    // The task that sleeps longest is first in the list and last to finish: they overlap.
+    let src = r#"
+async fn work(name: Text, ms: Int, log: List[Text]) -> Text:
+    await std.task.sleep(ms)
+    log.push(name)
+    name
+
+async fn f() -> Text:
+    let log: List[Text] = []
+    let out = await std.task.gather([work("slow", 400, log), work("mid", 200, log), work("fast", 10, log)])
+    f"{out} {log}"
+"#;
+    assert_eq!(
+        shown(src),
+        "[\"slow\", \"mid\", \"fast\"] [\"fast\", \"mid\", \"slow\"]"
+    );
+    // The first failure, by position, is the result; an empty list is fine.
+    let src = r#"
+async fn ok(n: Int) -> Int:
+    n
+
+async fn bad(n: Int) -> Int:
+    assert_eq(n, 0)
+    n
+
+async fn f() -> Text:
+    let none: List[Int] = await std.task.gather([])
+    let some = await std.task.gather([ok(1), ok(2), ok(3)])
+    f"{none} {some}"
+
+async fn g() -> List[Int]:
+    await std.task.gather([ok(1), bad(5), ok(3)])
+"#;
+    assert_eq!(shown(src), "[] [1, 2, 3]");
+    let e = load(src).call("g", vec![]).unwrap_err();
+    assert!(e.message.contains("assert"), "{e}");
+}
+
+#[test]
+fn async_endpoints_and_methods() {
+    let src = r#"
+from std.http import Status
+
+type In:
+    a: Int
+
+type Out:
+    b: Int
+
+trait Source:
+    async fn load(self) -> Int: ...
+
+type Slow(Source):
+    n: Int
+
+    async fn load(self) -> Int:
+        await std.task.sleep(1)
+        self.n * 10
+
+async fn total(sources: List[Source]) -> Int:
+    var sum = 0
+    for s in sources:
+        sum = sum + await s.load()
+    sum
+
+@endpoint(POST, "/double")
+async fn double(i: In) -> Result[Out, Status]:
+    let t = await total([Slow(n: i.a), Slow(n: 1)])
+    if t < 0:
+        return Err(Status.BadRequest("negative"))
+    Ok(Out(b: t))
+"#;
+    let i = load(src);
+    let out = i.call_endpoint("double", &json!({"a": 4})).unwrap();
+    assert_eq!(out, json!({"b": 50}));
+    // `call` runs an `async fn` to the end.
+    assert_eq!(int(run(src, "total", vec![Value::vec(vec![])])), 0);
+    // The time functions.
+    let src = r#"
+fn f() -> Bool:
+    let t0 = std.time.now()
+    std.time.sleep(20)
+    std.time.now() - t0 >= 0.015
+"#;
+    assert_eq!(run(src, "f", vec![]).to_string(), "True");
+}

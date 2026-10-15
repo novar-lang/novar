@@ -209,6 +209,10 @@ pub(crate) struct Checker {
     aliases: HashMap<String, ast::Alias>,
     /// The variants marked `from`, by enum and variant: where `?` wraps an error.
     enum_from: HashSet<(String, String)>,
+    /// What each `async fn` gives when its task is awaited (its signature says `Task[T]`).
+    async_inner: HashMap<String, Ty>,
+    /// Whether the code being checked is the body of an `async fn`, where `await` is allowed.
+    in_async: bool,
     alias_stack: Vec<String>,
     /// Functions of `impl` blocks, by their full name (`Point::norm`), with the type they belong to.
     methods: HashMap<String, String>,
@@ -398,6 +402,7 @@ impl Checker {
 
     fn run(&mut self, program: &ast::Program) -> hir::Program {
         let mut out = hir::Program::default();
+        self.reject_generic_async(program);
 
         for item in &program.items {
             if let ast::Item::Import(i) = item {
@@ -733,8 +738,13 @@ impl Checker {
             }
             self.impl_ty = impl_ty.clone();
             let params = f.params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-            let ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
+            let mut ret = f.ret.as_ref().map_or(Ty::Unit, |t| self.resolve_type(t));
             self.impl_ty = None;
+            // Calling an `async fn` gives a task; its body is checked against what it gives.
+            if f.is_async {
+                self.async_inner.insert(f.name.node.clone(), ret.clone());
+                ret = Ty::Task(Box::new(ret));
+            }
             self.fn_sigs.insert(f.name.node.clone(), (params, ret));
         }
         self.adopt_trait_returns(&mut fns);
@@ -1028,6 +1038,16 @@ impl Checker {
                 Ty::Fn(tys, Box::new(ret))
             }
             "(tuple)" => Ty::Tuple(type_args.iter().map(|a| self.resolve_type(a)).collect()),
+            "Task" => match type_args.as_slice() {
+                [inner] if t.args.len() == 1 => Ty::Task(Box::new(self.resolve_type(inner))),
+                _ => {
+                    self.err(
+                        t.span.clone(),
+                        "`Task` takes one type argument: `Task[Int]`",
+                    );
+                    Ty::Unknown
+                }
+            },
             "Option" => match type_args.as_slice() {
                 [inner] if t.args.len() == 1 => Ty::Option(Box::new(self.resolve_type(inner))),
                 _ => {
@@ -1246,6 +1266,7 @@ impl Checker {
             Ty::Vec(t) => Ty::Vec(Box::new(self.resolve(t))),
             Ty::Result(a, b) => Ty::Result(Box::new(self.resolve(a)), Box::new(self.resolve(b))),
             Ty::Option(t) => Ty::Option(Box::new(self.resolve(t))),
+            Ty::Task(t) => Ty::Task(Box::new(self.resolve(t))),
             Ty::Tuple(items) => Ty::Tuple(items.iter().map(|t| self.resolve(t)).collect()),
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Fn(ps, r) => Ty::Fn(
@@ -1298,6 +1319,7 @@ impl Checker {
             }
             Ty::Vec(t) => Ty::Vec(Box::new(self.finalize_ty(&t))),
             Ty::Option(t) => Ty::Option(Box::new(self.finalize_ty(&t))),
+            Ty::Task(t) => Ty::Task(Box::new(self.finalize_ty(&t))),
             Ty::Tuple(items) => Ty::Tuple(items.iter().map(|t| self.finalize_ty(t)).collect()),
             Ty::Map(k, v) => Ty::Map(
                 Box::new(self.finalize_ty(&k)),
@@ -1334,7 +1356,7 @@ impl Checker {
                 true
             }
             (Ty::Vec(x), Ty::Vec(y)) => self.unify(x, y),
-            (Ty::Option(x), Ty::Option(y)) => self.unify(x, y),
+            (Ty::Option(x), Ty::Option(y)) | (Ty::Task(x), Ty::Task(y)) => self.unify(x, y),
             // A value of a type that implements the trait can be used where the trait is expected.
             (Ty::Trait(t), Ty::Struct(s) | Ty::Enum(s)) => {
                 self.impls.contains(&(t.clone(), s.clone()))
@@ -1409,7 +1431,7 @@ impl Checker {
                 }
             }
             K::Break | K::Continue => {}
-            K::Try(inner) => self.finalize_expr(inner),
+            K::Try(inner) | K::Await(inner) => self.finalize_expr(inner),
             K::Tuple(items) => items.iter_mut().for_each(|i| self.finalize_expr(i)),
             K::DynCall { args, .. } => args.iter_mut().for_each(|a| self.finalize_expr(a)),
             K::EnumCtor { args, .. } => {
@@ -1515,7 +1537,13 @@ impl Checker {
     // ---- functions ---------------------------------------------------------------------
 
     fn lower_fn(&mut self, f: &ast::Fn) -> hir::FnDef {
-        let (param_tys, ret) = self.fn_sigs[&f.name.node].clone();
+        let (param_tys, signature_ret) = self.fn_sigs[&f.name.node].clone();
+        let ret = self
+            .async_inner
+            .get(&f.name.node)
+            .cloned()
+            .unwrap_or(signature_ret);
+        self.in_async = f.is_async;
         self.scopes = vec![HashMap::new()];
         self.ret = ret.clone();
         let mut params = Vec::new();
@@ -1550,10 +1578,12 @@ impl Checker {
         self.finalize_block(&mut body);
         let endpoint = self.endpoint(f, &params, &ret);
         self.scopes.clear();
+        self.in_async = false;
         hir::FnDef {
             name: f.name.node.clone(),
             name_span: f.name.span.clone(),
             is_pub: f.is_pub,
+            is_async: f.is_async,
             params,
             ret,
             body,
@@ -1713,10 +1743,18 @@ impl Checker {
     fn coerce(&mut self, e: hir::Expr, expected: &Ty) -> hir::Expr {
         if !self.unify(expected, &e.ty) {
             let (want, found) = (self.resolve(expected), self.resolve(&e.ty));
-            self.err(
+            let mut diag = Diagnostic::error(
                 e.span.clone(),
                 format!("mismatched types: expected `{want}`, found `{found}`"),
             );
+            // A call of an `async fn` where its value is wanted: the `await` was left out.
+            if let Ty::Task(inner) = &found
+                && want.accepts(inner)
+            {
+                diag =
+                    diag.with_note("a call of an `async fn` gives a task; write `await` to run it");
+            }
+            self.diags.push(diag);
         }
         e
     }
@@ -1953,6 +1991,8 @@ impl Checker {
                 self.scopes.push(HashMap::new());
                 let saved = std::mem::take(&mut self.ret);
                 let saved_depth = std::mem::take(&mut self.loop_depth);
+                // A closure is not an `async fn`: `await` is not allowed in it.
+                let saved_async = std::mem::take(&mut self.in_async);
                 let locals: Vec<_> = params
                     .iter()
                     .enumerate()
@@ -1967,6 +2007,7 @@ impl Checker {
                 let body = self.expr(body, want.map(|(_, r)| r));
                 self.ret = saved;
                 self.loop_depth = saved_depth;
+                self.in_async = saved_async;
                 self.scopes.pop();
                 self.closure_floors.pop();
                 let ty = Ty::Fn(
@@ -2043,6 +2084,29 @@ impl Checker {
                     .collect();
                 let ty = Ty::Tuple(parts.iter().map(|p| p.ty.clone()).collect());
                 Self::mk(hir::ExprKind::Tuple(parts), ty, span)
+            }
+            K::Await(inner) => {
+                if !self.in_async {
+                    self.err(
+                        span.clone(),
+                        "`await` can only be used inside an `async fn`",
+                    );
+                }
+                let task = self.expr(inner, None);
+                let ty = match self.resolve(&task.ty) {
+                    Ty::Task(t) => *t,
+                    Ty::Unknown | Ty::Never => Ty::Unknown,
+                    other => {
+                        self.err(
+                            task.span.clone(),
+                            format!(
+                                "`await` needs a task, found `{other}`; a task is what a call of an `async fn` gives"
+                            ),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                Self::mk(hir::ExprKind::Await(Box::new(task)), ty, span)
             }
             K::Try(inner) => {
                 let value = self.expr(inner, None);
@@ -2426,7 +2490,7 @@ impl Checker {
     fn has_param(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Param(_) => true,
-            Ty::Vec(t) | Ty::Option(t) => self.has_param(t),
+            Ty::Vec(t) | Ty::Option(t) | Ty::Task(t) => self.has_param(t),
             Ty::Result(a, b) | Ty::Map(a, b) => self.has_param(a) || self.has_param(b),
             Ty::Tuple(items) => items.iter().any(|t| self.has_param(t)),
             Ty::Fn(ps, r) => ps.iter().any(|p| self.has_param(p)) || self.has_param(r),
@@ -2445,6 +2509,7 @@ impl Checker {
             Ty::Param(p) => bind.get(p).cloned().unwrap_or(Ty::Unknown),
             Ty::Vec(t) => Ty::Vec(Box::new(self.subst_params(t, bind))),
             Ty::Option(t) => Ty::Option(Box::new(self.subst_params(t, bind))),
+            Ty::Task(t) => Ty::Task(Box::new(self.subst_params(t, bind))),
             Ty::Result(a, b) => Ty::Result(
                 Box::new(self.subst_params(a, bind)),
                 Box::new(self.subst_params(b, bind)),
@@ -2482,7 +2547,9 @@ impl Checker {
                     bind.entry(p.clone()).or_insert_with(|| a.clone());
                 }
             }
-            (Ty::Vec(d), Ty::Vec(a)) | (Ty::Option(d), Ty::Option(a)) => {
+            (Ty::Vec(d), Ty::Vec(a))
+            | (Ty::Option(d), Ty::Option(a))
+            | (Ty::Task(d), Ty::Task(a)) => {
                 self.infer_params(d, a, bind);
             }
             (Ty::Result(d1, d2), Ty::Result(a1, a2)) | (Ty::Map(d1, d2), Ty::Map(a1, a2)) => {
@@ -3153,7 +3220,7 @@ impl Checker {
     fn has_literal_var(&self, ty: &Ty) -> bool {
         match self.resolve(ty) {
             Ty::IntVar(_) | Ty::FloatVar(_) => true,
-            Ty::Vec(t) | Ty::Option(t) => self.has_literal_var(&t),
+            Ty::Vec(t) | Ty::Option(t) | Ty::Task(t) => self.has_literal_var(&t),
             Ty::Result(a, b) | Ty::Map(a, b) => {
                 self.has_literal_var(&a) || self.has_literal_var(&b)
             }
@@ -3168,7 +3235,7 @@ impl Checker {
     fn type_size(&self, ty: &Ty) -> usize {
         let sum = |tys: &[&Ty]| tys.iter().map(|t| self.type_size(t)).sum::<usize>();
         1 + match ty {
-            Ty::Vec(t) | Ty::Option(t) => self.type_size(t),
+            Ty::Vec(t) | Ty::Option(t) | Ty::Task(t) => self.type_size(t),
             Ty::Tensor { elem, .. } => self.type_size(elem),
             Ty::Result(a, b) | Ty::Map(a, b) => sum(&[a, b]),
             Ty::Tuple(items) => items.iter().map(|t| self.type_size(t)).sum(),
@@ -3353,6 +3420,7 @@ impl Checker {
             Ty::Trait(n) if n == trait_name => concrete.clone(),
             Ty::Vec(t) => Ty::Vec(Box::new(go(t))),
             Ty::Option(t) => Ty::Option(Box::new(go(t))),
+            Ty::Task(t) => Ty::Task(Box::new(go(t))),
             Ty::Result(a, b) => Ty::Result(Box::new(go(a)), Box::new(go(b))),
             Ty::Map(k, v) => Ty::Map(Box::new(go(k)), Box::new(go(v))),
             Ty::Tuple(items) => Ty::Tuple(items.iter().map(go).collect()),
@@ -3492,6 +3560,32 @@ impl Checker {
             ret,
             span,
         )
+    }
+
+    /// An `async fn` with type parameters, or in a type that has them, is not supported yet.
+    fn reject_generic_async(&mut self, program: &ast::Program) {
+        let mut bad: Vec<Span> = Vec::new();
+        for item in &program.items {
+            match item {
+                ast::Item::Fn(f) if f.is_async && !f.generics.is_empty() => {
+                    bad.push(f.name.span.clone());
+                }
+                ast::Item::Impl(imp) => {
+                    for f in imp.fns.iter().filter(|f| f.is_async) {
+                        if !imp.generics.is_empty() || !f.generics.is_empty() {
+                            bad.push(f.name.span.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for span in bad {
+            self.err(
+                span,
+                "an `async fn` cannot have type parameters yet, nor belong to a generic type",
+            );
+        }
     }
 
     fn record_labels(&mut self, en: &ast::Enum) {

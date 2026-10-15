@@ -398,7 +398,7 @@ fn walk(e: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         }
         ExprKind::Named { value, .. } => walk(value, f),
         ExprKind::Field { base, .. } => walk(base, f),
-        ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => walk(expr, f),
+        ExprKind::Unary { expr, .. } | ExprKind::Try(expr) | ExprKind::Await(expr) => walk(expr, f),
         ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
             walk(lhs, f);
             walk(rhs, f);

@@ -194,7 +194,11 @@
       "patterns": [
         {
           "name": "keyword.control.telvax",
-          "match": "\\b(?:if|elif|else|for|while|in|is|return|break|continue|match|case|pass)\\b"
+          "match": "\\b(?:if|elif|else|for|while|in|is|return|break|continue|match|case|pass|await)\\b"
+        },
+        {
+          "name": "storage.modifier.async.telvax",
+          "match": "\\basync\\b"
         },
         {
           "name": "keyword.control.import.telvax",

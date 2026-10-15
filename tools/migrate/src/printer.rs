@@ -924,6 +924,7 @@ impl<'a> Printer<'a> {
                 (format!("{b}[{i}]"), 11)
             }
             ExprKind::Try(x) => (format!("{}?", self.expr(x, 11)), 11),
+            ExprKind::Await(x) => (format!("await {}", self.expr(x, 11)), 10),
             ExprKind::Unary { op, expr } => match op {
                 UnOp::Neg => (format!("-{}", self.expr(expr, 10)), 10),
                 UnOp::Not => (format!("not {}", self.expr(expr, 5)), 5),
@@ -1232,7 +1233,9 @@ fn expr_assigns(e: &Expr, out: &mut HashSet<String>) {
         }
         ExprKind::Named { value, .. } => expr_assigns(value, out),
         ExprKind::Field { base, .. } => expr_assigns(base, out),
-        ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => expr_assigns(expr, out),
+        ExprKind::Unary { expr, .. } | ExprKind::Try(expr) | ExprKind::Await(expr) => {
+            expr_assigns(expr, out)
+        }
         ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
             expr_assigns(lhs, out);
             expr_assigns(rhs, out);

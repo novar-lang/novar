@@ -76,6 +76,8 @@ pub struct FnDef {
     pub name: String,
     pub name_span: Span,
     pub is_pub: bool,
+    /// `async fn`: a call gives a `Task`; `ret` is the type the task gives when it is awaited.
+    pub is_async: bool,
     pub params: Vec<Local>,
     pub ret: Ty,
     pub body: Block,
@@ -188,6 +190,8 @@ pub enum ExprKind {
         index: Box<Expr>,
     },
     Array(Vec<Expr>),
+    /// `await task`
+    Await(Box<Expr>),
     Error,
 }
 

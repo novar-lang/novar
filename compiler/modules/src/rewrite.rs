@@ -222,7 +222,9 @@ impl<'a> Rewriter<'a> {
             }
             ExprKind::Field { base, .. } => self.expr(base),
             ExprKind::Named { value, .. } => self.expr(value),
-            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) => self.expr(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::Try(expr) | ExprKind::Await(expr) => {
+                self.expr(expr)
+            }
             ExprKind::Tuple(items) => items.iter_mut().for_each(|a| self.expr(a)),
             ExprKind::Binary { lhs, rhs, .. } | ExprKind::Pipe { lhs, rhs } => {
                 self.expr(lhs);
