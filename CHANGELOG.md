@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* **Completion in context:** the language server now offers types after `:` and `->`, inside `List[..]`,
+  `Map[..]` and `Table[..]`, after `type Id =` and for the fields of a `type` (built-in types, your
+  `type`s, `enum`s, `trait`s, aliases and the type parameters in scope). After a dot it knows the methods
+  of `Text`, `List`, `Map`, `Option`, `Result`, `Tensor` and `Table`, the methods of your types and the
+  defaults of the traits they implement, and the methods of a trait-typed value; it follows calls in a
+  chain (`s.trim().`, `xs.first().unwrap().`). `Shape.` lists the variants of an enum and `Point.` the
+  functions without `self`. In a closure that is still being typed, the parameter has the type of the
+  elements (`xs.map(p => p.`, `std.table.filter(t, r => r.`). Inside a string, the columns of a table are
+  offered for `t["`, `t.sql("..` and `std.table.f(t, "..`; other strings and comments offer nothing.
+  Items fit the type the code wants first (the parameter of the call, a `return`, the variable being
+  assigned), then names in scope, then declarations, then keywords, and carry a detail and a short
+  description. The method lists come from one table that the type checker also uses for its suggestions.
 * **VS Code README:** the install commands pointed at `ntsation/telvax`, which does not exist; they use `telvax/telvax`.
 * **VS Code snippets and a fuller README:** the extension adds snippets for `fn`, `main`, `type`, `enum`,
   `match`, `for`, `test`, `endpoint` and `trait`. Its README lists references, rename and formatting and

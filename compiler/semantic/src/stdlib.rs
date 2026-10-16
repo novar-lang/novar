@@ -1659,3 +1659,139 @@ pub fn methods_of(ty: &str) -> Vec<&'static str> {
         .map(|(_, n, _)| *n)
         .collect()
 }
+
+/// A method built into the language: its name and how it reads.
+pub type BuiltinMethod = (&'static str, &'static str);
+
+const TEXT_METHODS: &[BuiltinMethod] = &[
+    ("is_empty", "() -> Bool"),
+    ("len", "() -> u64"),
+    ("trim", "() -> Text"),
+    ("to_lowercase", "() -> Text"),
+    ("to_uppercase", "() -> Text"),
+    ("contains", "(part: Text) -> Bool"),
+    ("starts_with", "(prefix: Text) -> Bool"),
+    ("ends_with", "(suffix: Text) -> Bool"),
+    ("replace", "(from: Text, to: Text) -> Text"),
+    ("split", "(sep: Text) -> List[Text]"),
+    ("find", "(part: Text) -> u64?"),
+    ("to_int", "() -> i64?"),
+    ("to_float", "() -> f64?"),
+    ("chars", "() -> List[Text]"),
+    ("lines", "() -> List[Text]"),
+    ("slice", "(start, end) -> Text"),
+];
+
+const LIST_METHODS: &[BuiltinMethod] = &[
+    ("is_empty", "() -> Bool"),
+    ("len", "() -> u64"),
+    ("push", "(x: T)"),
+    ("contains", "(x: T) -> Bool"),
+    ("first", "() -> T?"),
+    ("last", "() -> T?"),
+    ("pop", "() -> T?"),
+    ("get", "(i) -> T?"),
+    ("sort", "()"),
+    ("reverse", "()"),
+    ("map", "(f: (T) -> U) -> List[U]"),
+    ("filter", "(f: (T) -> Bool) -> List[T]"),
+    ("take", "(n) -> List[T]"),
+    ("skip", "(n) -> List[T]"),
+    ("count", "(f: (T) -> Bool) -> u64"),
+    ("any", "(f: (T) -> Bool) -> Bool"),
+    ("all", "(f: (T) -> Bool) -> Bool"),
+    ("find", "(f: (T) -> Bool) -> T?"),
+    ("for_each", "(f: (T) -> ())"),
+    ("fold", "(init: A, f: (A, T) -> A) -> A"),
+    ("enumerate", "() -> List[(u64, T)]"),
+    ("zip", "(other: List[U]) -> List[(T, U)]"),
+    ("sum", "() -> T"),
+    ("min", "() -> T?"),
+    ("max", "() -> T?"),
+    ("join", "(sep: Text) -> Text"),
+    ("slice", "(start, end) -> List[T]"),
+];
+
+const OPTION_METHODS: &[BuiltinMethod] = &[
+    ("is_some", "() -> Bool"),
+    ("is_none", "() -> Bool"),
+    ("unwrap", "() -> T"),
+    ("unwrap_or", "(default: T) -> T"),
+    ("unwrap_or_else", "(f: () -> T) -> T"),
+    ("expect", "(message: Text) -> T"),
+    ("map", "(f: (T) -> U) -> U?"),
+    ("and_then", "(f: (T) -> U?) -> U?"),
+    ("filter", "(f: (T) -> Bool) -> T?"),
+    ("ok_or", "(error: E) -> Result[T, E]"),
+];
+
+const RESULT_METHODS: &[BuiltinMethod] = &[
+    ("is_ok", "() -> Bool"),
+    ("is_err", "() -> Bool"),
+    ("unwrap", "() -> T"),
+    ("expect", "(message: Text) -> T"),
+    ("unwrap_or", "(default: T) -> T"),
+    ("unwrap_or_else", "(f: (E) -> T) -> T"),
+    ("map", "(f: (T) -> U) -> Result[U, E]"),
+    ("map_err", "(f: (E) -> F) -> Result[T, F]"),
+    ("and_then", "(f: (T) -> Result[U, E]) -> Result[U, E]"),
+    ("ok", "() -> T?"),
+    ("err", "() -> E?"),
+];
+
+const MAP_METHODS: &[BuiltinMethod] = &[
+    ("insert", "(key: K, value: V)"),
+    ("get", "(key: K) -> V?"),
+    ("remove", "(key: K) -> V?"),
+    ("contains_key", "(key: K) -> Bool"),
+    ("len", "() -> u64"),
+    ("is_empty", "() -> Bool"),
+    ("keys", "() -> List[K]"),
+    ("values", "() -> List[V]"),
+    ("entries", "() -> List[(K, V)]"),
+];
+
+const TABLE_METHODS: &[BuiltinMethod] = &[
+    ("len", "() -> u64"),
+    ("is_empty", "() -> Bool"),
+    ("sql", "(query: Text) -> Table"),
+];
+
+const TENSOR_METHODS: &[BuiltinMethod] = &[
+    ("add", "(other) -> Tensor"),
+    ("sub", "(other) -> Tensor"),
+    ("mul", "(other) -> Tensor"),
+    ("div", "(other) -> Tensor"),
+    ("scale", "(k) -> Tensor"),
+    ("relu", "() -> Tensor"),
+    ("sigmoid", "() -> Tensor"),
+    ("softmax", "() -> Tensor"),
+    ("sum", "() -> number"),
+    ("mean", "() -> number"),
+    ("argmax", "() -> u64"),
+    ("dot", "(other) -> number"),
+    ("matmul", "(other) -> Tensor"),
+    ("transpose", "() -> Tensor"),
+    ("reshape", "(shape) -> Tensor"),
+    ("to_vec", "() -> List"),
+];
+
+/// The methods the language gives every value of `ty` (not those the user declares), in the order
+/// the type checker lists them when a name is misspelled.
+pub fn builtin_methods(ty: &Ty) -> &'static [BuiltinMethod] {
+    match ty {
+        Ty::Prim(Prim::Str) => TEXT_METHODS,
+        Ty::Vec(_) => LIST_METHODS,
+        Ty::Option(_) => OPTION_METHODS,
+        Ty::Result(..) => RESULT_METHODS,
+        Ty::Map(..) => MAP_METHODS,
+        Ty::Table(_) => TABLE_METHODS,
+        Ty::Tensor { .. } => TENSOR_METHODS,
+        _ => &[],
+    }
+}
+
+/// Just the names of [`builtin_methods`].
+pub fn builtin_method_names(ty: &Ty) -> Vec<&'static str> {
+    builtin_methods(ty).iter().map(|(n, _)| *n).collect()
+}

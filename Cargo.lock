@@ -3735,6 +3735,7 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
+ "telvax_ast",
  "telvax_diagnostics",
  "telvax_fmt",
  "telvax_hir",

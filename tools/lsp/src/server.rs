@@ -15,9 +15,9 @@ use lsp_types::request::{
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     DiagnosticRelatedInformation, DiagnosticSeverity, DocumentSymbol, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InlayHint, InlayHintKind,
-    InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind, OneOf,
+    DocumentSymbolResponse, Documentation, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InlayHint,
+    InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent, MarkupKind, OneOf,
     PublishDiagnosticsParams, ServerCapabilities, SymbolKind, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Uri,
 };
@@ -273,6 +273,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 .completions(snap.index.offset(pos.position))
                 .into_iter()
                 .map(|c| CompletionItem {
+                    sort_text: Some(format!("{}{}", c.rank, c.label)),
                     label: c.label,
                     kind: Some(match c.kind {
                         CompletionKind::Keyword => CompletionItemKind::KEYWORD,
@@ -283,8 +284,12 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                         CompletionKind::Method => CompletionItemKind::METHOD,
                         CompletionKind::Module => CompletionItemKind::MODULE,
                         CompletionKind::Type => CompletionItemKind::CLASS,
+                        CompletionKind::Enum => CompletionItemKind::ENUM,
+                        CompletionKind::EnumMember => CompletionItemKind::ENUM_MEMBER,
+                        CompletionKind::Trait => CompletionItemKind::INTERFACE,
                     }),
                     detail: c.detail,
+                    documentation: c.doc.map(Documentation::String),
                     ..CompletionItem::default()
                 })
                 .collect();
