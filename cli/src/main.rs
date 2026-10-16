@@ -595,25 +595,14 @@ fn line_ranges(lines: &[usize]) -> String {
     out.join(", ")
 }
 
-/// The `test_*.tvx` and `*_test.tvx` files under `dir`, skipping hidden folders, `target` and
-/// `node_modules`.
+/// The `test_*.tvx` and `*_test.tvx` files under `dir`.
 fn collect_test_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
-            if !name.starts_with('.') && name != "target" && name != "node_modules" {
-                collect_test_files(&path, out);
-            }
-        } else if let Some(stem) = name.strip_suffix(".tvx")
-            && (stem.starts_with("test_") || stem.ends_with("_test"))
-        {
-            out.push(path);
-        }
-    }
+    collect_tvx_files(dir, out);
+    out.retain(|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.starts_with("test_") || s.ends_with("_test"))
+    });
 }
 
 /// Runs the tests of one file and returns how many passed and failed.
