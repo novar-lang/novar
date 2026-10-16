@@ -3694,6 +3694,7 @@ dependencies = [
  "telvax_codegen",
  "telvax_dap",
  "telvax_diagnostics",
+ "telvax_doc",
  "telvax_fmt",
  "telvax_hir",
  "telvax_lint",
@@ -3754,6 +3755,14 @@ name = "telvax_diagnostics"
 version = "0.0.5"
 dependencies = [
  "ariadne",
+]
+
+[[package]]
+name = "telvax_doc"
+version = "0.0.5"
+dependencies = [
+ "telvax_ast",
+ "telvax_parser",
 ]
 
 [[package]]

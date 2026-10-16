@@ -445,6 +445,24 @@ spends its time and include the time of the interpreter itself. Memory counts th
 several threads a function also counts what the other threads allocate meanwhile. Programs built with
 `telvax build` are not profiled.
 
+## Documentation
+
+`telvax doc` writes a Markdown reference from the code: each function with its signature, each `type` with
+a table of fields (and defaults), each `enum` with its variants, each `trait`, and the methods under `extend`.
+The `#` comment lines written directly above an item (no blank line between) become its description.
+
+```sh
+telvax doc file.tvx                # print the reference of one file
+telvax doc src/ -o REFERENCE.md    # every `.tvx` file under the directory, written to a file
+telvax doc --public src/           # leave out names that start with `_`
+```
+
+```tvx
+# Sum of the first `n` squares.
+fn squares(n: Int) -> Int:
+    n * (n + 1) * (2 * n + 1) / 6
+```
+
 ## Formatting and linting
 
 ```sh

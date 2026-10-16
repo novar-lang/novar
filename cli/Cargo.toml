@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 telvax_lint = { path = "../tools/linter" }
 telvax_fmt = { path = "../tools/formatter" }
+telvax_doc = { path = "../tools/doc" }
 telvax_accel = { path = "../compiler/accel" }
 telvax_codegen = { path = "../compiler/codegen", optional = true }
 telvax_mlir = { path = "../compiler/ir", optional = true }

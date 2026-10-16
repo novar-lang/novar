@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **`telvax doc`:** writes a Markdown reference from the code: functions with their signatures, `type` fields
+  and defaults, `enum` variants, `trait` and `extend` methods, and the `#` comment lines directly above each
+  item. `telvax doc src/ -o REFERENCE.md`; `--public` skips names that start with `_`. It is the library
+  `telvax_doc`.
 * **Notebooks:** `pip install "telvax[kernel]"` adds a Jupyter kernel for Telvax (over `ipykernel`): each cell
   is Telvax, definitions and variables last from one cell to the next, the value of the last expression is
   shown (a table or a tensor as HTML), what the program prints is the cell's output, an error shows the line,
