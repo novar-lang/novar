@@ -367,8 +367,17 @@ fn references_and_rename_reach_the_other_files_of_the_project() {
     let main = "from util import double\n\nfn main() -> i32:\n    double(4)\n";
     std::fs::write(dir.join("util.tvx"), util).unwrap();
     std::fs::write(dir.join("main.tvx"), main).unwrap();
-    let main_uri = format!("file://{}", dir.join("main.tvx").display());
-    let util_uri = format!("file://{}", dir.join("util.tvx").display());
+    let uri_of = |name: &str| {
+        let text = dir.join(name).display().to_string().replace('\\', "/");
+        let text = if text.starts_with('/') {
+            text
+        } else {
+            format!("/{text}")
+        };
+        format!("file://{text}")
+    };
+    let main_uri = uri_of("main.tvx");
+    let util_uri = uri_of("util.tvx");
 
     let mut c = Client::start();
     initialize(&mut c);

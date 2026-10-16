@@ -146,9 +146,32 @@ fn file_path(uri: &Uri) -> Option<std::path::PathBuf> {
         out.push(bytes[i]);
         i += 1;
     }
-    Some(std::path::PathBuf::from(
-        String::from_utf8_lossy(&out).into_owned(),
-    ))
+    let mut text = String::from_utf8_lossy(&out).into_owned();
+    // `file:///C:/dir/a.tvx` is `C:\dir\a.tvx` on Windows.
+    if cfg!(windows) && text.starts_with('/') && text.as_bytes().get(2) == Some(&b':') {
+        text.remove(0);
+    }
+    Some(std::path::PathBuf::from(text))
+}
+
+/// The `file://` address of `path`, the inverse of [`file_path`].
+fn path_uri(path: &std::path::Path) -> Option<Uri> {
+    let mut text = path.display().to_string();
+    if cfg!(windows) {
+        text = text.replace('\\', "/");
+        if !text.starts_with('/') {
+            text.insert(0, '/');
+        }
+    }
+    let mut out = String::from("file://");
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => out.push(b as char),
+            b'-' | b'_' | b'.' | b'~' | b'/' | b':' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out.parse().ok()
 }
 
 pub fn diagnostics(snap: &Snapshot, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
@@ -202,9 +225,7 @@ fn uri_of(path: &std::path::Path, doc: &Uri) -> Uri {
     if file_path(doc).as_deref() == Some(path) {
         return doc.clone();
     }
-    format!("file://{}", path.display())
-        .parse::<Uri>()
-        .unwrap_or_else(|_| doc.clone())
+    path_uri(path).unwrap_or_else(|| doc.clone())
 }
 
 fn reply<T: serde::Serialize>(id: RequestId, result: T) -> Response {
@@ -277,7 +298,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                     }
                     let text = std::fs::read_to_string(&file).ok()?;
                     let range = crate::position::LineIndex::new(&text).range(&span);
-                    let uri = format!("file://{file}").parse::<Uri>().ok()?;
+                    let uri = path_uri(std::path::Path::new(&file))?;
                     Some(GotoDefinitionResponse::Scalar(Location { uri, range }))
                 });
             reply(id, target)
