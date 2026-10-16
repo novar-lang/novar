@@ -12,7 +12,6 @@
   at the cursor instead of four columns off.
 * **HTML for tables and tensors:** `telvax_runtime::rich::html` shows a table as an HTML table (the first 50
   rows) and a tensor as a grid, for notebooks and pages.
-
 * **A console in the playground:** under the editor, the same session as `telvax repl` runs in the browser.
   Definitions and variables last from one input to the next, a block ends with an empty line, Tab completes names,
   fields and methods, the arrow keys go through earlier lines, and `:type`, `:vars`, `:defs`, `:load`, `:reset`,
