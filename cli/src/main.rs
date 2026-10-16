@@ -14,7 +14,8 @@ use telvax_runtime::{Interp, Value};
 const USAGE: &str = "\
 usage:
   telvax check [--json] [file.tvx...]                       no file: the package in this directory
-  telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
+  telvax lint <file.tvx> [--allow|--warn|--deny rule]... [--deny-warnings] [--list-rules]
+                                                            unused variables and functions, unreachable cases
   telvax fmt [--check] [--diff] [file.tvx|dir]...             format in place (`-` reads stdin; no path: this directory)
   telvax test [file.tvx|dir] [name] [--allow list] [--coverage] [--fail-under N]
                                                             run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
@@ -82,6 +83,12 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         .as_slice()
     {
         ["fmt", rest @ ..] => fmt(rest),
+        ["lint", "--list-rules"] => {
+            for rule in telvax_lint::Rule::ALL {
+                println!("{:<18}{}", rule.name(), rule.describe());
+            }
+            Ok(())
+        }
         ["lint", file, rest @ ..] => lint(file, rest),
         ["--version" | "-V" | "version"] => {
             println!("telvax {}", env!("CARGO_PKG_VERSION"));
@@ -924,22 +931,54 @@ fn collect_tvx_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// `telvax lint <file> [--deny-warnings]`: type-checks, then reports unused code.
+/// `telvax lint <file> [--allow|--warn|--deny rule]... [--deny-warnings]`: type-checks, then reports
+/// unused code. Rule levels come from `[lint]` in `telvax.toml`, then the flags.
 fn lint(file: &str, flags: &[&str]) -> Result<(), CliError> {
-    let deny = match flags {
-        [] => false,
-        ["--deny-warnings"] => true,
-        _ => return Err(CliError::Usage),
-    };
+    let mut deny = false;
+    let mut from_flags = Vec::new();
+    let mut words = flags.iter();
+    while let Some(&flag) = words.next() {
+        match flag {
+            "--deny-warnings" => deny = true,
+            "--allow" | "--warn" | "--deny" => {
+                let Some(&rule) = words.next() else {
+                    return Err(CliError::Usage);
+                };
+                let level = telvax_lint::Level::parse(&flag[2..]).or_else(failed)?;
+                from_flags.push((rule, level));
+            }
+            _ => return Err(CliError::Usage),
+        }
+    }
     let path = Path::new(file);
-    let deps = match telvax_pkg::Project::discover(path) {
-        Ok(Some(project)) => project.dependency_packages().or_else(failed)?,
-        Ok(None) => Vec::new(),
+    let project = match telvax_pkg::Project::discover(path) {
+        Ok(p) => p,
         Err(e) => return failed(e),
+    };
+    // `[lint]` in telvax.toml first, then the flags, which win.
+    let mut config = telvax_lint::Config::default();
+    if let Some(project) = &project {
+        for (rule, level) in &project.manifest.lint {
+            let rule = telvax_lint::Rule::parse(rule)
+                .map_err(|e| format!("telvax.toml [lint]: {e}"))
+                .or_else(failed)?;
+            let level = telvax_lint::Level::parse(level)
+                .map_err(|e| format!("telvax.toml [lint] {}: {e}", rule.name()))
+                .or_else(failed)?;
+            config.set(rule, level);
+        }
+    }
+    for (rule, level) in from_flags {
+        config.set(telvax_lint::Rule::parse(rule).or_else(failed)?, level);
+    }
+    let deps = match &project {
+        Some(project) => project.dependency_packages().or_else(failed)?,
+        None => Vec::new(),
     };
     let loaded = telvax_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
-    let warnings = telvax_lint::lint(&hir);
+    let warnings = telvax_lint::lint_with(&hir, &config);
+    let errors = warnings.iter().filter(|d| d.is_error()).count();
     eprint!(
         "{}",
         loaded
@@ -950,8 +989,11 @@ fn lint(file: &str, flags: &[&str]) -> Result<(), CliError> {
         eprintln!("`{file}`: no warnings");
         return Ok(());
     }
-    eprintln!("`{file}`: {} warning(s)", warnings.len());
-    if deny {
+    eprintln!(
+        "`{file}`: {} warning(s), {errors} error(s)",
+        warnings.len() - errors
+    );
+    if deny || errors > 0 {
         Err(CliError::Failed(String::new()))
     } else {
         Ok(())

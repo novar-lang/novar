@@ -108,7 +108,7 @@ Os tipos aparecem como são escritos no programa: ``expected `i32`, found `Text`
 ## 6. Ferramentas
 
 * **`telvax fmt`** mantém cada quebra de linha e cada bloco e normaliza espaços, continuações, comentários e linhas em branco; confere que o resultado tem os mesmos tokens (inclusive `Indent`/`Dedent`).
-* **`telvax lint`**: variáveis e funções privadas sem uso (as privadas são as que começam com `_`).
+* **`telvax lint`**: variáveis e funções privadas sem uso (as privadas são as que começam com `_`) e `case` que nunca é alcançado. Cada regra tem nome e nível (`allow`, `warn`, `deny`), definidos em `[lint]` no `telvax.toml` ou com `--allow`, `--warn` e `--deny`.
 * **LSP**: hover (`fn norm(p: Point) -> Float`, `let origin: Point`, `var total: f32`), dicas de tipo para `let`/`var`/`for`, completação de `std.` e de membros, renomear.
 * **VS Code**: gramática TextMate, regras de indentação e `#` como comentário. Playground e exemplos migrados.
 * **`telvax-migrate`** (`tools/migrate`): converte arquivos da sintaxe antiga (estilo Rust), mantendo os comentários. Sai numa versão futura.

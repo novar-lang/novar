@@ -711,3 +711,40 @@ fn nesting_past_the_limit_is_an_error_not_a_crash() {
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
 }
+
+#[test]
+fn lint_levels_come_from_the_manifest_and_the_flags() {
+    let dir = std::env::temp_dir().join(format!("telvax-lintcfg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let manifest = |lint: &str| {
+        std::fs::write(
+            dir.join("telvax.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[lint]\n{lint}"),
+        )
+        .unwrap();
+    };
+    let src = dir.join("src/main.tvx");
+    std::fs::write(&src, "fn main():\n    let dead = 5\n").unwrap();
+    let path = src.to_str().unwrap();
+
+    manifest("unused-variable = \"deny\"\n");
+    let (ok, _, err) = run(&["lint", path]);
+    assert!(!ok && err.contains("unused variable `dead`"), "{err}");
+
+    // a flag wins over the manifest
+    let (ok, _, err) = run(&["lint", path, "--warn", "unused-variable"]);
+    assert!(ok && err.contains("unused variable `dead`"), "{err}");
+
+    manifest("unused-variable = \"allow\"\n");
+    let (ok, _, err) = run(&["lint", path, "--deny-warnings"]);
+    assert!(ok && err.contains("no warnings"), "{err}");
+
+    manifest("unused-var = \"allow\"\n");
+    let (ok, _, err) = run(&["lint", path]);
+    assert!(!ok && err.contains("no lint rule `unused-var`"), "{err}");
+
+    let (ok, out, _) = run(&["lint", "--list-rules"]);
+    assert!(ok && out.contains("unused-function"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

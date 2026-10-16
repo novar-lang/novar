@@ -4,13 +4,102 @@
 //! * a private function (a name starting with `_`) that nothing calls (`main` and endpoints are
 //!   exempt, and so is every public function);
 //! * a `case` of a `match` that no value can reach, because the cases above it take them all.
+//!
+//! Each check is a `Rule` with a name; a `Config` sets its `Level` (`allow`, `warn` or `deny`).
 
 use std::collections::{HashMap, HashSet};
 
-use telvax_diagnostics::Diagnostic;
+use telvax_diagnostics::{Diagnostic, Severity};
 use telvax_hir::hir::{self, Expr, ExprKind, ForIter, Local, LocalId, Pat, Proj, Stmt};
 
+/// A check the linter makes. Its name is what `telvax.toml` and `--allow`/`--warn`/`--deny` use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Rule {
+    UnusedVariable,
+    UnusedFunction,
+    UnreachableCase,
+}
+
+impl Rule {
+    pub const ALL: [Rule; 3] = [
+        Rule::UnusedVariable,
+        Rule::UnusedFunction,
+        Rule::UnreachableCase,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Rule::UnusedVariable => "unused-variable",
+            Rule::UnusedFunction => "unused-function",
+            Rule::UnreachableCase => "unreachable-case",
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Rule::UnusedVariable => "a variable or parameter that is never read",
+            Rule::UnusedFunction => "a private function that nothing calls",
+            Rule::UnreachableCase => "a `case` that the cases above it already cover",
+        }
+    }
+
+    pub fn parse(name: &str) -> Result<Rule, String> {
+        Rule::ALL
+            .into_iter()
+            .find(|r| r.name() == name)
+            .ok_or_else(|| {
+                let names: Vec<_> = Rule::ALL.iter().map(|r| r.name()).collect();
+                format!("no lint rule `{name}`; the rules are {}", names.join(", "))
+            })
+    }
+}
+
+/// What a rule does when it finds something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// Say nothing.
+    Allow,
+    /// Print a warning.
+    Warn,
+    /// Report an error.
+    Deny,
+}
+
+impl Level {
+    pub fn parse(word: &str) -> Result<Level, String> {
+        match word {
+            "allow" => Ok(Level::Allow),
+            "warn" => Ok(Level::Warn),
+            "deny" => Ok(Level::Deny),
+            _ => Err(format!(
+                "`{word}` is not a lint level; write allow, warn or deny"
+            )),
+        }
+    }
+}
+
+/// The level of each rule. A rule not set is `warn`.
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    levels: HashMap<Rule, Level>,
+}
+
+impl Config {
+    pub fn set(&mut self, rule: Rule, level: Level) {
+        self.levels.insert(rule, level);
+    }
+
+    pub fn level(&self, rule: Rule) -> Level {
+        self.levels.get(&rule).copied().unwrap_or(Level::Warn)
+    }
+}
+
 pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
+    lint_with(program, &Config::default())
+}
+
+/// The findings of the rules that are not `allow`ed; a `deny`ed rule reports errors.
+pub fn lint_with(program: &hir::Program, config: &Config) -> Vec<Diagnostic> {
     let mut l = Linter::default();
     for g in &program.globals {
         l.expr(&g.init);
@@ -23,19 +112,20 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
         l.block(&f.body);
     }
 
-    let mut out = Vec::new();
+    let mut found: Vec<(Rule, Diagnostic)> = Vec::new();
     for (id, local) in &l.locals {
         if local.name.starts_with('_') {
             continue;
         }
         if !l.read.contains(id) {
-            out.push(
+            found.push((
+                Rule::UnusedVariable,
                 Diagnostic::warning(
                     local.span.clone(),
                     format!("unused variable `{}`", local.name),
                 )
                 .with_note("prefix it with `_` if that is intentional"),
-            );
+            ));
         }
     }
     for f in &program.fns {
@@ -46,18 +136,33 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
                 .iter()
                 .any(|p| f.name.starts_with(p));
         if !exempt && !l.called.contains(&f.name) {
-            out.push(Diagnostic::warning(
-                f.name_span.clone(),
-                format!("function `{}` is never used", f.name.replace("::", ".")),
+            found.push((
+                Rule::UnusedFunction,
+                Diagnostic::warning(
+                    f.name_span.clone(),
+                    format!("function `{}` is never used", f.name.replace("::", ".")),
+                ),
             ));
         }
     }
     for span in &l.unreachable {
-        out.push(
+        found.push((
+            Rule::UnreachableCase,
             Diagnostic::warning(span.clone(), "this `case` is never reached")
                 .with_note("the cases above it already take every value it could take"),
-        );
+        ));
     }
+    let mut out: Vec<Diagnostic> = found
+        .into_iter()
+        .filter_map(|(rule, mut d)| match config.level(rule) {
+            Level::Allow => None,
+            Level::Warn => Some(d),
+            Level::Deny => {
+                d.severity = Severity::Error;
+                Some(d)
+            }
+        })
+        .collect();
     out.sort_by_key(|d| d.span.start);
     out
 }
