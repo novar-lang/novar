@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* **VS Code README:** the install commands pointed at `ntsation/telvax`, which does not exist; they use `telvax/telvax`.
 * **VS Code snippets and a fuller README:** the extension adds snippets for `fn`, `main`, `type`, `enum`,
   `match`, `for`, `test`, `endpoint` and `trait`. Its README lists references, rename and formatting and
   explains how the release publishes to the Marketplace and Open VSX.
