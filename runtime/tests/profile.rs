@@ -1,5 +1,7 @@
 //! The profiler: time and calls per function and per line, `std` operations and memory.
 
+use std::sync::{Mutex, MutexGuard};
+
 use telvax_runtime::Interp;
 use telvax_runtime::alloc_count::CountingAlloc;
 use telvax_runtime::profile::Profiler;
@@ -26,6 +28,13 @@ fn main() -> Int:
     a + fib(10)
 ";
 
+/// The allocator's counters are global to the process, so tests that profile cannot overlap.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn serial() -> MutexGuard<'static, ()> {
+    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn load() -> Interp {
     let (ast, errors) = telvax_parser::parse(SRC);
     assert!(errors.is_empty(), "{errors:?}");
@@ -40,6 +49,7 @@ fn line_of(offset: usize) -> usize {
 
 #[test]
 fn counts_calls_and_splits_self_time_from_total_time() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -62,6 +72,7 @@ fn counts_calls_and_splits_self_time_from_total_time() {
 
 #[test]
 fn counts_how_often_each_statement_ran() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -85,6 +96,7 @@ fn counts_how_often_each_statement_ran() {
 
 #[test]
 fn times_std_operations_with_the_size_of_their_data() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -104,6 +116,7 @@ fn times_std_operations_with_the_size_of_their_data() {
 
 #[test]
 fn measures_the_memory_the_program_allocates() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -121,6 +134,7 @@ fn measures_the_memory_the_program_allocates() {
 
 #[test]
 fn writes_stacks_for_flame_graphs() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -144,6 +158,7 @@ fn writes_stacks_for_flame_graphs() {
 
 #[test]
 fn the_report_is_text_and_json() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
@@ -172,6 +187,7 @@ fn the_report_is_text_and_json() {
 
 #[test]
 fn a_run_without_a_profiler_records_nothing() {
+    let _serial = serial();
     let interp = load();
     let profiler = Profiler::new();
     interp.set_profiler(Some(profiler.clone()));
