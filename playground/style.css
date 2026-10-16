@@ -36,3 +36,12 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(280p
 .error { color: var(--error); } .warning { color: var(--num); } .ok { color: var(--ok); } .muted { color: var(--muted); }
 .k { color: var(--kw); } .t { color: var(--ty); } .s { color: var(--str); } .n { color: var(--num); } .c { color: var(--cm); font-style: italic; } .o { color: var(--op); } .f { color: var(--fn); }
 footer { padding: 10px 16px 16px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); }
+
+.console { grid-column: 1 / -1; }
+.console h2 button { margin-left: 8px; font-size: 11px; padding: 1px 8px; text-transform: none; letter-spacing: 0; }
+#console { max-height: 50vh; min-height: 160px; }
+#console-log div { white-space: pre-wrap; }
+.console-row { display: flex; gap: 8px; align-items: baseline; }
+.prompt { color: var(--accent); font-weight: 600; white-space: pre; }
+#console-input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; padding: 0; outline: none; }
+.echo { color: var(--muted); }

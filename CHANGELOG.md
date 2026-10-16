@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **A console in the playground:** under the editor, the same session as `telvax repl` runs in the browser.
+  Definitions and variables last from one input to the next, a block ends with an empty line, Tab completes names,
+  fields and methods, the arrow keys go through earlier lines, and `:type`, `:vars`, `:defs`, `:load`, `:reset`,
+  `:clear` and `:help` are commands. **Load the program** enters the functions, types and variables of the editor.
+  It has no files, environment or network, and a runaway input stops at the step limit.
 * **`telvax repl`:** an interactive session. Type a definition (`fn`, `type`, `enum`, `trait`, `extend`,
   `import`), a variable (`let`, `var`), a statement or an expression and see the value. Definitions and
   variables last from one input to the next; a name can be defined again; a type error shows the line and

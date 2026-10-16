@@ -97,3 +97,73 @@ test("hover and completion work in the engine", () => {
   const std = call(telvax.complete, "fn f():\n    std.te", 1, 10);
   assert.ok(std.every((i) => typeof i.label === "string"));
 });
+
+// ---- the console ----------------------------------------------------------------------------
+
+const eval_ = (input) => call(telvax.repl_eval, input);
+
+test("the console keeps definitions and variables from one input to the next", () => {
+  telvax.repl_reset();
+  assert.deepStrictEqual(eval_("let x = 5").defined, ["x"]);
+  assert.strictEqual(eval_("x * 2").value.text, "10");
+  eval_("var n = 0");
+  eval_("for i in range(0, 4):\n    n = n + i");
+  assert.strictEqual(eval_("n").value.text, "6");
+  eval_("fn double(k: Int) -> Int:\n    k * 2");
+  assert.strictEqual(eval_("double(n)").value.text, "12");
+  eval_("let x = x + 1");
+  assert.strictEqual(eval_("x").value.text, "6");
+  assert.deepStrictEqual(call(telvax.repl_defs), ["fn double"]);
+  const vars = call(telvax.repl_vars);
+  assert.deepStrictEqual(vars.map((v) => [v.name, v.ty, v.value]), [
+    ["x", "Int", "6"],
+    ["n", "Int", "6"],
+  ]);
+});
+
+test("the console shows what the program prints and where an error is", () => {
+  telvax.repl_reset();
+  assert.strictEqual(eval_('print("hi")').output, "hi\n");
+  eval_("let x = 1");
+  const bad = eval_('x + "a"');
+  assert.match(bad.error, /^error: mismatched operand types/);
+  assert.match(bad.error, /1 \| x \+ "a"/);
+  assert.strictEqual(eval_("x").value.text, "1", "an error leaves the session as it was");
+});
+
+test("the console runs a runaway input to the step limit and goes on", () => {
+  telvax.repl_reset();
+  const r = eval_("while True:\n    pass");
+  assert.ok(r.error, "the loop must stop");
+  assert.strictEqual(eval_("1 + 1").value.text, "2");
+});
+
+test("the console has no files, environment or network", () => {
+  telvax.repl_reset();
+  assert.match(eval_('std.fs.read("/etc/hostname")').error, /needs the `fs.read` capability/);
+});
+
+test("the console tells the type, completes and knows when a block is not finished", () => {
+  telvax.repl_reset();
+  eval_("type Point:\n    x: Int\n    y: Int");
+  eval_("let origin = Point(x: 1, y: 2)");
+  assert.deepStrictEqual(call(telvax.repl_type, "origin.x"), { ok: true, type: "Int" });
+  assert.strictEqual(call(telvax.repl_type, "origin +").ok, false);
+  const names = call(telvax.repl_complete, "ori", 3);
+  assert.strictEqual(names.start, 0);
+  assert.ok(names.items.some((i) => i.label === "origin"));
+  const fields = call(telvax.repl_complete, "origin.", 7);
+  assert.deepStrictEqual(
+    fields.items.map((i) => i.label).filter((l) => l === "x" || l === "y").sort(),
+    ["x", "y"],
+  );
+  assert.strictEqual(telvax.repl_is_complete("fn f() -> Int:"), false);
+  assert.strictEqual(telvax.repl_is_complete("1 + 2"), true);
+});
+
+test("the program in the editor can be entered into the console", () => {
+  telvax.repl_reset();
+  const r = call(telvax.repl_load, "type Pair:\n    a: Int\n    b: Int\n\nfn sum(p: Pair) -> Int:\n    p.a + p.b\n");
+  assert.ok(!r.error, r.error);
+  assert.strictEqual(eval_("sum(Pair(a: 1, b: 2))").value.text, "3");
+});

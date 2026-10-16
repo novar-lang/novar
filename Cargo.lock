@@ -3921,6 +3921,7 @@ dependencies = [
  "telvax_hir",
  "telvax_lsp",
  "telvax_parser",
+ "telvax_repl",
  "telvax_runtime",
  "wasm-bindgen",
 ]

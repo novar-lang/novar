@@ -19,6 +19,7 @@ telvax_diagnostics = { path = "../compiler/diagnostics" }
 telvax_hir = { path = "../compiler/semantic" }
 telvax_lsp = { path = "../tools/lsp", default-features = false }
 telvax_parser = { path = "../compiler/parser" }
+telvax_repl = { path = "../tools/repl" }
 # No DataFusion or network clients in the browser.
 telvax_runtime = { path = "../runtime", default-features = false }
 serde_json = "1"
