@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Mocks in `telvax test`:** `std.test.mock(price, fake_price)` or `std.test.mock("std.fs.read", fake_read)`
+  replaces a function until the test ends; `std.test.calls(target)` counts the calls. A replacement for
+  one of your functions must have its type.
 * **Cases in `telvax test`:** `fn cases_double() -> List[(Int, Int)]` runs `test_double(x, want)` once for
   each item and lists each run as `test_double[(2, 4)]`. A tuple fills the first parameters; the rest are
   fixtures. An empty list or items of the wrong type fail the test with a message.
