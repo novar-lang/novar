@@ -61,6 +61,9 @@ cargo test --workspace
 cargo deny check
 ```
 
+* Code in the docs is tested (`cli/tests/docs.rs`): a ```` ```telvax ```` block must pass `telvax check` and
+  `telvax fmt --check`, and run when it has `fn main`. Mark a piece of a program ```` ```telvax ignore ````.
+  Files under `examples/` get the same checks.
 * Add a test with the change. Compiler tests live next to the crate (`compiler/*/tests`), runtime
   tests in `runtime/tests`.
 * Keep commits short and in the imperative, with the existing prefixes: `feat:`, `fix:`, `docs:`,

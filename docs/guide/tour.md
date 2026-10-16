@@ -5,6 +5,9 @@ with `:`, and there are no braces or semicolons. It keeps its own words (`fn`, `
 `type`, `x => x + 1`, `Int?`) and it checks before the program runs what Python finds out
 halfway through: every name has a type, written or inferred.
 
+The code in this guide is tested: each block that is not marked `ignore` is checked, formatted and,
+when it has `fn main`, run. Run them from the root of the repository.
+
 ## Functions, types and inference
 
 ```telvax
@@ -54,8 +57,8 @@ type Query:
 fn search(q: Query, limit: Int = 10, rerank: Bool = False) -> List[Text]:
     []
 
-let q = Query(text: "tensor shapes")          # top_k is 5
-let hits = search(q, rerank: True)              # limit is 10
+let q = Query(text: "tensor shapes")  # top_k is 5
+let hits = search(q, rerank: True)  # limit is 10
 ```
 
 Names are checked against the function: a misspelled or repeated name is a compile error.
@@ -65,7 +68,7 @@ Names are checked against the function: a misspelled or repeated name is a compi
 `x |> f(a)` means `f(x, a)`, so stages read left to right. A line that starts with `|>` continues
 the line before it:
 
-```telvax
+```telvax ignore
 let answer = prompt |> llm.complete() |> std.text.trim()
 
 let docs = query
@@ -107,7 +110,7 @@ fn mean_score(t: Table[Row]) -> f32:
 
 ## HTTP endpoints
 
-```telvax
+```telvax ignore
 @endpoint(POST, "/v1/score")
 fn score(input: In) -> Result[Out, Status]:
     ...
@@ -118,7 +121,7 @@ Returning `Err(Status.BadRequest("..."))` becomes an HTTP 400.
 
 ## Modules and packages
 
-```telvax
+```telvax ignore
 from util import clamp  # ./util.tvx
 from mathx.vec import dot  # dependency `mathx`, file vec.tvx
 ```
@@ -138,7 +141,7 @@ tvpm update                               # newest versions that fit; `tvpm upda
 
 ## Distribution
 
-```telvax
+```telvax ignore
 fn work(item: Job) -> Done:
     ...
 
@@ -274,7 +277,7 @@ To run one test on several values, write a `cases_...` function with the name of
 `test_`. It returns a list; the test runs once for each item. A tuple gives the first parameters of
 the test, and the parameters left over are still fixtures.
 
-```telvax
+```telvax ignore
 fn cases_double() -> List[(Int, Int)]:
     [(1, 2), (2, 4), (3, 6)]
 
@@ -360,7 +363,7 @@ fn pick(n: Int) -> Int:
         todo!()
 
 fn test_pick():
-    let x = dbg!(pick(4))    # stderr: pick(4) = 4
+    let x = dbg!(pick(4))  # stderr: pick(4) = 4
     assert!(x == 4)
 ```
 
@@ -459,7 +462,7 @@ type Sale:
     price: Float
 
 fn main():
-    let sales: Table[Sale] = read_csv("sales.csv")
+    let sales: Table[Sale] = read_csv("examples/dataframe/sales.csv")
     print(f"mean price: {sales.price.mean()}")
 
     let by_region: Table[{region: Text, revenue: Float}] = sales.sql("SELECT region, SUM(units * price) AS revenue FROM t GROUP BY region")
