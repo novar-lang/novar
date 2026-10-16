@@ -4,11 +4,13 @@
 // limit (a warning today, a hard error in a future compiler).
 #![cfg_attr(feature = "gpu", recursion_limit = "256")]
 
+pub mod alloc_count;
 mod caps;
 pub mod debug;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod interp;
+pub mod profile;
 #[cfg(feature = "live")]
 mod services;
 mod show;

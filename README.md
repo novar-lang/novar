@@ -78,6 +78,7 @@ telvax doctor                                 # what this build can do (native b
 telvax check examples/rag-service.tvx         # parse + type-check, diagnostics point at the exact span
 telvax check --json examples/rag-service.tvx  # the same diagnostics as JSON, for CI and editors
 telvax run examples/basics/primes.tvx main    # interpret
+telvax profile app.tvx main --top 10          # time per function, line and std operation; memory
 telvax test tests/ --coverage                 # run `test_*` functions with fixtures, cases and mocks; lines not run
 telvax fmt --check                            # every .tvx file under this directory (--diff shows the changes)
 telvax serve examples/rag-service.tvx         # HTTP server on :8080 (offline model stand-ins)
