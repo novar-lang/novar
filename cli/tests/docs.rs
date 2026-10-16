@@ -1,3 +1,5 @@
+#![cfg(feature = "tables")] // the guides read CSV files, which the lite build cannot
+
 //! The code in the guides and under `examples/` must keep working: every ```` ```telvax ```` block
 //! in the documentation is checked and formatted, and a block with `fn main` is also run.
 //! A block that is only a piece of a program is marked ```` ```telvax ignore ````.
