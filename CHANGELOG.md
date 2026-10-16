@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **The documentation is tested:** every ```` ```telvax ```` block in the README, the tour and the use cases is
+  checked, checked for formatting and, when it has `fn main`, run; every file under `examples/` is checked
+  and checked for formatting. A block that is only a piece of a program is marked ```` ```telvax ignore ````.
+  The tour and the use cases now format cleanly and read `examples/dataframe/sales.csv` from the repository root.
 * **Lint rules you can configure:** the checks of `telvax lint` now have names (`unused-variable`,
   `unused-function`, `unreachable-case`) and a level, `allow`, `warn` (the default) or `deny`. Set them in
   a `[lint]` table in `telvax.toml` or with `--allow`, `--warn` and `--deny <rule>`; the flags win.

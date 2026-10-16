@@ -66,7 +66,7 @@ Weights come from `std.tensor.from_vec` here; a real model would load them from 
 `@endpoint` turns a function into a route. The parameter type is the JSON body and is validated
 for you; `Err(Status.BadRequest(...))` becomes a 400.
 
-```telvax
+```telvax ignore
 @endpoint(POST, "/v1/sentiment")
 fn sentiment(input: Input) -> Result[Output, Status]:
     if input.text.is_empty():
@@ -90,7 +90,7 @@ binary with the program embedded, plus a Dockerfile.
 store, builds a prompt from the hits and asks a model, as one `@endpoint`. Stages are chained with
 `|>`:
 
-```telvax
+```telvax ignore
 let answer = prompt |> llm.complete() |> std.text.trim()
 ```
 
@@ -125,7 +125,7 @@ telvax run examples/text/word-count.tvx main
 There are no exceptions. A function that can fail returns `Result[T, E]` or `T?`, `match`
 must cover every case, and `?` passes an error up to the caller.
 
-```telvax
+```telvax ignore
 fn port_of(line: Text) -> Result[Int, Text]:
     let key, value = split_pair(line)?
 ```
