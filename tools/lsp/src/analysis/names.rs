@@ -36,16 +36,81 @@ impl Key {
     }
 }
 
+/// An item another file declares and this file imports.
+#[derive(Debug, Clone)]
+pub struct Foreign {
+    /// The name this file gives it (the `as` name, or its own).
+    pub local: String,
+    /// Its name in the file that declares it.
+    pub name: String,
+    /// The file that declares it, named as the source map names it.
+    pub file: String,
+    /// How the program writes it: `util.Pair`.
+    pub display: String,
+    /// The name as written in the `import` line.
+    pub ident: Span,
+    pub info: ItemInfo,
+}
+
+/// What a file declares under one name.
+#[derive(Debug, Clone, Default)]
+pub struct ItemInfo {
+    pub is_type: bool,
+    pub fields: HashSet<String>,
+    pub variants: HashSet<String>,
+    pub methods: HashSet<String>,
+}
+
+impl ItemInfo {
+    /// What `program` declares under `name`, when it is a function or a type.
+    pub fn of(program: &ast::Program, name: &str) -> Option<ItemInfo> {
+        let mut env = Env::default();
+        let mut is_fn = false;
+        for item in &program.items {
+            env.declare(item);
+            if let ast::Item::Fn(f) = item
+                && f.name.node == name
+            {
+                is_fn = true;
+            }
+        }
+        if env.types.contains(name) {
+            Some(ItemInfo {
+                is_type: true,
+                fields: env.fields.remove(name).unwrap_or_default(),
+                variants: env.variants.remove(name).unwrap_or_default(),
+                methods: env.methods.remove(name).unwrap_or_default(),
+            })
+        } else {
+            is_fn.then(ItemInfo::default)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Names {
+    /// The file these names are in, named as the source map names it.
+    pub file: String,
     pub decls: Vec<(Key, Span)>,
     pub uses: Vec<(Key, Span)>,
     /// `(type, trait)`: the type implements the trait.
     impls: Vec<(String, String)>,
+    /// The file that declares each imported function and type.
+    homes: HashMap<Key, String>,
     /// The text parsed with no syntax error.
     pub syntax_ok: bool,
     /// The uses that need a type (`p.x`) were looked up. False when the types are not known.
     pub typed: bool,
+}
+
+/// What `Names::of` reads besides the syntax tree.
+pub struct Context<'a> {
+    pub file: &'a str,
+    /// The type of the expression at each `(start, end)`, when the program is typed.
+    pub types: Option<&'a HashMap<(usize, usize), Ty>>,
+    pub foreign: &'a [Foreign],
+    /// Turns a name the compiler made up for an imported item into the one the program writes.
+    pub demangle: &'a dyn Fn(&str) -> String,
 }
 
 /// What the document declares, read before the uses so that a use can be told from a lookalike.
@@ -56,31 +121,65 @@ struct Env {
     fields: HashMap<String, HashSet<String>>,
     methods: HashMap<String, HashSet<String>>,
     impls: Vec<(String, String)>,
+    /// Imported name -> the name in the file that declares it.
+    canon: HashMap<String, String>,
+    /// How the program writes an imported type -> the name this file gives it.
+    by_display: HashMap<String, String>,
 }
 
 impl Names {
-    /// Reads `text`. `types` gives the type of the expression at each `(start, end)`, when the
-    /// program is typed.
-    pub fn of(text: &str, types: Option<&HashMap<(usize, usize), Ty>>) -> Names {
-        let (program, errors) = telvax_parser::parse(text);
+    /// Reads the syntax tree of a document; `syntax_ok` says it had no syntax error.
+    pub fn of(program: Option<&ast::Program>, syntax_ok: bool, cx: &Context) -> Names {
         let Some(program) = program else {
             return Names::default();
         };
         let mut env = Env::default();
+        for f in cx.foreign {
+            if f.info.is_type {
+                env.types.insert(f.local.clone());
+                env.fields.insert(f.local.clone(), f.info.fields.clone());
+                env.variants
+                    .insert(f.local.clone(), f.info.variants.clone());
+                env.methods.insert(f.local.clone(), f.info.methods.clone());
+                env.by_display.insert(f.display.clone(), f.local.clone());
+            }
+            env.canon.insert(f.local.clone(), f.name.clone());
+        }
         for item in &program.items {
             env.declare(item);
         }
+        let foreign_key = |f: &Foreign| {
+            if f.info.is_type {
+                Key::Type(f.name.clone())
+            } else {
+                Key::Fn(f.name.clone())
+            }
+        };
+        let homes = cx
+            .foreign
+            .iter()
+            .map(|f| (foreign_key(f), f.file.clone()))
+            .collect();
         let mut w = Walker {
             env: &env,
-            types,
+            cx,
             generics: Vec::new(),
             out: Names {
-                syntax_ok: errors.is_empty(),
-                typed: types.is_some(),
-                impls: env.impls.clone(),
+                file: cx.file.to_string(),
+                syntax_ok,
+                typed: cx.types.is_some(),
+                impls: env
+                    .impls
+                    .iter()
+                    .map(|(t, tr)| (env.canon_of(t), env.canon_of(tr)))
+                    .collect(),
+                homes,
                 ..Names::default()
             },
         };
+        for f in cx.foreign {
+            w.out.uses.push((foreign_key(f), f.ident.clone()));
+        }
         for item in &program.items {
             w.item(item);
         }
@@ -90,6 +189,19 @@ impl Names {
         out.uses.sort_by_key(|(_, s)| s.start);
         out.uses.dedup();
         out
+    }
+
+    /// The file that declares the item `key` names (for a variant, a field or a method, the file
+    /// of its type).
+    pub fn home_of(&self, key: &Key) -> String {
+        let owner = match key {
+            Key::Variant(o, _) | Key::Field(o, _) | Key::Method(o, _) => Key::Type(o.clone()),
+            other => other.clone(),
+        };
+        self.homes
+            .get(&owner)
+            .cloned()
+            .unwrap_or_else(|| self.file.clone())
     }
 
     /// The key whose declaration or use contains `offset`.
@@ -161,9 +273,11 @@ impl Names {
                 .collect()
         };
         Names {
+            file: self.file.clone(),
             decls: keep(&self.decls),
             uses: keep(&self.uses),
             impls: self.impls.clone(),
+            homes: self.homes.clone(),
             syntax_ok: false,
             typed: false,
         }
@@ -215,6 +329,14 @@ impl Edit {
 }
 
 impl Env {
+    /// The name of `local` in the file that declares it.
+    fn canon_of(&self, local: &str) -> String {
+        self.canon
+            .get(local)
+            .cloned()
+            .unwrap_or_else(|| local.to_string())
+    }
+
     fn declare(&mut self, item: &ast::Item) {
         match item {
             ast::Item::Struct(s) => {
@@ -257,18 +379,33 @@ impl Env {
 
 struct Walker<'a> {
     env: &'a Env,
-    types: Option<&'a HashMap<(usize, usize), Ty>>,
+    cx: &'a Context<'a>,
     /// The type parameters in scope, with the traits that limit each.
     generics: Vec<(String, Vec<String>)>,
     out: Names,
 }
 
 impl Walker<'_> {
+    /// The key with the names of the file that declares the items, so that the same item has the
+    /// same key in every file.
+    fn canon(&self, key: Key) -> Key {
+        let c = |n: String| self.env.canon_of(&n);
+        match key {
+            Key::Type(n) => Key::Type(c(n)),
+            Key::Variant(o, n) => Key::Variant(c(o), n),
+            Key::Field(o, n) => Key::Field(c(o), n),
+            Key::Method(o, n) => Key::Method(c(o), n),
+            other => other,
+        }
+    }
+
     fn decl(&mut self, key: Key, span: &Span) {
+        let key = self.canon(key);
         self.out.decls.push((key, span.clone()));
     }
 
     fn used(&mut self, key: Key, span: &Span) {
+        let key = self.canon(key);
         self.out.uses.push((key, span.clone()));
     }
 
@@ -447,12 +584,24 @@ impl Walker<'_> {
 
     /// The types a value can have for the purpose of looking up a field or a method.
     fn owners(&self, e: &ast::Expr) -> Vec<String> {
-        let Some(ty) = self.types.and_then(|t| t.get(&(e.span.start, e.span.end))) else {
+        let Some(ty) = self
+            .cx
+            .types
+            .and_then(|t| t.get(&(e.span.start, e.span.end)))
+        else {
             return Vec::new();
         };
         match ty {
             Ty::Struct(n) | Ty::Enum(n) | Ty::Trait(n) | Ty::Named(n) | Ty::Table(n) => {
-                vec![n.clone()]
+                // An imported type is named by the compiler; the file knows it by its import.
+                let shown = (self.cx.demangle)(n);
+                vec![
+                    self.env
+                        .by_display
+                        .get(&shown)
+                        .cloned()
+                        .unwrap_or_else(|| n.clone()),
+                ]
             }
             Ty::Param(p) => self
                 .generics

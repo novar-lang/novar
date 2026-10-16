@@ -188,6 +188,25 @@ pub fn diagnostics(snap: &Snapshot, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
         .collect()
 }
 
+/// The text of every file the editor has open, by path.
+fn open_texts(state: &Documents) -> HashMap<std::path::PathBuf, String> {
+    state
+        .docs
+        .iter()
+        .filter_map(|(uri, snap)| file_path(uri).map(|p| (p, snap.text.clone())))
+        .collect()
+}
+
+/// The `file://` address of `path`; the document's own address is kept as the editor sent it.
+fn uri_of(path: &std::path::Path, doc: &Uri) -> Uri {
+    if file_path(doc).as_deref() == Some(path) {
+        return doc.clone();
+    }
+    format!("file://{}", path.display())
+        .parse::<Uri>()
+        .unwrap_or_else(|_| doc.clone())
+}
+
 fn reply<T: serde::Serialize>(id: RequestId, result: T) -> Response {
     Response {
         id,
@@ -327,22 +346,43 @@ fn handle_request(state: &Documents, req: Request) -> Response {
             let Some(snap) = state.docs.get(&pos.text_document.uri) else {
                 return unknown(id);
             };
-            let found = snap.occurrences(snap.index.offset(pos.position));
-            let locations: Vec<Location> = found
-                .map(|o| {
-                    let declaration = o.decl.clone();
-                    o.spans
-                        .into_iter()
-                        .filter(|s| {
-                            p.context.include_declaration || Some(s) != declaration.as_ref()
+            let offset = snap.index.offset(pos.position);
+            let include_declaration = p.context.include_declaration;
+            let across = file_path(&pos.text_document.uri).and_then(|path| {
+                let (item, _) = snap.item_at(offset)?;
+                let hits = crate::workspace::find(&item, snap, &path, &open_texts(state));
+                Some(
+                    hits.into_iter()
+                        .flat_map(|hit| {
+                            let uri = uri_of(&hit.path, &pos.text_document.uri);
+                            let lines = crate::position::LineIndex::new(&hit.text);
+                            let decl = hit.decl.clone();
+                            hit.spans
+                                .into_iter()
+                                .filter(move |s| include_declaration || Some(s) != decl.as_ref())
+                                .map(move |s| Location {
+                                    uri: uri.clone(),
+                                    range: lines.range(&s),
+                                })
+                                .collect::<Vec<_>>()
                         })
-                        .map(|s| Location {
-                            uri: pos.text_document.uri.clone(),
-                            range: snap.index.range(&s),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                        .collect::<Vec<_>>(),
+                )
+            });
+            let locations = across.unwrap_or_else(|| {
+                snap.occurrences(offset)
+                    .map(|o| {
+                        o.spans
+                            .into_iter()
+                            .filter(|s| include_declaration || Some(s) != o.decl.as_ref())
+                            .map(|s| Location {
+                                uri: pos.text_document.uri.clone(),
+                                range: snap.index.range(&s),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
             reply(id, locations)
         }
         PrepareRenameRequest::METHOD => {
@@ -351,6 +391,25 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                 return unknown(id);
             };
             let offset = snap.index.offset(p.position);
+            if let Some((item, span)) = snap.item_at(offset) {
+                let name = item.key.name().to_string();
+                return if snap.text.get(span.clone()) == Some(name.as_str()) {
+                    reply(
+                        id,
+                        lsp_types::PrepareRenameResponse::RangeWithPlaceholder {
+                            range: snap.index.range(&span),
+                            placeholder: name,
+                        },
+                    )
+                } else {
+                    failure(
+                        id,
+                        format!(
+                            "this is another name for `{name}`; rename it where it is imported"
+                        ),
+                    )
+                };
+            }
             match snap.occurrences(offset) {
                 Ok(o) => {
                     let at = o
@@ -377,8 +436,30 @@ fn handle_request(state: &Documents, req: Request) -> Response {
             let Some(snap) = state.docs.get(&pos.text_document.uri) else {
                 return unknown(id);
             };
-            match snap.rename(snap.index.offset(pos.position), &p.new_name) {
-                Ok(edits) => {
+            let offset = snap.index.offset(pos.position);
+            let renamed = match (file_path(&pos.text_document.uri), snap.item_at(offset)) {
+                (Some(path), Some((item, _))) => {
+                    crate::workspace::rename(&item, &p.new_name, snap, &path, &open_texts(state))
+                        .map(|files| {
+                            files
+                                .into_iter()
+                                .map(|file| {
+                                    let lines = crate::position::LineIndex::new(&file.text);
+                                    let path = file.path;
+                                    let edits: Vec<TextEdit> = file
+                                        .edits
+                                        .into_iter()
+                                        .map(|(span, new_text)| TextEdit {
+                                            range: lines.range(&span),
+                                            new_text,
+                                        })
+                                        .collect();
+                                    (uri_of(&path, &pos.text_document.uri), edits)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                }
+                _ => snap.rename(offset, &p.new_name).map(|edits| {
                     let edits: Vec<TextEdit> = edits
                         .into_iter()
                         .map(|(span, new_text)| TextEdit {
@@ -386,9 +467,14 @@ fn handle_request(state: &Documents, req: Request) -> Response {
                             new_text,
                         })
                         .collect();
+                    vec![(pos.text_document.uri.clone(), edits)]
+                }),
+            };
+            match renamed {
+                Ok(files) => {
                     // `WorkspaceEdit::changes` is keyed by `Uri`, which clippy flags; it is never mutated.
                     #[allow(clippy::mutable_key_type)]
-                    let changes = std::collections::HashMap::from([(pos.text_document.uri, edits)]);
+                    let changes: HashMap<Uri, Vec<TextEdit>> = files.into_iter().collect();
                     reply(
                         id,
                         lsp_types::WorkspaceEdit {

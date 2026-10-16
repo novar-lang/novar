@@ -357,3 +357,63 @@ fn finds_references_and_renames_variables_and_functions() {
     assert_eq!(on_struct["result"]["placeholder"], "Point", "{on_struct}");
     c.request("shutdown", json!(null));
 }
+
+#[test]
+fn references_and_rename_reach_the_other_files_of_the_project() {
+    let dir = std::env::temp_dir().join(format!("telvax-lsp-stdio-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let util = "fn double(x: i32) -> i32:\n    x * 2\n";
+    let main = "from util import double\n\nfn main() -> i32:\n    double(4)\n";
+    std::fs::write(dir.join("util.tvx"), util).unwrap();
+    std::fs::write(dir.join("main.tvx"), main).unwrap();
+    let main_uri = format!("file://{}", dir.join("main.tvx").display());
+    let util_uri = format!("file://{}", dir.join("util.tvx").display());
+
+    let mut c = Client::start();
+    initialize(&mut c);
+    c.notify(
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": main_uri, "languageId": "telvax", "version": 1, "text": main}}),
+    );
+    c.diagnostics(&main_uri);
+
+    // From the call in `main`: the import and the call there, and the declaration in `util`.
+    let pos = json!({"textDocument": {"uri": main_uri}, "position": {"line": 3, "character": 6}});
+    let refs = c.request(
+        "textDocument/references",
+        json!({"textDocument": pos["textDocument"], "position": pos["position"],
+               "context": {"includeDeclaration": true}}),
+    );
+    let mut places: Vec<(String, u64)> = refs["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["uri"].as_str().unwrap().to_string(),
+                l["range"]["start"]["line"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    places.sort();
+    assert_eq!(
+        places,
+        [
+            (main_uri.clone(), 0),
+            (main_uri.clone(), 3),
+            (util_uri.clone(), 0)
+        ]
+    );
+
+    // One rename edits both files.
+    let r = c.request(
+        "textDocument/rename",
+        json!({"textDocument": pos["textDocument"], "position": pos["position"], "newName": "twice"}),
+    );
+    let changes = r["result"]["changes"].as_object().unwrap();
+    assert_eq!(changes[&main_uri].as_array().unwrap().len(), 2, "{r}");
+    assert_eq!(changes[&util_uri].as_array().unwrap().len(), 1, "{r}");
+    c.request("shutdown", json!(null));
+    let _ = std::fs::remove_dir_all(&dir);
+}
