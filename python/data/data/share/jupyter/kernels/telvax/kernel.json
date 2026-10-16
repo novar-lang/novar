@@ -1,0 +1,5 @@
+{
+  "argv": ["python", "-m", "telvax.kernel", "-f", "{connection_file}"],
+  "display_name": "Telvax",
+  "language": "telvax"
+}

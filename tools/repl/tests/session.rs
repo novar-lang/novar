@@ -282,3 +282,59 @@ fn tab_completes_names_fields_and_methods() {
     assert_eq!(start, 18);
     assert!(found.iter().any(|c| c.label == "origin"));
 }
+
+#[test]
+fn a_tensor_has_a_grid_for_a_notebook_and_a_plain_value_has_none() {
+    let mut s = Session::new();
+    run(&mut s, &["let t: Tensor[f32, 2, 3] = std.tensor.zeros()"]);
+    let shown = s.eval("t").value.expect("a value");
+    let html = shown.html.expect("a grid");
+    assert!(
+        html.contains("telvax-tensor") && html.contains("[2, 3]"),
+        "{html}"
+    );
+    assert_eq!(html.matches("<tr>").count(), 2);
+    assert!(s.eval("1 + 1").value.unwrap().html.is_none());
+}
+
+#[test]
+fn hover_tells_the_type_or_the_signature_of_a_name() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        &["fn double(n: Int) -> Int:\n    n * 2", "let xs = [1, 2]"],
+    );
+    let on_function = s.hover("double(21)", 2).expect("a signature");
+    assert!(
+        on_function.contains("fn double(n: Int) -> Int"),
+        "{on_function}"
+    );
+    let on_variable = s.hover("xs.len()", 1).expect("a type");
+    assert!(on_variable.contains("List[Int]"), "{on_variable}");
+    assert!(s.hover("1 +", 1).is_none());
+    assert!(
+        s.hover("nothing_here", 3).is_none(),
+        "an unknown name has nothing to tell"
+    );
+}
+
+#[test]
+fn the_cursor_may_be_at_the_start_of_a_line_or_in_the_middle_of_one() {
+    let mut s = Session::new();
+    run(&mut s, &["let origin = 3", "let xs = [1, 2]"]);
+    // Hover at the very start of a name, and on the second line of an input.
+    assert!(s.hover("origin", 0).unwrap().contains("let origin: Int"));
+    assert!(
+        s.hover("let y = 1\norigin + y", 10)
+            .unwrap()
+            .contains("let origin: Int")
+    );
+    // Completing in the middle of a line leaves the rest of the line alone.
+    let (start, found) = s.complete("print(ori + 1)", 9);
+    assert_eq!(start, 6);
+    assert!(found.iter().any(|c| c.label == "origin"), "{found:?}");
+    // And on an empty line before the cursor.
+    let (start, found) = s.complete("\nxs.", 4);
+    assert_eq!(start, 4);
+    assert!(found.iter().any(|c| c.label == "len"), "{found:?}");
+}

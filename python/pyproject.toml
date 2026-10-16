@@ -9,6 +9,12 @@ description = "Python bindings for the Telvax language runtime"
 requires-python = ">=3.9"
 license = { text = "MIT OR Apache-2.0" }
 
+[project.optional-dependencies]
+# The Jupyter kernel (`python -m telvax.kernel`) and the `%%telvax` cell magic.
+kernel = ["ipykernel>=6.0", "jupyter_client>=7.0"]
+
 [tool.maturin]
 python-source = "python"
+# Files installed beside the package: `share/jupyter/kernels/telvax/kernel.json` registers the kernel.
+data = "data"
 module-name = "telvax._native"

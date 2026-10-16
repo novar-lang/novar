@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+* **Notebooks:** `pip install "telvax[kernel]"` adds a Jupyter kernel for Telvax (over `ipykernel`): each cell
+  is Telvax, definitions and variables last from one cell to the next, the value of the last expression is
+  shown (a table or a tensor as HTML), what the program prints is the cell's output, an error shows the line,
+  Tab completes and Shift+Tab shows the type. `%load_ext telvax` adds `%%telvax` to a Python notebook. In Python,
+  `telvax.Session` is the engine of both (`eval`, `type_of`, `complete`, `hover`, `variables`, `reset`).
+  `python -m telvax.kernel install` registers the kernel when pip's data files are not used.
+* **`telvax repl` completion:** Tab in the middle of a line, or on an empty line before the cursor, now completes
+  at the cursor instead of four columns off.
+* **HTML for tables and tensors:** `telvax_runtime::rich::html` shows a table as an HTML table (the first 50
+  rows) and a tensor as a grid, for notebooks and pages.
+
 * **A console in the playground:** under the editor, the same session as `telvax repl` runs in the browser.
   Definitions and variables last from one input to the next, a block ends with an empty line, Tab completes names,
   fields and methods, the arrow keys go through earlier lines, and `:type`, `:vars`, `:defs`, `:load`, `:reset`,

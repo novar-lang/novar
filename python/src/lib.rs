@@ -11,6 +11,7 @@
 
 mod convert;
 mod cuda;
+mod session;
 mod tables;
 mod tensor;
 
@@ -190,6 +191,7 @@ fn version() -> &'static str {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Program>()?;
+    m.add_class::<session::Session>()?;
     m.add_class::<tensor::Tensor>()?;
     m.add_class::<tables::Table>()?;
     m.add_class::<cuda::DeviceTensor>()?;

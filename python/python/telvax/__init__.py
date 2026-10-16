@@ -5,6 +5,7 @@ from ._native import (  # noqa: F401
     DeviceTensor,
     TelvaxError,
     Program,
+    Session,
     StatusError,
     Table,
     Tensor,
@@ -17,9 +18,16 @@ from ._native import (  # noqa: F401
 )
 
 __all__ = [
-    "CompileError", "DeviceTensor", "TelvaxError", "Program", "StatusError", "Table", "Tensor",
+    "CompileError", "DeviceTensor", "TelvaxError", "Program", "Session", "StatusError", "Table", "Tensor",
     "compile", "load", "table", "tensor", "version", "ray",
 ]
+
+
+def load_ipython_extension(ipython):
+    """``%load_ext telvax`` adds the ``%%telvax`` cell magic."""
+    from .magic import load_ipython_extension as load
+
+    load(ipython)
 
 
 def __getattr__(name):
