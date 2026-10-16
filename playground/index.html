@@ -35,6 +35,23 @@
       <h2>Problems <span id="problem-count"></span></h2>
       <ul id="problems" class="panel"></ul>
     </section>
+
+    <section class="console" aria-label="Console">
+      <h2>
+        Console
+        <button id="console-load" title="Enter the functions, types and variables of the program above">Load the program</button>
+        <button id="console-reset" title="Forget everything the console holds">Reset</button>
+        <button id="console-clear" title="Clear the screen (Ctrl+L)">Clear</button>
+      </h2>
+      <div id="console" class="panel">
+        <div id="console-log" aria-live="polite"></div>
+        <div class="console-row">
+          <span id="console-prompt" class="prompt">&gt;&gt;&gt;</span>
+          <input id="console-input" spellcheck="false" autocapitalize="off" autocomplete="off"
+                 aria-label="Console input" placeholder="a definition, a variable or an expression; :help lists the commands">
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>

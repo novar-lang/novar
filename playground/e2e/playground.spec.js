@@ -100,3 +100,77 @@ test("the share link carries the program", async ({ page, context }) => {
   await page.reload();
   await expect(page.locator("#code")).toHaveValue("fn main() -> i32:\n    99\n");
 });
+
+// ---- the console ----------------------------------------------------------------------------
+
+/** Types a line into the console and presses Enter. */
+async function type(page, line) {
+  const input = page.locator("#console-input");
+  await input.fill(line);
+  await input.press("Enter");
+}
+
+test("the console keeps variables and definitions between lines", async ({ page }) => {
+  await type(page, "let x = 5");
+  await type(page, "x * 2");
+  await expect(page.locator("#console-log")).toContainText("10");
+  await type(page, "fn double(k: Int) -> Int:");
+  await expect(page.locator("#console-prompt")).toHaveText("...");
+  // The next line starts indented; an empty line ends the block.
+  await expect(page.locator("#console-input")).toHaveValue("    ");
+  await type(page, "    k * 2");
+  await type(page, "");
+  await expect(page.locator("#console-prompt")).toHaveText(">>>");
+  await type(page, "double(x)");
+  await expect(page.locator("#console-log .ok").last()).toHaveText("10");
+});
+
+test("the console shows what is printed and the line of an error", async ({ page }) => {
+  await type(page, 'print("from the console")');
+  await expect(page.locator("#console-log")).toContainText("from the console");
+  await type(page, 'let y = 1');
+  await type(page, 'y + "a"');
+  await expect(page.locator("#console-log .error").last()).toContainText("mismatched operand types");
+  await expect(page.locator("#console-log .error").last()).toContainText('1 | y + "a"');
+  // The session is as it was.
+  await type(page, "y");
+  await expect(page.locator("#console-log .ok").last()).toHaveText("1");
+});
+
+test("the console has commands, history and Tab", async ({ page }) => {
+  await type(page, "let origin = [1, 2, 3]");
+  await type(page, ":type origin");
+  await expect(page.locator("#console-log .ok").last()).toHaveText("List[Int]");
+  await type(page, ":vars");
+  await expect(page.locator("#console-log")).toContainText("origin: List[Int] = [1, 2, 3]");
+  // The arrow keys bring back earlier lines.
+  const input = page.locator("#console-input");
+  await input.press("ArrowUp");
+  await expect(input).toHaveValue(":vars");
+  await input.press("ArrowUp");
+  await expect(input).toHaveValue(":type origin");
+  await input.fill("ori");
+  await input.press("Tab");
+  await expect(input).toHaveValue("origin");
+  await input.fill("");
+  await type(page, ":reset");
+  await type(page, "origin");
+  await expect(page.locator("#console-log .error").last()).toBeVisible();
+});
+
+test("the program in the editor can be loaded into the console", async ({ page }) => {
+  await setCode(page, "fn triple(n: Int) -> Int:\n    n * 3\n\nfn main() -> Int:\n    0\n");
+  await page.locator("#console-load").click();
+  await expect(page.locator("#console-log")).toContainText("entered");
+  await type(page, "triple(14)");
+  await expect(page.locator("#console-log .ok").last()).toHaveText("42");
+});
+
+test("a runaway input in the console stops and the console goes on", async ({ page }) => {
+  await type(page, "while True:");
+  await type(page, "    pass");
+  await type(page, "");
+  await expect(page.locator("#console-log .error").last()).toContainText("error", { timeout: 20_000 });
+  await type(page, "1 + 1");
+  await expect(page.locator("#console-log .ok").last()).toHaveText("2");
+});

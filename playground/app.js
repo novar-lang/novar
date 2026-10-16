@@ -1,4 +1,7 @@
-import init, { check, functions, run, hover } from "./pkg/telvax_wasm.js";
+import init, {
+  check, functions, run, hover,
+  repl_eval, repl_load, repl_type, repl_vars, repl_defs, repl_reset, repl_is_complete, repl_complete,
+} from "./pkg/telvax_wasm.js";
 import { EXAMPLES } from "./examples.js";
 
 const $ = (id) => document.getElementById(id);
@@ -172,6 +175,137 @@ code.addEventListener("keydown", (e) => {
     scheduleCheck();
   }
 });
+
+// ---- the console ---------------------------------------------------------------------------------
+const consoleLog = $("console-log"), consoleInput = $("console-input"), consolePrompt = $("console-prompt");
+const CONSOLE_HELP = `Type a definition (fn, type, enum, trait, extend, import), a variable (let, var), a statement
+or an expression. A block ends with an empty line. Names last until :reset.
+  :type <expression>   the type of an expression, without running it
+  :vars                the variables, with their types and values
+  :defs                the functions, types and the like defined so far
+  :load                enter the definitions and variables of the program above
+  :reset               forget everything
+  :clear               clear the screen (Ctrl+L)
+Tab completes names, fields and methods; the arrow keys go through earlier lines.`;
+const encoder = new TextEncoder(), decoder = new TextDecoder();
+let pending = "";
+const lines = [];
+let lineAt = 0;
+
+function say(cls, text) {
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = text;
+  consoleLog.append(div);
+  const box = $("console");
+  box.scrollTop = box.scrollHeight;
+}
+
+/** What an input did: what it printed, its value, what it defined, what went wrong. */
+function showOutcome(r) {
+  if (r.output) say("", r.output.replace(/\n$/, ""));
+  if (r.value) say("ok", r.value.text);
+  for (const note of r.notes ?? []) say("muted", `note: ${note}`);
+  if (r.error) say("error", r.error);
+}
+
+function consoleCommand(line) {
+  const [word, ...rest] = line.trim().split(/\s+/);
+  const arg = rest.join(" ");
+  switch (word) {
+    case ":help": case ":h": case ":?": say("muted", CONSOLE_HELP); break;
+    case ":clear": consoleLog.innerHTML = ""; break;
+    case ":reset": repl_reset(); say("muted", "(everything forgotten)"); break;
+    case ":load": loadProgram(); break;
+    case ":vars": {
+      const vars = JSON.parse(repl_vars());
+      if (!vars.length) say("muted", "(no variables)");
+      for (const v of vars) say("", `${v.name}: ${v.ty} = ${v.value}`);
+      break;
+    }
+    case ":defs": {
+      const defs = JSON.parse(repl_defs());
+      if (!defs.length) say("muted", "(nothing defined)");
+      for (const d of defs) say("", d);
+      break;
+    }
+    case ":type": case ":t": {
+      if (!arg) { say("error", "error: :type takes an expression, as in `:type 1 + 2`"); break; }
+      const r = JSON.parse(repl_type(arg));
+      say(r.ok ? "ok" : "error", r.ok ? r.type : r.error);
+      break;
+    }
+    default: say("error", `error: no command \`${word}\`; :help lists them`);
+  }
+}
+
+function loadProgram() {
+  if (!ready) return;
+  const r = JSON.parse(repl_load(code.value));
+  if (r.error) showOutcome(r);
+  else say("muted", r.defined.length ? `entered ${r.defined.join(", ")}` : "(nothing to enter)");
+}
+
+/** The spaces to start the next line with: those of the line before, and one level more after a `:`. */
+function nextIndent(text) {
+  const last = text.split("\n").filter((l) => l.trim()).pop();
+  if (!last) return "";
+  const spaces = last.length - last.trimStart().length;
+  return " ".repeat(spaces + (last.trimEnd().endsWith(":") ? 4 : 0));
+}
+
+function submitLine() {
+  if (!ready) { say("muted", "The compiler is still loading…"); return; }
+  const line = consoleInput.value;
+  if (!pending && !line.trim()) return;
+  say("echo", `${pending ? "..." : ">>>"} ${line}`);
+  if (line.trim()) { lines.push(line); lineAt = lines.length; }
+  consoleInput.value = "";
+  if (!pending && line.trimStart().startsWith(":")) { consoleCommand(line); return; }
+  pending = pending ? `${pending}\n${line}` : line;
+  // An empty line ends a block; otherwise the input ends when it is complete.
+  if (!line.trim() || repl_is_complete(pending)) {
+    showOutcome(JSON.parse(repl_eval(pending)));
+    pending = "";
+    consolePrompt.textContent = ">>>";
+  } else {
+    consolePrompt.textContent = "...";
+    consoleInput.value = nextIndent(pending);
+  }
+}
+
+function commonPrefix(words) {
+  let prefix = words[0] ?? "";
+  for (const w of words) while (!w.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  return prefix;
+}
+
+function completeInput() {
+  const line = consoleInput.value, at = consoleInput.selectionStart ?? line.length;
+  if (!line.slice(0, at).trim()) { consoleInput.setRangeText("    ", at, at, "end"); return; }
+  if (!ready) return;
+  // The engine counts bytes of UTF-8; the page counts UTF-16 units.
+  const cursor = encoder.encode(line.slice(0, at)).length;
+  const r = JSON.parse(repl_complete(line, cursor));
+  const start = decoder.decode(encoder.encode(line).slice(0, r.start)).length;
+  const labels = [...new Set(r.items.map((i) => i.label))];
+  if (!labels.length) return;
+  const common = commonPrefix(labels);
+  if (common.length > at - start) consoleInput.setRangeText(common, start, at, "end");
+  if (labels.length > 1) say("muted", labels.slice(0, 40).join("  "));
+}
+
+consoleInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitLine(); }
+  else if (e.key === "Tab") { e.preventDefault(); completeInput(); }
+  else if (e.key === "ArrowUp" && lineAt > 0) { e.preventDefault(); consoleInput.value = lines[--lineAt]; }
+  else if (e.key === "ArrowDown" && lineAt < lines.length) { e.preventDefault(); consoleInput.value = lines[++lineAt] ?? ""; }
+  else if (e.key === "l" && e.ctrlKey) { e.preventDefault(); consoleLog.innerHTML = ""; }
+});
+$("console-load").onclick = loadProgram;
+$("console-reset").onclick = () => { if (ready) { repl_reset(); pending = ""; consolePrompt.textContent = ">>>"; say("muted", "(everything forgotten)"); } };
+$("console-clear").onclick = () => { consoleLog.innerHTML = ""; };
+say("muted", "Console: type a definition, a variable or an expression. :help lists the commands.");
 
 render(EXAMPLES[0].source);
 code.value = EXAMPLES[0].source;

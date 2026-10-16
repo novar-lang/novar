@@ -14,6 +14,14 @@ python3 -m http.server -d playground 8000   # open http://localhost:8000
 scripts/build-playground.sh --node && node --test playground/test    # engine tests on the real .wasm
 ```
 
-`src/lib.rs` exports `check`, `functions`, `run`, `hover` and `complete` (JSON in, JSON out).
+`src/lib.rs` exports `check`, `functions`, `run`, `hover` and `complete` (JSON in, JSON out), and for the
+console `repl_eval`, `repl_load`, `repl_type`, `repl_vars`, `repl_defs`, `repl_reset`, `repl_is_complete` and
+`repl_complete`.
+
+The console under the editor is the same session as `telvax repl`: definitions and variables last from one
+input to the next, a block ends with an empty line, Tab completes, the arrow keys go through earlier lines, and
+`:type`, `:vars`, `:defs`, `:load`, `:reset`, `:clear` and `:help` are commands. **Load the program** enters the
+functions, types and variables of the editor into the console. It has no files, environment or network, and an
+input stops after the same number of steps as a run.
 `index.html`, `app.js` and `examples.js` are the page. The engine tests run the compiled module
-under Node; the page itself has not been exercised in an automated browser.
+under Node; the page is exercised in Chromium by `playground/e2e`.

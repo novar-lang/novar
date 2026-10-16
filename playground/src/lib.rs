@@ -4,12 +4,14 @@
 //! `JSON.parse`. Programs run in the interpreter with a step limit, with the offline model
 //! stand-ins and without file or network access.
 
+use std::cell::RefCell;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value as Json, json};
 use telvax_lsp::analysis::Snapshot;
-use telvax_runtime::Interp;
+use telvax_repl::{Outcome, Session};
+use telvax_runtime::{Caps, Interp};
 use wasm_bindgen::prelude::*;
 
 /// How many evaluation steps a run may take before it is stopped.
@@ -161,6 +163,107 @@ pub fn complete(source: &str, line: u32, character: u32) -> String {
         .map(|c| json!({"label": c.label, "kind": format!("{:?}", c.kind).to_lowercase(), "detail": c.detail}))
         .collect();
     Json::Array(items).to_string()
+}
+
+// ---- the console: an interactive session that lasts as long as the page ---------------------
+
+thread_local! {
+    static CONSOLE: RefCell<Session> = RefCell::new(new_console());
+}
+
+fn new_console() -> Session {
+    let mut session = Session::new();
+    // The browser has no files, environment or network.
+    session.set_caps(Caps::parse("none").unwrap_or(Caps::ALL));
+    session.set_step_limit(Some(STEP_LIMIT));
+    session
+}
+
+fn outcome_json(out: &Outcome) -> String {
+    let mut output = out.output.clone();
+    if output.len() > OUTPUT_LIMIT {
+        let mut end = OUTPUT_LIMIT;
+        while !output.is_char_boundary(end) {
+            end -= 1;
+        }
+        output.truncate(end);
+    }
+    json!({
+        "output": output,
+        "value": out.value.as_ref().map(|v| json!({"text": v.text, "ty": v.ty})),
+        "defined": out.defined,
+        "notes": out.notes,
+        "error": out.error,
+    })
+    .to_string()
+}
+
+/// Runs one input of the console. Returns `{output, value: {text, ty} | null, defined, notes, error}`.
+#[wasm_bindgen]
+pub fn repl_eval(input: &str) -> String {
+    CONSOLE.with(|c| outcome_json(&c.borrow_mut().eval(input)))
+}
+
+/// Enters the definitions and variables of `source` (the program in the editor).
+#[wasm_bindgen]
+pub fn repl_load(source: &str) -> String {
+    CONSOLE.with(|c| outcome_json(&c.borrow_mut().load(source)))
+}
+
+/// The type of an expression, without running it: `{ok, type}` or `{ok: false, error}`.
+#[wasm_bindgen]
+pub fn repl_type(expression: &str) -> String {
+    CONSOLE
+        .with(|c| match c.borrow_mut().type_of(expression) {
+            Ok(ty) => json!({"ok": true, "type": ty}),
+            Err(error) => json!({"ok": false, "error": error}),
+        })
+        .to_string()
+}
+
+/// The variables of the console: `[{name, ty, value}]`.
+#[wasm_bindgen]
+pub fn repl_vars() -> String {
+    CONSOLE.with(|c| {
+        let vars: Vec<Json> = c
+            .borrow()
+            .variables()
+            .into_iter()
+            .map(|(name, ty, value)| json!({"name": name, "ty": ty, "value": value}))
+            .collect();
+        Json::Array(vars).to_string()
+    })
+}
+
+/// The functions, types and the like defined in the console.
+#[wasm_bindgen]
+pub fn repl_defs() -> String {
+    CONSOLE.with(|c| json!(c.borrow().definitions()).to_string())
+}
+
+/// Forgets everything the console holds.
+#[wasm_bindgen]
+pub fn repl_reset() {
+    CONSOLE.with(|c| c.borrow_mut().reset());
+}
+
+/// Whether `input` can be run as it is, or the person is in the middle of a block or a bracket.
+#[wasm_bindgen]
+pub fn repl_is_complete(input: &str) -> bool {
+    Session::is_complete(input)
+}
+
+/// What Tab can complete the word before byte `cursor` to: `{start, items: [{label, detail}]}`.
+#[wasm_bindgen]
+pub fn repl_complete(input: &str, cursor: u32) -> String {
+    CONSOLE.with(|c| {
+        let (start, found) = c.borrow().complete(input, cursor as usize);
+        let items: Vec<Json> = found
+            .into_iter()
+            .map(|s| json!({"label": s.label, "detail": s.detail}))
+            .collect();
+        json!({"start": start, "items": items}).to_string()
+    })
 }
 
 fn lsp_position(line: u32, character: u32) -> lsp_types_position::Position {
