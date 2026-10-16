@@ -16,8 +16,8 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
 Install the `telvax` executable so that `telvax lsp` is on your `PATH`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ntsation/telvax/main/scripts/install.sh | sh        # Linux, macOS
-irm https://raw.githubusercontent.com/ntsation/telvax/main/scripts/install.ps1 | iex             # Windows (PowerShell)
+curl -fsSL https://raw.githubusercontent.com/telvax/telvax/main/scripts/install.sh | sh        # Linux, macOS
+irm https://raw.githubusercontent.com/telvax/telvax/main/scripts/install.ps1 | iex             # Windows (PowerShell)
 ```
 
 or point the `telvax.server.path` setting at the executable. Each GitHub release also carries the
