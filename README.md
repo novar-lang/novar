@@ -99,7 +99,7 @@ Nightly Rust is required (`rust-toolchain.toml` selects it). More in the [tour](
 | Native backend | `compiler/{ir,codegen}` | MLIR (`melior`) and LLVM (`inkwell`) 22; JIT and executables; int8 quantization of `matmul`. Optional: `--features llvm` |
 | HTTP serving | `server/`, `cli/` | `@endpoint` becomes an Axum route; `telvax build --serve` embeds the program in one binary |
 | Modules and packages | `compiler/modules`, `tools/package-manager` | `import` between files, `tvpm` with registries, a resolver and a lockfile |
-| Editor support | `tools/lsp`, `editors/vscode` | diagnostics, hover, completion, go to definition, inferred-type hints |
+| Editor support | `tools/lsp`, `editors/vscode` | diagnostics, hover, contextual completion, go to definition, inferred-type hints |
 | Web playground | `playground/` | the checker and interpreter compiled to WebAssembly |
 | Accelerators | `compiler/accel/` | StableHLO and PTX generators (not run on TPU / NVIDIA hardware); GPU execution lives in `runtime` (`gpu` feature) |
 | Python | `python/` | PyO3 module; zero-copy Arrow, NumPy and CUDA-array interchange; Ray executor |

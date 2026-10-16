@@ -208,10 +208,8 @@ fn completes_table_columns_and_methods() {
         "{l:?}"
     );
     let nested = complete_after_edit(src, "t.score.");
-    assert!(
-        nested.is_empty(),
-        "tensors have no member completions yet: {nested:?}"
-    );
+    let l = labels(&nested);
+    assert!(l.contains(&"sum") && l.contains(&"matmul"), "{l:?}");
 }
 
 #[test]

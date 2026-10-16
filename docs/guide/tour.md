@@ -395,6 +395,11 @@ Indentation is part of the syntax, so `telvax fmt` never moves a line between bl
 spaces per level, spaces inside a line, continuation lines and blank lines. Directories skip hidden
 folders, `target`, `node_modules` and `.tvpm`.
 
+The language server completes names as you type: types after `:` and `->`, the fields, columns and
+methods after a dot (also after calls such as `s.trim().`), the variants after `Shape.`, the parameter of
+a closure you are writing (`xs.map(p => p.`) and the columns of a table inside `t.sql("..`. What fits the
+type the code expects comes first.
+
 The language server formats documents too, so VS Code can format on save. It also finds all
 references to a variable or function and renames them (a rename is refused when the new name
 would collide with another one in scope, or when the symbol is a type or lives in another file).

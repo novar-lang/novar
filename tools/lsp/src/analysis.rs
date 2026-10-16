@@ -6,11 +6,12 @@ use std::ops::Range;
 use std::path::Path;
 
 use telvax_diagnostics::Diagnostic;
+use telvax_hir::Ty;
 use telvax_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
-use telvax_hir::stdlib::{self, ItemKind};
-use telvax_hir::{Prim, Ty};
 
 use crate::position::LineIndex;
+
+mod completion;
 
 pub type Span = Range<usize>;
 
@@ -49,6 +50,8 @@ pub struct Snapshot {
     pub map: telvax_modules::SourceMap,
     nodes: Vec<Node>,
     locals: HashMap<LocalId, LocalInfo>,
+    /// Traits, aliases and type parameters, which the typed program no longer shows.
+    decls: completion::Decls,
     /// The program came from an earlier version of the text because the current one could not
     /// be analysed (typically mid-edit). Types are still useful for completion, positions are not.
     pub stale: bool,
@@ -87,6 +90,9 @@ pub enum CompletionKind {
     Method,
     Module,
     Type,
+    Enum,
+    EnumMember,
+    Trait,
 }
 
 #[derive(Debug, Clone)]
@@ -94,12 +100,19 @@ pub struct Completion {
     pub label: String,
     pub kind: CompletionKind,
     pub detail: Option<String>,
+    /// A sentence about the item, shown beside the list.
+    pub doc: Option<String>,
+    /// 0 is offered first: items that fit the type expected at the cursor, then names in scope,
+    /// then declarations, then keywords.
+    pub rank: u8,
+    /// The type of the value the item gives, when it gives one.
+    pub ty: Option<String>,
 }
 
 const KEYWORDS: &[&str] = &[
     "fn", "let", "var", "type", "enum", "trait", "extend", "import", "from", "return", "if",
     "elif", "else", "for", "in", "is", "while", "match", "case", "break", "continue", "pass",
-    "and", "or", "not", "True", "False",
+    "and", "or", "not", "True", "False", "async", "await",
 ];
 const PRIMS: &[&str] = &[
     "Int", "Float", "Text", "Bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32",
@@ -145,6 +158,7 @@ impl Snapshot {
             snap.hir = prev.hir.clone();
             snap.nodes = prev.nodes.clone();
             snap.locals = prev.locals.clone();
+            snap.decls = prev.decls.clone();
             snap.map = prev.map.clone();
             snap.stale = true;
         }
@@ -187,6 +201,7 @@ impl Snapshot {
             map: loaded.map,
             nodes: Vec::new(),
             locals: HashMap::new(),
+            decls: completion::Decls::of(&loaded.program),
             stale: false,
         };
         if let Some(h) = &hir {
@@ -494,331 +509,6 @@ impl Snapshot {
         }
         hints.sort();
         hints
-    }
-
-    // ---- completion -----------------------------------------------------------------------
-
-    pub fn completions(&self, offset: usize) -> Vec<Completion> {
-        let offset = offset.min(self.text.len());
-        let before = &self.text[..offset];
-        let word_start = before
-            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-            .map_or(0, |i| {
-                i + before[i..].chars().next().map_or(1, char::len_utf8)
-            });
-        let prefix = &before[word_start..];
-        let head = &before[..word_start];
-
-        let mut items = if let Some(receiver) = head.strip_suffix('.') {
-            if self.starts_a_path(receiver) {
-                self.path_completions(receiver)
-            } else {
-                self.member_completions(receiver, offset)
-            }
-        } else if head.ends_with('@') {
-            vec![item(
-                "endpoint",
-                CompletionKind::Function,
-                Some("HTTP endpoint attribute".into()),
-            )]
-        } else {
-            self.general_completions(offset)
-        };
-        items.retain(|c| c.label.starts_with(prefix));
-        items.sort_by(|a, b| a.label.cmp(&b.label));
-        items.dedup_by(|a, b| a.label == b.label && a.kind == b.kind);
-        items
-    }
-
-    fn general_completions(&self, offset: usize) -> Vec<Completion> {
-        let mut out: Vec<Completion> = KEYWORDS
-            .iter()
-            .map(|k| item(k, CompletionKind::Keyword, None))
-            .collect();
-        out.extend(PRIMS.iter().map(|p| item(p, CompletionKind::Type, None)));
-        for t in ["List", "Map", "Tensor", "Table", "Result"] {
-            out.push(item(t, CompletionKind::Type, None));
-        }
-        out.push(item(
-            "std",
-            CompletionKind::Module,
-            Some("standard library".into()),
-        ));
-        if let Some(prog) = self.program() {
-            let own = |span: &Span| span.end <= self.text.len();
-            for s in prog.structs.iter().filter(|s| own(&s.name_span)) {
-                out.push(item(&s.name, CompletionKind::Struct, None));
-            }
-            for f in prog.fns.iter().filter(|f| own(&f.name_span)) {
-                out.push(item(&f.name, CompletionKind::Function, Some(signature(f))));
-            }
-            for g in prog.globals.iter().filter(|g| own(&g.span)) {
-                out.push(item(
-                    &g.name,
-                    CompletionKind::Variable,
-                    Some(g.ty.to_string()),
-                ));
-            }
-            for imp in &prog.imports {
-                if let Some(last) = imp.last() {
-                    out.push(item(last, CompletionKind::Module, Some(imp.join("."))));
-                }
-            }
-            // Items imported from other modules, under the names the user wrote.
-            for (mangled, shown) in &self.map.display_names {
-                let Some(name) = shown.rsplit('.').next() else {
-                    continue;
-                };
-                if let Some(f) = prog.fns.iter().find(|f| &f.name == mangled) {
-                    out.push(item(
-                        name,
-                        CompletionKind::Function,
-                        Some(self.map.demangle(&signature(f))),
-                    ));
-                } else if prog.structs.iter().any(|s| &s.name == mangled) {
-                    out.push(item(name, CompletionKind::Struct, Some(shown.clone())));
-                }
-            }
-        }
-        out.extend(
-            self.visible_locals(offset)
-                .into_iter()
-                .map(|l| item(&l.name, CompletionKind::Variable, Some(l.ty.to_string()))),
-        );
-        out
-    }
-
-    /// The run of dotted names that ends `text`: `std.text` in `x = std.text`.
-    fn dotted_tail<'t>(&self, text: &'t str) -> &'t str {
-        let start = text
-            .rfind(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
-            .map_or(0, |i| {
-                i + text[i..].chars().next().map_or(1, char::len_utf8)
-            });
-        &text[start..]
-    }
-
-    /// Whether `receiver` (the text before a `.`) names a module or type rather than a value:
-    /// its first name is `std`, an imported name or capitalized.
-    fn starts_a_path(&self, receiver: &str) -> bool {
-        let run = self.dotted_tail(receiver);
-        let Some(first) = run.split('.').next().filter(|s| !s.is_empty()) else {
-            return false;
-        };
-        first == "std"
-            || first.starts_with(|c: char| c.is_uppercase())
-            || self.program().is_some_and(|p| {
-                p.imports
-                    .iter()
-                    .any(|i| i.last().is_some_and(|l| l == first))
-            })
-    }
-
-    fn path_completions(&self, path_text: &str) -> Vec<Completion> {
-        let mut segments: Vec<String> = self
-            .dotted_tail(path_text)
-            .split('.')
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect();
-        if segments.is_empty() {
-            return Vec::new();
-        }
-        // An imported name stands for its full path.
-        if let Some(prog) = self.program()
-            && let Some(full) = prog.imports.iter().find(|p| p.last() == segments.first())
-        {
-            let mut resolved = full.clone();
-            resolved.extend(segments.drain(1..));
-            segments = resolved;
-        }
-        if segments[0] != "std" {
-            return Vec::new();
-        }
-        stdlib::children(&segments.join("::"))
-            .into_iter()
-            .map(|(name, kind)| {
-                let kind = match kind {
-                    ItemKind::Module => CompletionKind::Module,
-                    ItemKind::Function => CompletionKind::Function,
-                    ItemKind::Type => CompletionKind::Type,
-                };
-                item(&name, kind, None)
-            })
-            .collect()
-    }
-
-    fn member_completions(&self, receiver: &str, offset: usize) -> Vec<Completion> {
-        let Some(ty) = self.type_of_chain(receiver, offset) else {
-            return Vec::new();
-        };
-        let methods = |names: &[&str]| -> Vec<Completion> {
-            names
-                .iter()
-                .map(|n| item(n, CompletionKind::Method, None))
-                .collect()
-        };
-        match &ty {
-            Ty::Struct(name) => self
-                .program()
-                .and_then(|p| p.structs.iter().find(|s| &s.name == name))
-                .map(|s| {
-                    s.fields
-                        .iter()
-                        .map(|(n, t)| item(n, CompletionKind::Field, Some(t.to_string())))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            Ty::Table(name) => {
-                let mut out = methods(&["len", "is_empty"]);
-                if let Some(s) = self
-                    .program()
-                    .and_then(|p| p.structs.iter().find(|s| &s.name == name))
-                {
-                    out.extend(s.fields.iter().map(|(n, t)| {
-                        item(n, CompletionKind::Field, Some(format!("column: {t}")))
-                    }));
-                }
-                out
-            }
-            Ty::Prim(Prim::Str) => {
-                methods(&["is_empty", "len", "trim", "to_lowercase", "to_uppercase"])
-            }
-            Ty::Vec(_) => methods(&["is_empty", "len"]),
-            Ty::Named(t) => stdlib::methods_of(t)
-                .into_iter()
-                .map(|n| item(n, CompletionKind::Method, None))
-                .collect(),
-            _ => Vec::new(),
-        }
-    }
-
-    /// Locals declared in the function around `offset`, before it.
-    fn visible_locals(&self, offset: usize) -> Vec<&LocalInfo> {
-        let Some(prog) = self.program() else {
-            return Vec::new();
-        };
-        let Some(f) = prog
-            .fns
-            .iter()
-            .find(|f| f.span.start <= offset && offset <= f.span.end)
-        else {
-            return Vec::new();
-        };
-        self.locals
-            .values()
-            .filter(|l| {
-                l.span.start >= f.span.start && l.span.start < offset && l.span.end <= f.span.end
-            })
-            .collect()
-    }
-
-    /// Resolves `a.b.c` / `f(x).field` from the text before a dot, using the last analysis.
-    fn type_of_chain(&self, text: &str, offset: usize) -> Option<Ty> {
-        let prog = self.program()?;
-        let text = text.trim_end();
-        // Split into segments at top-level dots, remembering calls.
-        let mut segments: Vec<(String, bool)> = Vec::new();
-        let mut depth = 0i32;
-        let mut current = String::new();
-        for c in text.chars().rev() {
-            match c {
-                ')' | ']' => {
-                    depth += 1;
-                    current.insert(0, c);
-                }
-                '(' | '[' => {
-                    depth -= 1;
-                    current.insert(0, c);
-                }
-                '.' if depth == 0 => {
-                    segments.insert(0, (std::mem::take(&mut current), false));
-                }
-                c if depth > 0 || c.is_alphanumeric() || c == '_' => current.insert(0, c),
-                _ => break,
-            }
-        }
-        segments.insert(0, (current, false));
-        segments.retain(|(s, _)| !s.is_empty());
-        let (first, rest) = segments.split_first()?;
-        let name = first.0.split(['(', '[']).next()?.to_string();
-        let is_call = first.0.contains('(');
-        let mut ty = if let Some(l) = self
-            .visible_locals(offset)
-            .into_iter()
-            .filter(|l| l.name == name)
-            .max_by_key(|l| l.span.start)
-        {
-            l.ty.clone()
-        } else if let Some(g) = prog.globals.iter().find(|g| g.name == name) {
-            g.ty.clone()
-        } else {
-            // A bare function name is not a value we can complete on; a call yields its result.
-            let f = prog.fns.iter().find(|f| f.name == name)?;
-            is_call.then(|| f.ret.clone())?
-        };
-        if first.0.contains('[') {
-            ty = element_of(&ty)?;
-        }
-        for (seg, _) in rest {
-            let field = seg.split(['(', '[']).next()?;
-            ty = match &ty {
-                Ty::Struct(sname) => prog
-                    .structs
-                    .iter()
-                    .find(|s| &s.name == sname)?
-                    .fields
-                    .iter()
-                    .find(|(n, _)| n == field)?
-                    .1
-                    .clone(),
-                Ty::Table(sname) => {
-                    let col = prog
-                        .structs
-                        .iter()
-                        .find(|s| &s.name == sname)?
-                        .fields
-                        .iter()
-                        .find(|(n, _)| n == field)?
-                        .1
-                        .clone();
-                    match col {
-                        Ty::Prim(p) if p.is_numeric() => Ty::Tensor {
-                            elem: Box::new(Ty::Prim(p)),
-                            shape: vec![telvax_hir::Dim::Named("N".into())],
-                        },
-                        Ty::Prim(p) => Ty::Vec(Box::new(Ty::Prim(p))),
-                        other => other,
-                    }
-                }
-                _ => return None,
-            };
-            if seg.contains('[') {
-                ty = element_of(&ty)?;
-            }
-        }
-        Some(ty)
-    }
-}
-
-fn element_of(ty: &Ty) -> Option<Ty> {
-    match ty {
-        Ty::Vec(t) => Some((**t).clone()),
-        Ty::Table(s) => Some(Ty::Struct(s.clone())),
-        Ty::Tensor { elem, shape } if shape.len() == 1 => Some((**elem).clone()),
-        Ty::Tensor { elem, shape } => Some(Ty::Tensor {
-            elem: elem.clone(),
-            shape: shape[1..].to_vec(),
-        }),
-        _ => None,
-    }
-}
-
-fn item(label: &str, kind: CompletionKind, detail: Option<String>) -> Completion {
-    Completion {
-        label: label.to_string(),
-        kind,
-        detail,
     }
 }
 

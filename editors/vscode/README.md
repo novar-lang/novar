@@ -6,7 +6,8 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
 * **Diagnostics** from the real parser and type checker, including tensor-shape mismatches.
 * **Hover** with inferred types and function signatures.
 * **Inlay hints** showing the inferred type of `let` bindings and loop variables.
-* **Completion** for fields, table columns, methods, `std.` paths, functions and variables.
+* **Completion** for types, fields, table columns (also inside `t["..` and `t.sql("..`), methods of built-in and
+  your own types, enum variants, `std.` paths, functions and variables, ordered by the type the code expects.
 * **Go to definition**, **find references**, **rename** and **document symbols**.
 * **Formatting** with the same rules as `telvax fmt`.
 * **Snippets** for `fn`, `main`, `type`, `enum`, `match`, `for`, `test`, `endpoint` and `trait`.

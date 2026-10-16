@@ -4718,27 +4718,10 @@ impl Checker {
                 "to_int" => Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Prim(Prim::I64))))),
                 "to_float" => Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Prim(Prim::F64))))),
                 "chars" | "lines" => Ty::Fn(vec![], Box::new(Ty::Vec(Box::new(Ty::str())))),
-                _ => self.no_method(
-                    name,
-                    "Text",
-                    &[
-                        "is_empty",
-                        "len",
-                        "trim",
-                        "to_lowercase",
-                        "to_uppercase",
-                        "contains",
-                        "starts_with",
-                        "ends_with",
-                        "replace",
-                        "split",
-                        "find",
-                        "to_int",
-                        "to_float",
-                        "chars",
-                        "lines",
-                    ],
-                ),
+                _ => {
+                    let all = stdlib::builtin_method_names(&Ty::str());
+                    self.no_method(name, "Text", &all)
+                }
             },
             Ty::Vec(elem) => match n {
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
@@ -4753,14 +4736,8 @@ impl Checker {
                 "sort" | "reverse" => Ty::Fn(vec![], Box::new(Ty::Unit)),
                 _ => {
                     let shown = base.ty.to_string();
-                    self.no_method(
-                        name,
-                        &shown,
-                        &[
-                            "is_empty", "len", "push", "contains", "first", "last", "pop", "get",
-                            "sort", "reverse",
-                        ],
-                    )
+                    let all = stdlib::builtin_method_names(&base.ty);
+                    self.no_method(name, &shown, &all)
                 }
             },
             Ty::Option(inner) => match n {
@@ -4769,43 +4746,14 @@ impl Checker {
                 "unwrap_or" => Ty::Fn(vec![(**inner).clone()], inner.clone()),
                 _ => {
                     let shown = base.ty.to_string();
-                    self.no_method(
-                        name,
-                        &shown,
-                        &[
-                            "is_some",
-                            "is_none",
-                            "unwrap",
-                            "unwrap_or",
-                            "unwrap_or_else",
-                            "expect",
-                            "map",
-                            "and_then",
-                            "filter",
-                            "ok_or",
-                        ],
-                    )
+                    let all = stdlib::builtin_method_names(&base.ty);
+                    self.no_method(name, &shown, &all)
                 }
             },
             Ty::Result(..) => {
                 let shown = base.ty.to_string();
-                self.no_method(
-                    name,
-                    &shown,
-                    &[
-                        "is_ok",
-                        "is_err",
-                        "unwrap",
-                        "expect",
-                        "unwrap_or",
-                        "unwrap_or_else",
-                        "map",
-                        "map_err",
-                        "and_then",
-                        "ok",
-                        "err",
-                    ],
-                )
+                let all = stdlib::builtin_method_names(&base.ty);
+                self.no_method(name, &shown, &all)
             }
             Ty::Map(k, v) => match n {
                 "insert" => Ty::Fn(vec![(**k).clone(), (**v).clone()], Box::new(Ty::Unit)),
@@ -4824,21 +4772,8 @@ impl Checker {
                 "values" => Ty::Fn(vec![], Box::new(Ty::Vec(v.clone()))),
                 _ => {
                     let shown = base.ty.to_string();
-                    self.no_method(
-                        name,
-                        &shown,
-                        &[
-                            "insert",
-                            "get",
-                            "remove",
-                            "contains_key",
-                            "len",
-                            "is_empty",
-                            "keys",
-                            "values",
-                            "entries",
-                        ],
-                    )
+                    let all = stdlib::builtin_method_names(&base.ty);
+                    self.no_method(name, &shown, &all)
                 }
             },
             Ty::Table(s) => match n {

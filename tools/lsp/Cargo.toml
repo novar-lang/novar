@@ -29,6 +29,7 @@ lsp-server = "0.10"
 lsp-types = "0.97"
 telvax_fmt = { path = "../formatter" }
 telvax_diagnostics = { path = "../../compiler/diagnostics" }
+telvax_ast = { path = "../../compiler/ast" }
 telvax_hir = { path = "../../compiler/semantic" }
 telvax_modules = { path = "../../compiler/modules" }
 telvax_parser = { path = "../../compiler/parser" }
