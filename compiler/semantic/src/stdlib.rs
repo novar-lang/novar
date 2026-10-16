@@ -914,6 +914,48 @@ fn test_assert_msg(args: &[Ty]) -> Result<Ty, String> {
     Ok(Ty::Unit)
 }
 
+/// What a test names a function by: a std path as text, or the function itself.
+fn mock_target(args: &[Ty]) -> Result<(), String> {
+    match &args[0] {
+        Ty::Fn(..) => Ok(()),
+        t if s().accepts(t) => Ok(()),
+        t => Err(format!(
+            "argument 1 must be a function or the path of a std function as `Text`, found `{t}`"
+        )),
+    }
+}
+
+fn test_mock(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    mock_target(args)?;
+    let Ty::Fn(..) = &args[1] else {
+        return Err(format!(
+            "argument 2 must be the function that takes its place, found `{}`",
+            args[1]
+        ));
+    };
+    if let Ty::Fn(..) = &args[0]
+        && !args[0].accepts(&args[1])
+    {
+        return Err(format!(
+            "the replacement must have the type of the function it replaces: `{}`, found `{}`",
+            args[0], args[1]
+        ));
+    }
+    Ok(Ty::Unit)
+}
+
+fn test_calls(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 1)?;
+    mock_target(args)?;
+    Ok(Ty::Prim(Prim::I64))
+}
+
+fn test_reset_mocks(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 0)?;
+    Ok(Ty::Unit)
+}
+
 fn test_fail(args: &[Ty]) -> Result<Ty, String> {
     arity(args, 1)?;
     want(args, 0, &s())?;
@@ -1465,6 +1507,9 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::test::assert_eq", sig(test_assert_eq)),
     ("std::test::assert_msg", sig(test_assert_msg)),
     ("std::test::fail", sig(test_fail)),
+    ("std::test::mock", sig(test_mock)),
+    ("std::test::calls", sig(test_calls)),
+    ("std::test::reset_mocks", sig(test_reset_mocks)),
     ("std::debug::dbg", sig(debug_dbg)),
     ("std::env::get", sig(env_get)),
     ("std::fs::read", sig(fs_read)),

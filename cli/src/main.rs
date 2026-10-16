@@ -5,7 +5,7 @@ mod native;
 mod serve;
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use telvax_diagnostics::Diagnostic;
@@ -16,7 +16,8 @@ usage:
   telvax check [--json] [file.tvx...]                       no file: the package in this directory
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
-  telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
+  telvax test [file.tvx|dir] [name] [--allow list] [--coverage] [--fail-under N]
+                                                            run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
   telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax doctor                                             what this build can do and how it is set up
   telvax lsp                                                language server over stdio
@@ -100,11 +101,17 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             [func, args @ ..] if !func.starts_with('-') => run(file, func, args),
             _ => run(file, "main", rest),
         },
-        ["test", file, rest @ ..] => {
+        // Without a path, `test` looks in this directory.
+        ["test", rest @ ..] => {
+            let (path, rest) = match rest {
+                [path, rest @ ..] if !path.starts_with('-') => (*path, rest),
+                _ => (".", rest),
+            };
             let (caps, rest) = take_allow(rest)?;
+            let (cov, rest) = take_coverage(&rest)?;
             match rest.as_slice() {
-                [] => test(file, None, caps),
-                [filter] => test(file, Some(filter), caps),
+                [] => test(path, None, caps, cov),
+                [filter] => test(path, Some(filter), caps, cov),
                 _ => Err(CliError::Usage),
             }
         }
@@ -242,6 +249,32 @@ pub fn take_allow<'a>(args: &[&'a str]) -> Result<(telvax_runtime::Caps, Vec<&'a
     Ok((caps, rest))
 }
 
+/// Splits `--coverage` and `--fail-under N` out of `args`. Either one turns the report on;
+/// `--fail-under` also sets the percentage of lines the tests must run.
+fn take_coverage<'a>(args: &[&'a str]) -> Result<(Option<Coverage>, Vec<&'a str>), CliError> {
+    let mut cov = None;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match *a {
+            "--coverage" => {
+                cov.get_or_insert_with(Coverage::default);
+            }
+            "--fail-under" => {
+                let Some(n) = it.next().and_then(|n| n.parse::<f64>().ok()) else {
+                    return failed("--fail-under takes a percentage such as `90`");
+                };
+                if !(0.0..=100.0).contains(&n) {
+                    return failed("--fail-under takes a percentage from 0 to 100");
+                }
+                cov.get_or_insert_with(Coverage::default).fail_under = Some(n);
+            }
+            _ => rest.push(*a),
+        }
+    }
+    Ok((cov, rest))
+}
+
 /// Splits `--quantize int8|int8-channel|int4-channel|none` out of `args`.
 pub fn take_quantize<'a>(
     args: &[&'a str],
@@ -287,6 +320,8 @@ pub struct Checked {
     pub hir: telvax_hir::hir::Program,
     /// Everything needed to rebuild the program without the source tree.
     pub bundle: bundle::Bundle,
+    /// Where every span points, for reports by file and line.
+    pub map: telvax_modules::SourceMap,
 }
 
 /// Type-checks a loaded program, printing every diagnostic against the file it belongs to.
@@ -323,7 +358,11 @@ pub fn check_project(file: &str) -> Result<Checked, CliError> {
     let loaded = telvax_modules::load(path, &deps).or_else(failed)?;
     let (hir, _) = lower_loaded(&loaded)?;
     let bundle = bundle::Bundle::new(file, &loaded, &deps);
-    Ok(Checked { hir, bundle })
+    Ok(Checked {
+        hir,
+        bundle,
+        map: loaded.map.clone(),
+    })
 }
 
 /// Parses and checks `file`, printing diagnostics. Fails if any is an error.
@@ -367,37 +406,420 @@ fn call_arguments(interp: &Interp, func: &str, words: &[&str]) -> Result<Vec<Val
         .collect()
 }
 
-/// `telvax test <file> [name]`: runs every function called `test_*` that takes no arguments. A
+/// `telvax test [path] [name]`: runs every function called `test_*` that takes no arguments. A
 /// test passes when it returns and fails when it stops with an error (`assert`, `assert_eq`, ...).
-fn test(file: &str, filter: Option<&str>, caps: telvax_runtime::Caps) -> Result<(), CliError> {
+/// A directory runs every `test_*.tvx` and `*_test.tvx` file under it.
+fn test(
+    path: &str,
+    filter: Option<&str>,
+    caps: telvax_runtime::Caps,
+    mut cov: Option<Coverage>,
+) -> Result<(), CliError> {
+    if let Some(cov) = cov.as_mut() {
+        cov.root = coverage_root(Path::new(path));
+    }
+    let outcome = test_all(path, filter, caps, &mut cov);
+    match (outcome, cov) {
+        (Err(e), _) => Err(e),
+        (Ok(()), None) => Ok(()),
+        (Ok(()), Some(cov)) => cov.finish(),
+    }
+}
+
+fn test_all(
+    path: &str,
+    filter: Option<&str>,
+    caps: telvax_runtime::Caps,
+    cov: &mut Option<Coverage>,
+) -> Result<(), CliError> {
+    if !Path::new(path).is_dir() {
+        let (passed, failures) = test_file(path, filter, caps, cov)?;
+        println!("{passed} passed, {failures} failed");
+        return if failures > 0 { failed("") } else { Ok(()) };
+    }
+    let mut files = Vec::new();
+    collect_test_files(Path::new(path), &mut files);
+    files.sort();
+    if files.is_empty() {
+        return failed(format!(
+            "no test files in `{path}` (a test file is named `test_*.tvx` or `*_test.tvx`)"
+        ));
+    }
+    let (mut passed, mut failures, mut ran) = (0, 0, 0);
+    for file in &files {
+        let file = file.to_string_lossy();
+        println!("== {file}");
+        match test_file(&file, filter, caps, cov) {
+            Ok((p, f)) => {
+                passed += p;
+                failures += f;
+                ran += 1;
+            }
+            Err(CliError::Failed(msg)) if msg.starts_with("no test functions") => {}
+            Err(CliError::Failed(msg)) => {
+                failures += 1;
+                if !msg.is_empty() {
+                    eprintln!("error: {msg}");
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if ran == 0 && failures == 0 {
+        return failed("no test functions found (a test is a function named `test_...`)");
+    }
+    println!("{passed} passed, {failures} failed");
+    if failures > 0 { failed("") } else { Ok(()) }
+}
+
+/// The lines the tests ran, per file, for `--coverage`.
+#[derive(Default)]
+struct Coverage {
+    fail_under: Option<f64>,
+    /// Files outside this directory (dependencies) are not counted.
+    root: PathBuf,
+    inside: std::collections::HashMap<String, bool>,
+    /// File -> (lines with code, lines that ran).
+    files: std::collections::BTreeMap<
+        String,
+        (
+            std::collections::BTreeSet<usize>,
+            std::collections::BTreeSet<usize>,
+        ),
+    >,
+}
+
+/// What the tests are about: the project of `path` if it has a `telvax.toml`, else its directory.
+fn coverage_root(path: &Path) -> PathBuf {
+    let root = match telvax_pkg::Project::discover(path) {
+        Ok(Some(project)) => project.dir,
+        _ if path.is_dir() => path.to_path_buf(),
+        _ => path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+    };
+    std::fs::canonicalize(&root).unwrap_or(root)
+}
+
+impl Coverage {
+    /// Records, for one loaded program, which of `points` (statement offsets) ran.
+    fn add(
+        &mut self,
+        map: &telvax_modules::SourceMap,
+        points: &[usize],
+        ran: &std::collections::HashSet<usize>,
+    ) {
+        for &offset in points {
+            let Some((file, local)) = map.locate(offset) else {
+                continue;
+            };
+            let root = &self.root;
+            let inside = *self.inside.entry(file.name.clone()).or_insert_with(|| {
+                std::fs::canonicalize(&file.name).is_ok_and(|p| p.starts_with(root))
+            });
+            if !inside {
+                continue;
+            }
+            let line = file.text.as_bytes()[..local.min(file.text.len())]
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count()
+                + 1;
+            let entry = self.files.entry(file.name.clone()).or_default();
+            entry.0.insert(line);
+            if ran.contains(&offset) {
+                entry.1.insert(line);
+            }
+        }
+    }
+
+    /// Prints the table and applies `--fail-under`.
+    fn finish(&self) -> Result<(), CliError> {
+        let percent = |hit: usize, all: usize| {
+            if all == 0 {
+                100.0
+            } else {
+                hit as f64 * 100.0 / all as f64
+            }
+        };
+        println!("\ncoverage (lines that ran / lines with code):");
+        let (mut hit_total, mut all_total) = (0, 0);
+        let here = std::env::current_dir().ok();
+        for (name, (all, hit)) in &self.files {
+            let name = here
+                .as_ref()
+                .and_then(|h| Path::new(name).strip_prefix(h).ok())
+                .map_or(name.as_str(), |p| p.to_str().unwrap_or(name));
+            hit_total += hit.len();
+            all_total += all.len();
+            let missing: Vec<usize> = all.difference(hit).copied().collect();
+            let missing = if missing.is_empty() {
+                String::new()
+            } else {
+                format!("   missing {}", line_ranges(&missing))
+            };
+            println!(
+                "  {name}  {}/{}  {:.1}%{missing}",
+                hit.len(),
+                all.len(),
+                percent(hit.len(), all.len())
+            );
+        }
+        let total = percent(hit_total, all_total);
+        println!("  total  {hit_total}/{all_total}  {total:.1}%");
+        match self.fail_under {
+            Some(min) if total < min => failed(format!(
+                "coverage is {total:.1}%, below the {min}% that --fail-under asks for"
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// `[1, 2, 3, 7]` as `1-3, 7`.
+fn line_ranges(lines: &[usize]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let mut j = i;
+        while j + 1 < lines.len() && lines[j + 1] == lines[j] + 1 {
+            j += 1;
+        }
+        out.push(if i == j {
+            lines[i].to_string()
+        } else {
+            format!("{}-{}", lines[i], lines[j])
+        });
+        i = j + 1;
+    }
+    out.join(", ")
+}
+
+/// The `test_*.tvx` and `*_test.tvx` files under `dir`, skipping hidden folders, `target` and
+/// `node_modules`.
+fn collect_test_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                collect_test_files(&path, out);
+            }
+        } else if let Some(stem) = name.strip_suffix(".tvx")
+            && (stem.starts_with("test_") || stem.ends_with("_test"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// Runs the tests of one file and returns how many passed and failed.
+fn test_file(
+    file: &str,
+    filter: Option<&str>,
+    caps: telvax_runtime::Caps,
+    cov: &mut Option<Coverage>,
+) -> Result<(usize, usize), CliError> {
     let checked = check_project(file)?;
     let mut names: Vec<String> = checked
         .hir
         .fns
         .iter()
-        .filter(|f| f.name.starts_with("test_") && f.params.is_empty())
+        .filter(|f| f.name.starts_with("test_"))
         .filter(|f| filter.is_none_or(|n| f.name.contains(n)))
         .map(|f| f.name.clone())
         .collect();
     names.sort();
     if names.is_empty() {
-        return failed(
-            "no test functions found (a test is a function named `test_...` without arguments)",
-        );
+        return failed("no test functions found (a test is a function named `test_...`)");
     }
+    // Code that only supports the tests is not what the tests are measured on.
+    let points = cov.as_ref().map(|_| {
+        telvax_hir::coverage::points(&checked.hir, |name| {
+            ["test_", "fixture_", "teardown_", "cases_"]
+                .iter()
+                .any(|p| name.starts_with(p))
+        })
+    });
     let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
+    if points.is_some() {
+        interp.start_coverage();
+    }
     let mut failures = 0;
+    let mut total = 0;
     for name in &names {
-        match interp.call(name, vec![]) {
-            Ok(_) => println!("ok      {name}"),
+        let runs = match test_runs(&interp, name) {
+            Ok(runs) => runs,
             Err(e) => {
+                total += 1;
                 failures += 1;
                 println!("FAILED  {name}: {e}");
+                continue;
+            }
+        };
+        for (label, given) in runs {
+            total += 1;
+            let outcome = run_test(&interp, name, given);
+            interp.reset_mocks();
+            match outcome {
+                Ok(()) => println!("ok      {label}"),
+                Err(e) => {
+                    failures += 1;
+                    println!("FAILED  {label}: {e}");
+                }
             }
         }
     }
-    println!("{} passed, {failures} failed", names.len() - failures);
-    if failures > 0 { failed("") } else { Ok(()) }
+    if let (Some(cov), Some(points)) = (cov.as_mut(), points) {
+        cov.add(&checked.map, &points, &interp.covered());
+    }
+    Ok((total - failures, failures))
+}
+
+/// The runs of a test: one, or one per case when there is a `cases_<name>()` function, where the
+/// name is the test's without `test_`. A case gives the test's first parameters (a tuple gives
+/// several); the others are fixtures.
+fn test_runs(interp: &Interp, name: &str) -> Result<Vec<(String, Vec<Value>)>, String> {
+    let cases = format!("cases_{}", name.strip_prefix("test_").unwrap_or(name));
+    let Some((cases_params, ret)) = interp.signature(&cases) else {
+        return Ok(vec![(name.to_string(), Vec::new())]);
+    };
+    let telvax_hir::Ty::Vec(case_ty) = &ret else {
+        return Err(format!(
+            "`{cases}` must return a list of cases: write `fn {cases}() -> List[...]`"
+        ));
+    };
+    if !cases_params.is_empty() {
+        return Err(format!("`{cases}` takes no arguments"));
+    }
+    let given = match &**case_ty {
+        telvax_hir::Ty::Tuple(parts) => parts.clone(),
+        one => vec![one.clone()],
+    };
+    let params = interp.signature(name).map(|(p, _)| p).unwrap_or_default();
+    if given.len() > params.len() {
+        return Err(format!(
+            "a case of `{cases}` has {} value(s) but `{name}` takes {} parameter(s)",
+            given.len(),
+            params.len()
+        ));
+    }
+    for ((param, ty), case) in params.iter().zip(&given) {
+        if !ty.accepts(case) {
+            return Err(format!(
+                "`{name}` takes `{param}: {ty}` but the cases of `{cases}` give `{case}`"
+            ));
+        }
+    }
+    let Value::Vec(list) = interp
+        .call(&cases, Vec::new())
+        .map_err(|e| format!("`{cases}` failed: {e}"))?
+    else {
+        return Err(format!("`{cases}` must return a list"));
+    };
+    if list.is_empty() {
+        return Err(format!("`{cases}` has no cases"));
+    }
+    Ok(list
+        .snapshot()
+        .into_iter()
+        .map(|case| {
+            let values = match (&case, given.len()) {
+                (Value::Tuple(items), n) if n > 1 => items.to_vec(),
+                _ => vec![case.clone()],
+            };
+            (format!("{name}[{case}]"), values)
+        })
+        .collect())
+}
+
+/// Runs one test. Each parameter of the test that a case does not give is a fixture: `fn test_x(db: Db)` gets the value of
+/// `fixture_db()`, made again for every test. A `teardown_db(db)` function, if there is one, runs
+/// after the test whether it passed or not.
+fn run_test(interp: &Interp, name: &str, given: Vec<Value>) -> Result<(), String> {
+    let params = interp.signature(name).map(|(p, _)| p).unwrap_or_default();
+    let mut made: Vec<(String, Value)> = Vec::new();
+    let result = params
+        .iter()
+        .enumerate()
+        .map(|(i, (p, ty))| match given.get(i) {
+            Some(value) => Ok(value.clone()),
+            None => fixture(interp, p, Some(ty), &mut made, &mut Vec::new()),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|args| {
+            interp
+                .call(name, args)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+    let mut teardown = Ok(());
+    for (fixture_name, value) in made.iter().rev() {
+        let t = format!("teardown_{fixture_name}");
+        let Some((params, _)) = interp.signature(&t) else {
+            continue;
+        };
+        let done = if params.len() == 1 {
+            interp
+                .call(&t, vec![value.clone()])
+                .map(|_| ())
+                .map_err(|e| format!("`{t}` failed: {e}"))
+        } else {
+            Err(format!(
+                "`{t}` takes the fixture to clean up: write `fn {t}({fixture_name}: ...)`"
+            ))
+        };
+        if teardown.is_ok() {
+            teardown = done;
+        }
+    }
+    result.and(teardown)
+}
+
+/// The value of the fixture `name`, made once per test; `made` holds the ones already made, in order.
+fn fixture(
+    interp: &Interp,
+    name: &str,
+    wanted: Option<&telvax_hir::Ty>,
+    made: &mut Vec<(String, Value)>,
+    stack: &mut Vec<String>,
+) -> Result<Value, String> {
+    if let Some((_, v)) = made.iter().find(|(n, _)| n == name) {
+        return Ok(v.clone());
+    }
+    if stack.iter().any(|n| n == name) {
+        return Err(format!(
+            "fixture `{name}` needs itself ({} -> {name})",
+            stack.join(" -> ")
+        ));
+    }
+    let function = format!("fixture_{name}");
+    let Some((params, ret)) = interp.signature(&function) else {
+        return Err(format!(
+            "the test asks for `{name}` but there is no fixture: write `fn {function}() -> ...`"
+        ));
+    };
+    if let Some(ty) = wanted
+        && !ty.accepts(&ret)
+    {
+        return Err(format!(
+            "the test takes `{name}: {ty}` but `{function}` returns `{ret}`"
+        ));
+    }
+    stack.push(name.to_string());
+    let args = params
+        .iter()
+        .map(|(p, ty)| fixture(interp, p, Some(ty), made, stack))
+        .collect::<Result<Vec<_>, _>>()?;
+    stack.pop();
+    let value = interp
+        .call(&function, args)
+        .map_err(|e| format!("`{function}` failed: {e}"))?;
+    made.push((name.to_string(), value.clone()));
+    Ok(value)
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {

@@ -78,6 +78,7 @@ telvax doctor                                 # what this build can do (native b
 telvax check examples/rag-service.tvx         # parse + type-check, diagnostics point at the exact span
 telvax check --json examples/rag-service.tvx  # the same diagnostics as JSON, for CI and editors
 telvax run examples/basics/primes.tvx main    # interpret
+telvax test tests/ --coverage                 # run `test_*` functions with fixtures, cases and mocks; lines not run
 telvax serve examples/rag-service.tvx         # HTTP server on :8080 (offline model stand-ins)
 # curl -XPOST localhost:8080/v1/rag/query -H 'content-type: application/json' -d '{"query":"hello","top_k":3}'
 telvax serve examples/rag-service.tvx --live  # real Ollama / OpenAI / PostgreSQL+pgvector
@@ -123,6 +124,11 @@ specification to what exists, what was verified and how, and what is still open.
   of `std` run in the interpreter only.
 
 ## Testing
+
+Telvax programs have their own test runner: a function called `test_...` is a test, `fixture_...`
+functions give it parameters, `cases_...` runs it on several values, `std.test.mock` replaces a
+function, and `--coverage` and `--fail-under N` report and hold the lines the tests ran. The
+[tour](docs/guide/tour.md#tests) has the details. To test this repository:
 
 ```sh
 cargo test --workspace                       # no LLVM needed

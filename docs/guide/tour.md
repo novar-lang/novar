@@ -226,7 +226,7 @@ the program runs, not when it is compiled, and `std.io.print` and `std.time` are
 
 ## Tests
 
-A function called `test_...` without arguments is a test. `assert(cond)` and `assert_eq(a, b)` stop
+A function called `test_...` is a test. `assert(cond)` and `assert_eq(a, b)` stop
 it with a message when they fail:
 
 ```telvax
@@ -240,7 +240,103 @@ fn test_double():
 ```sh
 telvax test file.tvx           # run them all, exit 1 if one fails
 telvax test file.tvx double    # only the tests whose name contains `double`
+telvax test tests/             # every `test_*.tvx` and `*_test.tvx` file under a directory
+telvax test                    # the same, in this directory
 ```
+
+### Fixtures
+
+A test that takes parameters gets them from fixtures. `fn test_total(order: Order)` calls
+`fixture_order()` and passes the result; a fixture can take other fixtures the same way. Each test
+gets new values. A `teardown_order(order: Order)` function, if there is one, runs after the test,
+whether it passed or not.
+
+```telvax
+fn fixture_base() -> Int:
+    10
+
+fn fixture_total(base: Int) -> Int:
+    base * 2
+
+fn teardown_total(total: Int):
+    print(f"done with {total}")
+
+fn test_total(base: Int, total: Int):
+    assert_eq(total, base * 2)
+```
+
+A parameter with no `fixture_...` function, or a fixture that returns another type, fails the test
+and says what to write.
+
+### Cases
+
+To run one test on several values, write a `cases_...` function with the name of the test without
+`test_`. It returns a list; the test runs once for each item. A tuple gives the first parameters of
+the test, and the parameters left over are still fixtures.
+
+```telvax
+fn cases_double() -> List[(Int, Int)]:
+    [(1, 2), (2, 4), (3, 6)]
+
+fn test_double(x: Int, want: Int):
+    assert_eq(double(x), want)
+```
+
+Each run is listed as `test_double[(2, 4)]`. A `cases_...` function that is empty, or whose items do
+not fit the parameters, fails the test and says why.
+
+### Mocks
+
+`std.test.mock(target, replacement)` makes a test call another function in place of one. The target is
+one of your functions, written without quotes, or a std function by its path in text. A function
+target must have the same type as its replacement; a std target is checked when the test runs.
+`std.test.calls(target)` says how many times the replacement was called. Every mock is removed when
+the test ends.
+
+```telvax
+fn price(item: Text) -> Int:
+    100
+
+fn total(item: Text) -> Int:
+    price(item) * 2
+
+fn fake_read(path: Text) -> Result[Text, Text]:
+    Ok("from the test")
+
+fn test_total():
+    std.test.mock(price, item => 7)
+    assert_eq(total("a"), 14)
+    assert_eq(std.test.calls(price), 1)
+
+fn test_read():
+    std.test.mock("std.fs.read", fake_read)
+    assert_eq(std.fs.read("any.txt"), Ok("from the test"))
+```
+
+A replacement cannot call the function it replaces. Calls through methods (`x.len()`) cannot be
+mocked, and `std.test.*` itself cannot.
+
+### Coverage
+
+`--coverage` lists, for each file of the project, the lines with code and how many of them the tests
+ran, and the numbers of the lines that did not run. `--fail-under 90` also fails the run, with exit
+code 1, when fewer than 90% of the lines ran, so a pipeline can hold the line.
+
+```sh
+telvax test tests/ --coverage
+telvax test tests/ --fail-under 90
+```
+
+```text
+coverage (lines that ran / lines with code):
+  src/price.tvx  18/20  90.0%   missing 14-15
+  total  18/20  90.0%
+```
+
+A line counts when it has a statement, the last expression of a block or the body of a `case`. The
+`test_`, `fixture_`, `teardown_` and `cases_` functions are not counted, nor are files outside the
+project (the directory with `telvax.toml`, or the one you test). The count is of lines, not of
+branches: a line with an `if` and its two results written on it counts once.
 
 ## Macros
 

@@ -39,7 +39,12 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
         }
     }
     for f in &program.fns {
-        let exempt = f.is_pub || f.name == "main" || f.endpoint.is_some();
+        let exempt = f.is_pub
+            || f.name == "main"
+            || f.endpoint.is_some()
+            || ["test_", "fixture_", "teardown_", "cases_"]
+                .iter()
+                .any(|p| f.name.starts_with(p));
         if !exempt && !l.called.contains(&f.name) {
             out.push(Diagnostic::warning(
                 f.name_span.clone(),

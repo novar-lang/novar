@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+* **Coverage in `telvax test`:** `--coverage` prints, for each file of the project, the lines with code that
+  the tests ran and the ones they did not; `--fail-under N` fails the run when fewer than N% ran. It
+  counts lines, not branches, and leaves out the `test_`, `fixture_`, `teardown_` and `cases_` functions.
+* **Mocks in `telvax test`:** `std.test.mock(price, fake_price)` or `std.test.mock("std.fs.read", fake_read)`
+  replaces a function until the test ends; `std.test.calls(target)` counts the calls. A replacement for
+  one of your functions must have its type.
+* **Cases in `telvax test`:** `fn cases_double() -> List[(Int, Int)]` runs `test_double(x, want)` once for
+  each item and lists each run as `test_double[(2, 4)]`. A tuple fills the first parameters; the rest are
+  fixtures. An empty list or items of the wrong type fail the test with a message.
+* **Fixtures in `telvax test`:** a test can take parameters; `fn test_x(db: Db)` gets `fixture_db()`, made
+  again for each test, and `teardown_db(db)` runs after it even when the test fails. Fixtures can take
+  other fixtures. `telvax lint` no longer calls `test_`, `fixture_` and `teardown_` functions unused.
+* **`telvax test` takes a directory:** it runs every `test_*.tvx` and `*_test.tvx` file under it (no
+  path means this directory), prints each file, and ends with one total. Files with no tests are skipped.
 * **`tvpm new` writes valid Telvax, and `tvpm publish` checks first:** the files `new` and `init` create
   used `def` and `str` and failed `telvax check`; they now use `fn` and `Text`. `publish` type-checks the
   package (with its dependencies) and refuses to publish one that has errors, showing them. `tvpm check`,
