@@ -15,7 +15,7 @@ const USAGE: &str = "\
 usage:
   telvax check [--json] [file.tvx...]                       no file: the package in this directory
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
-  telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
+  telvax fmt [--check] [--diff] [file.tvx|dir]...             format in place (`-` reads stdin; no path: this directory)
   telvax test [file.tvx|dir] [name] [--allow list] [--coverage] [--fail-under N]
                                                             run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
   telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
@@ -595,25 +595,14 @@ fn line_ranges(lines: &[usize]) -> String {
     out.join(", ")
 }
 
-/// The `test_*.tvx` and `*_test.tvx` files under `dir`, skipping hidden folders, `target` and
-/// `node_modules`.
+/// The `test_*.tvx` and `*_test.tvx` files under `dir`.
 fn collect_test_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
-            if !name.starts_with('.') && name != "target" && name != "node_modules" {
-                collect_test_files(&path, out);
-            }
-        } else if let Some(stem) = name.strip_suffix(".tvx")
-            && (stem.starts_with("test_") || stem.ends_with("_test"))
-        {
-            out.push(path);
-        }
-    }
+    collect_tvx_files(dir, out);
+    out.retain(|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.starts_with("test_") || s.ends_with("_test"))
+    });
 }
 
 /// Runs the tests of one file and returns how many passed and failed.
@@ -853,12 +842,36 @@ fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
     Ok(())
 }
 
-/// `telvax fmt [--check] <file>...`: rewrites files in place, or only reports with `--check`.
+/// `telvax fmt [--check] [--diff] [path...]`: rewrites files in place, or only reports with
+/// `--check`, or shows what would change with `--diff`. A directory means every `.tvx` file under it;
+/// no path means this directory.
 fn fmt(args: &[&str]) -> Result<(), CliError> {
     let check = args.contains(&"--check");
-    let files: Vec<&str> = args.iter().copied().filter(|a| *a != "--check").collect();
-    if files.is_empty() {
-        return Err(CliError::Usage);
+    let diff = args.contains(&"--diff");
+    let mut paths: Vec<&str> = args
+        .iter()
+        .copied()
+        .filter(|a| *a != "--check" && *a != "--diff")
+        .collect();
+    if let Some(flag) = paths.iter().find(|a| a.starts_with("--")) {
+        return failed(format!("unknown option `{flag}` for `telvax fmt`"));
+    }
+    if paths.is_empty() {
+        paths.push(".");
+    }
+    let mut files: Vec<String> = Vec::new();
+    for path in paths {
+        if path != "-" && Path::new(path).is_dir() {
+            let mut found = Vec::new();
+            collect_tvx_files(Path::new(path), &mut found);
+            if found.is_empty() {
+                return failed(format!("no `.tvx` files in `{path}`"));
+            }
+            found.sort();
+            files.extend(found.iter().map(|f| f.to_string_lossy().into_owned()));
+        } else {
+            files.push(path.to_string());
+        }
     }
     let mut unformatted = 0;
     for file in files {
@@ -869,17 +882,20 @@ fn fmt(args: &[&str]) -> Result<(), CliError> {
             print!("{}", telvax_fmt::format(&src).or_else(failed)?);
             continue;
         }
-        let src = std::fs::read_to_string(file)
+        let src = std::fs::read_to_string(&file)
             .or_else(|e| failed(format!("cannot read `{file}`: {e}")))?;
         let formatted = telvax_fmt::format(&src).or_else(|e| failed(format!("`{file}`: {e}")))?;
         if formatted == src {
             continue;
         }
-        if check {
+        if diff {
+            println!("--- {file}\n{}", telvax_fmt::diff(&src, &formatted));
+            unformatted += 1;
+        } else if check {
             println!("would reformat {file}");
             unformatted += 1;
         } else {
-            std::fs::write(file, &formatted)
+            std::fs::write(&file, &formatted)
                 .or_else(|e| failed(format!("cannot write `{file}`: {e}")))?;
             println!("formatted {file}");
         }
@@ -888,6 +904,24 @@ fn fmt(args: &[&str]) -> Result<(), CliError> {
         return failed(format!("{unformatted} file(s) need formatting"));
     }
     Ok(())
+}
+
+/// Every `.tvx` file under `dir`, skipping hidden folders, `target`, `node_modules` and `.tvpm`.
+fn collect_tvx_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                collect_tvx_files(&path, out);
+            }
+        } else if name.ends_with(".tvx") {
+            out.push(path);
+        }
+    }
 }
 
 /// `telvax lint <file> [--deny-warnings]`: type-checks, then reports unused code.

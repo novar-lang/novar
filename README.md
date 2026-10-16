@@ -79,6 +79,7 @@ telvax check examples/rag-service.tvx         # parse + type-check, diagnostics 
 telvax check --json examples/rag-service.tvx  # the same diagnostics as JSON, for CI and editors
 telvax run examples/basics/primes.tvx main    # interpret
 telvax test tests/ --coverage                 # run `test_*` functions with fixtures, cases and mocks; lines not run
+telvax fmt --check                            # every .tvx file under this directory (--diff shows the changes)
 telvax serve examples/rag-service.tvx         # HTTP server on :8080 (offline model stand-ins)
 # curl -XPOST localhost:8080/v1/rag/query -H 'content-type: application/json' -d '{"query":"hello","top_k":3}'
 telvax serve examples/rag-service.tvx --live  # real Ollama / OpenAI / PostgreSQL+pgvector

@@ -370,12 +370,15 @@ Macros run in the interpreter, as `assert` does; the native backend does not com
 
 ```sh
 telvax fmt file.tvx            # rewrite in place
-telvax fmt --check file.tvx    # list files that would change (exit 1), for CI
+telvax fmt src/ tests/         # every `.tvx` file under the directories (no path: this directory)
+telvax fmt --check             # list files that would change (exit 1), for CI
+telvax fmt --diff src/         # show the lines that would change, write nothing (exit 1)
 telvax lint file.tvx           # unused variables and unused private functions
 ```
 
 Indentation is part of the syntax, so `telvax fmt` never moves a line between blocks: it sets four
-spaces per level, spaces inside a line, continuation lines and blank lines.
+spaces per level, spaces inside a line, continuation lines and blank lines. Directories skip hidden
+folders, `target`, `node_modules` and `.tvpm`.
 
 The language server formats documents too, so VS Code can format on save. It also finds all
 references to a variable or function and renames them (a rename is refused when the new name

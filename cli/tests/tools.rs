@@ -39,6 +39,52 @@ fn fmt_rewrites_in_place_and_check_reports() {
 }
 
 #[test]
+fn fmt_takes_directories_and_shows_a_diff() {
+    let dir = std::env::temp_dir().join(format!("telvax-tools-{}-fmtdir", std::process::id()));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::create_dir_all(dir.join("target")).unwrap();
+    let messy = "fn main() -> i32:\n  let x=1\n  x+2\n";
+    let tidy = "fn main() -> i32:\n    let x = 1\n    x + 2\n";
+    std::fs::write(dir.join("a.tvx"), messy).unwrap();
+    std::fs::write(dir.join("sub").join("b.tvx"), messy).unwrap();
+    std::fs::write(dir.join("target").join("c.tvx"), messy).unwrap();
+    let path = dir.to_str().unwrap();
+    let (ok, out, _) = run(&["fmt", "--diff", path]);
+    assert!(!ok);
+    assert!(
+        out.contains("-  let x=1") && out.contains("+    let x = 1"),
+        "{out}"
+    );
+    assert!(
+        out.contains("a.tvx") && out.contains("b.tvx") && !out.contains("c.tvx"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(dir.join("a.tvx")).unwrap(), messy);
+    let (ok, out, _) = run(&["fmt", "--check", path]);
+    assert!(!ok && out.contains("would reformat"), "{out}");
+    let (ok, _, err) = run(&["fmt", path]);
+    assert!(ok, "{err}");
+    assert_eq!(std::fs::read_to_string(dir.join("a.tvx")).unwrap(), tidy);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("sub").join("b.tvx")).unwrap(),
+        tidy
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("target").join("c.tvx")).unwrap(),
+        messy
+    );
+    let out = Command::new(TELVAX)
+        .args(["fmt", "--check"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "no path means this directory");
+    let (ok, _, err) = run(&["fmt", "--wide", path]);
+    assert!(!ok && err.contains("unknown option `--wide`"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn fmt_refuses_broken_source() {
     let file = scratch("broken", "fn main():\n    let s = \"open\n");
     let (ok, _, err) = run(&["fmt", file.to_str().unwrap()]);

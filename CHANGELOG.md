@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **`telvax fmt` takes directories and shows a diff:** a directory means every `.tvx` file under it (hidden
+  folders, `target`, `node_modules` and `.tvpm` are skipped), and no path means this directory.
+  `--diff` prints the lines that would change as `@@ line N @@` blocks and writes nothing; like `--check`,
+  it exits 1 when something would change. An unknown option is an error.
 * **Coverage in `telvax test`:** `--coverage` prints, for each file of the project, the lines with code that
   the tests ran and the ones they did not; `--fail-under N` fails the run when fewer than N% ran. It
   counts lines, not branches, and leaves out the `test_`, `fixture_`, `teardown_` and `cases_` functions.
