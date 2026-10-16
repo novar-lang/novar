@@ -30,6 +30,7 @@ telvax_server = { path = "../server" }
 serde_json = "1.0.154"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "net", "macros", "signal"] }
 telvax_lsp = { path = "../tools/lsp" }
+telvax_dap = { path = "../tools/dap" }
 telvax_pkg = { path = "../tools/package-manager" }
 telvax_modules = { path = "../compiler/modules" }
 serde = { version = "1.0.229", features = ["derive"] }

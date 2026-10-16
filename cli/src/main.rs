@@ -24,6 +24,7 @@ usage:
   telvax profile <file.tvx> [function] [args...] [--allow list] [--top N] [--json f] [--collapsed f] [--speedscope f]
                                                             time per function, line and std operation, and memory
   telvax doctor                                             what this build can do and how it is set up
+  telvax dap                                                debug adapter over stdio (breakpoints, stepping, variables)
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
   telvax serve <file.tvx> [--port N] [--host H] [--seed docs.jsonl] [--live] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
@@ -139,6 +140,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         ["worker", rest @ ..] => worker(rest),
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
         ["profile", rest @ ..] => profile::run(rest),
+        ["dap"] => telvax_dap::run_stdio().or_else(|e| failed(e.to_string())),
         ["lsp"] => telvax_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
         ["build", file, rest @ ..] => native::build(file, rest),

@@ -1,0 +1,20 @@
+[package]
+name = "telvax_dap"
+description = "Telvax: debug adapter (breakpoints, stepping, variables) for editors that speak the Debug Adapter Protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+telvax_diagnostics = { path = "../../compiler/diagnostics" }
+telvax_hir = { path = "../../compiler/semantic" }
+telvax_modules = { path = "../../compiler/modules" }
+telvax_pkg = { path = "../package-manager" }
+telvax_runtime = { path = "../../runtime", default-features = false }
+serde_json = "1"

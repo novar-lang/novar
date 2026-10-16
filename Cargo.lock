@@ -3645,6 +3645,7 @@ dependencies = [
  "telvax_accel",
  "telvax_cluster",
  "telvax_codegen",
+ "telvax_dap",
  "telvax_diagnostics",
  "telvax_fmt",
  "telvax_hir",
@@ -3685,6 +3686,18 @@ dependencies = [
  "telvax_hir",
  "telvax_mlir",
  "telvax_parser",
+ "telvax_runtime",
+]
+
+[[package]]
+name = "telvax_dap"
+version = "0.0.5"
+dependencies = [
+ "serde_json",
+ "telvax_diagnostics",
+ "telvax_hir",
+ "telvax_modules",
+ "telvax_pkg",
  "telvax_runtime",
 ]
 
