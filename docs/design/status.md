@@ -12,6 +12,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 | `melior` / `inkwell` | done, against LLVM/MLIR **22** (the specification asks for 18+) |
 | `arrow` + `datafusion` 52+ | done: Arrow 59, DataFusion 55 |
 | `pyo3` 0.21+ | done: PyO3 0.29 |
+| Test runner for `.tvx` programs | done and tested: `telvax test` runs `test_*` functions in a file or a directory, with fixtures (`fixture_*`, `teardown_*`), cases (`cases_*`), mocks (`std.test.mock`) and line coverage (`--coverage`, `--fail-under`). Coverage counts lines, not branches; mocks do not reach method calls (`x.len()`); no parallel runs or test timeouts |
 | Workspace crates | all present: `telvax_lexer`, `_parser`, `_ast`, `_hir` (`compiler/semantic`), `_mlir` (`compiler/ir`), `_codegen`, `_runtime`, `_server`, `_cli`; plus `_diagnostics`, `_modules`, `_pkg`, `_lsp`, `_cluster`, `_wasm`, `_bench` |
 
 ## 2. Frontend
