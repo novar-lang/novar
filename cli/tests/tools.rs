@@ -258,6 +258,102 @@ fn test_empty(n: Int):
 }
 
 #[test]
+fn mock_replaces_a_function_for_one_test() {
+    let src = r#"fn price(item: Text) -> Int:
+    100
+
+fn total(item: Text) -> Int:
+    price(item) * 2
+
+fn config() -> Text:
+    match std.fs.read("/definitely/missing.txt"):
+        case Ok(text):
+            text
+        case Err(_):
+            "default"
+
+fn fake_price(item: Text) -> Int:
+    7
+
+fn fake_read(path: Text) -> Result[Text, Text]:
+    Ok("from mock")
+
+fn test_user_function():
+    std.test.mock(price, fake_price)
+    assert_eq(total("a"), 14)
+    assert_eq(total("b"), 14)
+    assert_eq(std.test.calls(price), 2)
+
+fn test_closure():
+    std.test.mock(price, item => 1)
+    assert_eq(total("a"), 2)
+
+fn test_std_function():
+    assert_eq(config(), "default")
+    std.test.mock("std.fs.read", fake_read)
+    assert_eq(config(), "from mock")
+
+fn test_zz_back_to_the_real_one():
+    assert_eq(total("a"), 200)
+    assert_eq(config(), "default")
+"#;
+    let file = scratch("mocks", src);
+    let (ok, out, err) = run(&["test", file.to_str().unwrap()]);
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("4 passed, 0 failed"), "{out}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn mock_checks_what_it_is_given() {
+    let src = r#"fn price(item: Text) -> Int:
+    100
+
+fn wrong(item: Int) -> Int:
+    1
+
+fn test_wrong_type():
+    std.test.mock(price, wrong)
+
+fn test_not_a_std_function():
+    std.test.mock("std.nowhere.nothing", price)
+
+fn test_calls_without_a_mock():
+    std.test.calls(price)
+"#;
+    let file = scratch("badmocks", src);
+    let (ok, out, err) = run(&["test", file.to_str().unwrap()]);
+    assert!(!ok);
+    assert!(
+        err.contains("the replacement must have the type of the function it replaces"),
+        "{out}{err}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+
+    let src = r#"fn price(item: Text) -> Int:
+    100
+
+fn test_not_a_std_function():
+    std.test.mock("std.nowhere.nothing", price)
+
+fn test_calls_without_a_mock():
+    assert_eq(std.test.calls(price), 0)
+"#;
+    let file = scratch("badmocks2", src);
+    let (ok, out, _) = run(&["test", file.to_str().unwrap()]);
+    assert!(!ok);
+    assert!(
+        out.contains("`std.nowhere.nothing` is not a std function"),
+        "{out}"
+    );
+    assert!(
+        out.contains("`price` is not mocked: call `std.test.mock` first"),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
 fn macros_quote_their_argument_and_dbg_gives_the_value_back() {
     let src = "fn pick(n: Int) -> Int:\n    if n > 0:\n        n\n    else:\n        todo!()\n\nfn test_dbg():\n    let x = dbg!(pick(4))\n    assert!(x == 4)\n\nfn test_quote():\n    let x = 1\n    assert!(x > 3)\n\nfn test_message():\n    assert!(1 > 3, \"one is small\")\n\nfn test_todo():\n    pick(0)\n\nfn test_panic():\n    panic!(\"boom\")\n";
     let file = scratch("macros", src);

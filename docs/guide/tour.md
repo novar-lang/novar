@@ -285,6 +285,37 @@ fn test_double(x: Int, want: Int):
 Each run is listed as `test_double[(2, 4)]`. A `cases_...` function that is empty, or whose items do
 not fit the parameters, fails the test and says why.
 
+### Mocks
+
+`std.test.mock(target, replacement)` makes a test call another function in place of one. The target is
+one of your functions, written without quotes, or a std function by its path in text. A function
+target must have the same type as its replacement; a std target is checked when the test runs.
+`std.test.calls(target)` says how many times the replacement was called. Every mock is removed when
+the test ends.
+
+```telvax
+fn price(item: Text) -> Int:
+    100
+
+fn total(item: Text) -> Int:
+    price(item) * 2
+
+fn fake_read(path: Text) -> Result[Text, Text]:
+    Ok("from the test")
+
+fn test_total():
+    std.test.mock(price, item => 7)
+    assert_eq(total("a"), 14)
+    assert_eq(std.test.calls(price), 1)
+
+fn test_read():
+    std.test.mock("std.fs.read", fake_read)
+    assert_eq(std.fs.read("any.txt"), Ok("from the test"))
+```
+
+A replacement cannot call the function it replaces. Calls through methods (`x.len()`) cannot be
+mocked, and `std.test.*` itself cannot.
+
 ## Macros
 
 A macro is written `name!(...)`. The compiler has five and you cannot define more. Each one is
