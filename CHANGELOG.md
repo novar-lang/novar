@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Fixtures in `telvax test`:** a test can take parameters; `fn test_x(db: Db)` gets `fixture_db()`, made
+  again for each test, and `teardown_db(db)` runs after it even when the test fails. Fixtures can take
+  other fixtures. `telvax lint` no longer calls `test_`, `fixture_` and `teardown_` functions unused.
 * **`telvax test` takes a directory:** it runs every `test_*.tvx` and `*_test.tvx` file under it (no
   path means this directory), prints each file, and ends with one total. Files with no tests are skipped.
 * **`tvpm new` writes valid Telvax, and `tvpm publish` checks first:** the files `new` and `init` create
