@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Coverage in `telvax test`:** `--coverage` prints, for each file of the project, the lines with code that
+  the tests ran and the ones they did not; `--fail-under N` fails the run when fewer than N% ran. It
+  counts lines, not branches, and leaves out the `test_`, `fixture_`, `teardown_` and `cases_` functions.
 * **Mocks in `telvax test`:** `std.test.mock(price, fake_price)` or `std.test.mock("std.fs.read", fake_read)`
   replaces a function until the test ends; `std.test.calls(target)` counts the calls. A replacement for
   one of your functions must have its type.
