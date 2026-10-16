@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **References and rename across files:** find references and rename now follow `import` and
+  `from .. import` into the other files of the project, for functions, types, enums, traits, variants,
+  fields and methods. One rename edits every file that uses the name; a name imported `as` another keeps
+  that alias. Files open in the editor count with their unsaved text. A rename is refused when a file
+  has a syntax error, when the name belongs to a dependency, or when the project would have more errors
+  after it (a collision). Go to definition on an imported type or variant opens the file that declares it.
 * **Go to definition, references and rename for more than variables:** they now work on `type`s, `enum`s,
   `trait`s and aliases (in annotations, `impl`, constructions and patterns), enum variants
   (`Shape.Circle`, `case Shape.Circle(r)`), fields (`p.x`, `Point(x: 1)`, `Point(x: a)` patterns), methods

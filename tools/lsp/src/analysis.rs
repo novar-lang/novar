@@ -12,11 +12,20 @@ use telvax_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
 use crate::position::LineIndex;
 
 mod completion;
-mod names;
+pub(crate) mod names;
 
-use names::{Edit, Key, Names};
+pub use names::Key;
+use names::{Context, Edit, Names};
+use telvax_modules::Files;
 
 pub type Span = Range<usize>;
+
+/// A function or a type that other files may use, and the file that declares it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemRef {
+    pub key: Key,
+    pub home: String,
+}
 
 #[derive(Debug, Clone)]
 enum Target {
@@ -59,6 +68,8 @@ pub struct Snapshot {
     names: Names,
     /// Where the document lives, for analysing a changed copy of it the same way.
     path: Option<PathBuf>,
+    /// The document's name in the source map: its path, or `<buffer>`.
+    file: String,
     /// The program came from an earlier version of the text because the current one could not
     /// be analysed (typically mid-edit). Types are still useful for completion, positions are not.
     pub stale: bool,
@@ -130,6 +141,19 @@ const PRIMS: &[&str] = &[
     "f64",
 ];
 
+/// `Err` says why `name` cannot be the name of a variable, function, type or field.
+pub fn check_name(name: &str) -> Result<(), String> {
+    let valid = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid || KEYWORDS.contains(&name) || PRIMS.contains(&name) {
+        return Err(format!("`{name}` is not a valid name"));
+    }
+    Ok(())
+}
+
 pub fn signature(f: &hir::FnDef) -> String {
     let params: Vec<String> = f
         .params
@@ -199,6 +223,12 @@ impl Snapshot {
     /// Analyses the document at `path`, loading the modules it imports and the dependencies of its
     /// project. Only diagnostics located in this document are kept.
     pub fn analyze_in(text: String, path: Option<&Path>) -> Snapshot {
+        Snapshot::analyze_with(text, path, &telvax_modules::OsFiles)
+    }
+
+    /// Like [`Snapshot::analyze_in`], reading the other modules through `files` (a rename checks
+    /// the files as they will be, before they are saved).
+    pub fn analyze_with(text: String, path: Option<&Path>, files: &dyn Files) -> Snapshot {
         let index = LineIndex::new(&text);
         #[cfg(feature = "project")]
         let deps = path
@@ -208,7 +238,8 @@ impl Snapshot {
         #[cfg(not(feature = "project"))]
         let deps = Vec::new();
         let name = path.map_or("<buffer>".to_string(), |p| p.display().to_string());
-        let loaded = telvax_modules::load_text(&name, &text, path.and_then(Path::parent), &deps);
+        let loaded =
+            telvax_modules::load_in(files, &name, &text, path.and_then(Path::parent), &deps);
         let mut diagnostics = loaded.diagnostics.clone();
         let mut hir = None;
         if loaded.entry_parsed {
@@ -230,6 +261,7 @@ impl Snapshot {
             decls: completion::Decls::of(&loaded.program),
             names: Names::default(),
             path: path.map(Path::to_path_buf),
+            file: name.clone(),
             stale: false,
         };
         if let Some(h) = &hir {
@@ -244,16 +276,120 @@ impl Snapshot {
                 .map(|n| ((n.span.start, n.span.end), n.ty.clone()))
                 .collect()
         });
-        snap.names = Names::of(&snap.text, types.as_ref());
+        let (ast, errors) = telvax_parser::parse(&snap.text);
+        let foreign = ast
+            .as_ref()
+            .map(|a| crate::workspace::imports(a, path, &deps))
+            .unwrap_or_default();
+        let demangle = |n: &str| snap.map.demangle(n);
+        snap.names = Names::of(
+            ast.as_ref(),
+            errors.is_empty(),
+            &Context {
+                file: &name,
+                types: types.as_ref(),
+                foreign: &foreign,
+                demangle: &demangle,
+            },
+        );
         snap.hir = hir;
         snap
     }
 
     /// Where `offset` is defined, possibly in another file: `(file name, byte range in that file)`.
     pub fn definition_location(&self, offset: usize) -> Option<(String, Span)> {
+        if let Some((key, _)) = self.names.key_at(offset) {
+            let home = self.names.home_of(key);
+            if home != self.file {
+                return crate::workspace::declaration(&home, key).map(|span| (home, span));
+            }
+            return self.names.decl(key).map(|span| (home, span.clone()));
+        }
         let span = self.definition(offset)?;
         let (file, local) = self.map.locate(span.start)?;
         Some((file.name.clone(), local..local + span.len()))
+    }
+
+    /// The name of the document in the source map.
+    pub fn file(&self) -> &str {
+        &self.file
+    }
+
+    /// The function or type under `offset` that other files may use, with the span of its name.
+    pub fn item_at(&self, offset: usize) -> Option<(ItemRef, Span)> {
+        if let Some((key, span)) = self.names.key_at(offset) {
+            // Globals cannot be imported: they are searched for in this document only.
+            if matches!(key, Key::Global(_)) {
+                return None;
+            }
+            let item = ItemRef {
+                key: key.clone(),
+                home: self.names.home_of(key),
+            };
+            return Some((item, span.clone()));
+        }
+        let node = self.node_at(offset)?;
+        match &node.target {
+            Target::Fn(m) => self.fn_item(m).map(|i| (i, node.span.clone())),
+            _ => None,
+        }
+    }
+
+    /// The function the program calls `mangled`, as a file and a name.
+    fn fn_item(&self, mangled: &str) -> Option<ItemRef> {
+        let own = Key::Fn(mangled.to_string());
+        if self.names.decl(&own).is_some() {
+            return Some(ItemRef {
+                key: own,
+                home: self.file.clone(),
+            });
+        }
+        let f = self.program()?.fns.iter().find(|f| f.name == mangled)?;
+        let (file, local) = self.map.locate(f.name_span.start)?;
+        let name = file.text.get(local..local + f.name_span.len())?;
+        // A method or a closure lowered to a function has a name that is not the written one.
+        (mangled == name || mangled.ends_with(&format!("__{name}"))).then(|| ItemRef {
+            key: Key::Fn(name.to_string()),
+            home: file.name.clone(),
+        })
+    }
+
+    /// Where `item` is declared and used in this document (empty when it is not mentioned).
+    pub fn item_spans(&self, item: &ItemRef) -> (Option<Span>, Vec<Span>) {
+        let (decl, mut spans) = if self.names.home_of(&item.key) == item.home {
+            self.names.spans(&item.key)
+        } else {
+            (None, Vec::new())
+        };
+        if matches!(item.key, Key::Fn(_)) {
+            let mut seen: HashMap<&str, bool> = HashMap::new();
+            for n in &self.nodes {
+                if let Target::Fn(m) = &n.target {
+                    let is_it = *seen
+                        .entry(m)
+                        .or_insert_with(|| self.fn_item(m).as_ref() == Some(item));
+                    if is_it {
+                        spans.push(n.span.clone());
+                    }
+                }
+            }
+            spans.sort_by_key(|s| s.start);
+            spans.dedup();
+        }
+        (decl, spans)
+    }
+
+    /// How many errors the document has.
+    pub fn error_count(&self) -> usize {
+        self.diagnostics.iter().filter(|d| d.is_error()).count()
+    }
+
+    /// The document is syntactically valid and its types are known.
+    pub fn is_exact(&self) -> (bool, bool) {
+        (
+            self.names.syntax_ok && !self.stale,
+            self.names.typed && !self.stale,
+        )
     }
 
     /// The smallest indexed expression containing `offset`.
@@ -453,16 +589,7 @@ impl Snapshot {
     /// renamed program must analyse with no more errors than before, which catches a new name
     /// that collides with another one in scope.
     pub fn rename(&self, offset: usize, new_name: &str) -> Result<Vec<(Span, String)>, String> {
-        let valid = new_name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            && new_name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_');
-        if !valid || KEYWORDS.contains(&new_name) || PRIMS.contains(&new_name) {
-            return Err(format!("`{new_name}` is not a valid name"));
-        }
+        check_name(new_name)?;
         let found = self.occurrences(offset)?;
         if found.name == "main" {
             return Err("`main` is the entry point and cannot be renamed".into());

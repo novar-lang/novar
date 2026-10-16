@@ -402,8 +402,8 @@ type the code expects comes first.
 
 The language server formats documents too, so VS Code can format on save. It also finds all
 references to a variable, function, global, type, enum variant, field or method and renames them (a
-rename is refused when the new name would collide with another one in scope, when the file has a syntax
-error, or when the symbol lives in another file).
+rename is refused when the new name would collide with another one in scope, when a file has a syntax
+error, or when the name belongs to a dependency). They follow imports into the other files of the project.
 
 ## Strings and lists
 

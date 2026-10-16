@@ -8,5 +8,6 @@
 pub mod analysis;
 pub mod position;
 pub mod server;
+pub mod workspace;
 
 pub use server::run_stdio;
