@@ -268,6 +268,23 @@ fn test_total(base: Int, total: Int):
 A parameter with no `fixture_...` function, or a fixture that returns another type, fails the test
 and says what to write.
 
+### Cases
+
+To run one test on several values, write a `cases_...` function with the name of the test without
+`test_`. It returns a list; the test runs once for each item. A tuple gives the first parameters of
+the test, and the parameters left over are still fixtures.
+
+```telvax
+fn cases_double() -> List[(Int, Int)]:
+    [(1, 2), (2, 4), (3, 6)]
+
+fn test_double(x: Int, want: Int):
+    assert_eq(double(x), want)
+```
+
+Each run is listed as `test_double[(2, 4)]`. A `cases_...` function that is empty, or whose items do
+not fit the parameters, fails the test and says why.
+
 ## Macros
 
 A macro is written `name!(...)`. The compiler has five and you cannot define more. Each one is

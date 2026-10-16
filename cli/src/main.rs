@@ -460,27 +460,101 @@ fn test_file(
     }
     let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
     let mut failures = 0;
+    let mut total = 0;
     for name in &names {
-        match run_test(&interp, name) {
-            Ok(()) => println!("ok      {name}"),
+        let runs = match test_runs(&interp, name) {
+            Ok(runs) => runs,
             Err(e) => {
+                total += 1;
                 failures += 1;
                 println!("FAILED  {name}: {e}");
+                continue;
+            }
+        };
+        for (label, given) in runs {
+            total += 1;
+            match run_test(&interp, name, given) {
+                Ok(()) => println!("ok      {label}"),
+                Err(e) => {
+                    failures += 1;
+                    println!("FAILED  {label}: {e}");
+                }
             }
         }
     }
-    Ok((names.len() - failures, failures))
+    Ok((total - failures, failures))
 }
 
-/// Runs one test. Each parameter of the test is a fixture: `fn test_x(db: Db)` gets the value of
+/// The runs of a test: one, or one per case when there is a `cases_<name>()` function, where the
+/// name is the test's without `test_`. A case gives the test's first parameters (a tuple gives
+/// several); the others are fixtures.
+fn test_runs(interp: &Interp, name: &str) -> Result<Vec<(String, Vec<Value>)>, String> {
+    let cases = format!("cases_{}", name.strip_prefix("test_").unwrap_or(name));
+    let Some((cases_params, ret)) = interp.signature(&cases) else {
+        return Ok(vec![(name.to_string(), Vec::new())]);
+    };
+    let telvax_hir::Ty::Vec(case_ty) = &ret else {
+        return Err(format!(
+            "`{cases}` must return a list of cases: write `fn {cases}() -> List[...]`"
+        ));
+    };
+    if !cases_params.is_empty() {
+        return Err(format!("`{cases}` takes no arguments"));
+    }
+    let given = match &**case_ty {
+        telvax_hir::Ty::Tuple(parts) => parts.clone(),
+        one => vec![one.clone()],
+    };
+    let params = interp.signature(name).map(|(p, _)| p).unwrap_or_default();
+    if given.len() > params.len() {
+        return Err(format!(
+            "a case of `{cases}` has {} value(s) but `{name}` takes {} parameter(s)",
+            given.len(),
+            params.len()
+        ));
+    }
+    for ((param, ty), case) in params.iter().zip(&given) {
+        if !ty.accepts(case) {
+            return Err(format!(
+                "`{name}` takes `{param}: {ty}` but the cases of `{cases}` give `{case}`"
+            ));
+        }
+    }
+    let Value::Vec(list) = interp
+        .call(&cases, Vec::new())
+        .map_err(|e| format!("`{cases}` failed: {e}"))?
+    else {
+        return Err(format!("`{cases}` must return a list"));
+    };
+    if list.is_empty() {
+        return Err(format!("`{cases}` has no cases"));
+    }
+    Ok(list
+        .snapshot()
+        .into_iter()
+        .map(|case| {
+            let values = match (&case, given.len()) {
+                (Value::Tuple(items), n) if n > 1 => items.to_vec(),
+                _ => vec![case.clone()],
+            };
+            (format!("{name}[{case}]"), values)
+        })
+        .collect())
+}
+
+/// Runs one test. Each parameter of the test that a case does not give is a fixture: `fn test_x(db: Db)` gets the value of
 /// `fixture_db()`, made again for every test. A `teardown_db(db)` function, if there is one, runs
 /// after the test whether it passed or not.
-fn run_test(interp: &Interp, name: &str) -> Result<(), String> {
+fn run_test(interp: &Interp, name: &str, given: Vec<Value>) -> Result<(), String> {
     let params = interp.signature(name).map(|(p, _)| p).unwrap_or_default();
     let mut made: Vec<(String, Value)> = Vec::new();
     let result = params
         .iter()
-        .map(|(p, ty)| fixture(interp, p, Some(ty), &mut made, &mut Vec::new()))
+        .enumerate()
+        .map(|(i, (p, ty))| match given.get(i) {
+            Some(value) => Ok(value.clone()),
+            None => fixture(interp, p, Some(ty), &mut made, &mut Vec::new()),
+        })
         .collect::<Result<Vec<_>, _>>()
         .and_then(|args| {
             interp
