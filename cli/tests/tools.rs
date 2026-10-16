@@ -123,6 +123,67 @@ fn test_on_a_directory_runs_every_test_file() {
 }
 
 #[test]
+fn test_parameters_are_fixtures_made_for_each_test() {
+    let src = r#"fn fixture_base() -> Int:
+    10
+
+fn fixture_total(base: Int) -> Int:
+    base * 2
+
+fn teardown_total(total: Int):
+    std.io.print(f"cleaned {total};")
+
+fn test_uses_both(base: Int, total: Int):
+    assert_eq(total, base * 2)
+
+fn test_fails(total: Int):
+    assert_eq(total, 0)
+"#;
+    let file = scratch("fixtures", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path]);
+    assert!(!ok, "{out}{err}");
+    assert!(out.contains("ok      test_uses_both"), "{out}");
+    assert!(
+        out.contains("FAILED  test_fails: assertion failed: left is `20`, right is `0`"),
+        "{out}"
+    );
+    assert_eq!(
+        out.matches("cleaned 20;").count(),
+        2,
+        "teardown runs after a pass and after a failure: {out}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn a_missing_or_mistyped_fixture_says_what_to_write() {
+    let src = "fn fixture_n() -> Int:\n    1\n\nfn test_missing(db: Int):\n    assert_eq(db, 1)\n\nfn test_type(n: Text):\n    assert_eq(n, \"1\")\n";
+    let file = scratch("badfixture", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, _) = run(&["test", path]);
+    assert!(!ok);
+    assert!(
+        out.contains("no fixture: write `fn fixture_db() -> ...`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("takes `n: Text` but `fixture_n` returns `Int`"),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn lint_does_not_flag_tests_and_fixtures() {
+    let src = "fn fixture_n() -> Int:\n    1\n\nfn teardown_n(n: Int):\n    std.io.print(f\"{n}\")\n\nfn test_n(n: Int):\n    assert_eq(n, 1)\n";
+    let file = scratch("lintfixtures", src);
+    let (ok, _, err) = run(&["lint", file.to_str().unwrap(), "--deny-warnings"]);
+    assert!(ok, "{err}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
 fn macros_quote_their_argument_and_dbg_gives_the_value_back() {
     let src = "fn pick(n: Int) -> Int:\n    if n > 0:\n        n\n    else:\n        todo!()\n\nfn test_dbg():\n    let x = dbg!(pick(4))\n    assert!(x == 4)\n\nfn test_quote():\n    let x = 1\n    assert!(x > 3)\n\nfn test_message():\n    assert!(1 > 3, \"one is small\")\n\nfn test_todo():\n    pick(0)\n\nfn test_panic():\n    panic!(\"boom\")\n";
     let file = scratch("macros", src);
