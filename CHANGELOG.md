@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **`telvax repl`:** an interactive session. Type a definition (`fn`, `type`, `enum`, `trait`, `extend`,
+  `import`), a variable (`let`, `var`), a statement or an expression and see the value. Definitions and
+  variables last from one input to the next; a name can be defined again; a type error shows the line and
+  leaves the session as it was. Blocks span lines and end with an empty line; Tab completes names, fields and
+  methods; `:type`, `:vars`, `:defs`, `:load`, `:reset`, `:help` and `:quit`; history in `~/.telvax_history`;
+  `--allow` as for `telvax run`. The session is the library `telvax_repl`, which the playground will use.
 * **Debugging in VS Code:** the extension contributes a `telvax` debugger that starts `telvax dap`. F5 on a
   `.tvx` file debugs it without a `launch.json`; the commands **Telvax: Debug Current File** and **Telvax: Run
   Current File Without Debugging** are in the run menu of Telvax files; a launch configuration takes

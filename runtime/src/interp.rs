@@ -503,6 +503,18 @@ impl Interp {
         Ok(db)
     }
 
+    /// Takes over what a program keeps outside itself from `from`: the databases it opened and
+    /// whether the services are real. A session that builds a new interpreter for each input uses
+    /// this so that the data survives from one input to the next.
+    pub fn inherit_state(&self, from: &Interp) {
+        let from_dbs = from.dbs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut dbs = self.dbs.lock().unwrap_or_else(|e| e.into_inner());
+        for (url, db) in from_dbs.iter() {
+            dbs.insert(url.clone(), db.clone());
+        }
+        self.set_live(from.is_live());
+    }
+
     /// Every database opened so far (one per distinct URL).
     pub fn dbs(&self) -> Vec<Arc<Db>> {
         self.dbs
