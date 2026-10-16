@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Debugger hook in the interpreter:** `telvax_runtime::debug` lets a debugger be called before each
+  statement, with the calls in progress, the variables of each call (name, type, value) and a way to
+  look into lists, maps, types and variants. It is the base for a debug adapter; there is no `telvax debug`
+  command or editor support yet. Without a debugger the cost is one flag check per statement.
 * **References and rename across files:** find references and rename now follow `import` and
   `from .. import` into the other files of the project, for functions, types, enums, traits, variants,
   fields and methods. One rename edits every file that uses the name; a name imported `as` another keeps
