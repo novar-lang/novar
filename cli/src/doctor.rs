@@ -3,8 +3,8 @@
 
 /// The commands `telvax` knows, for the "did you mean" of an unknown one.
 pub const COMMANDS: &[&str] = &[
-    "check", "lint", "fmt", "test", "run", "lsp", "worker", "serve", "build", "jit", "doctor",
-    "version", "help",
+    "check", "lint", "fmt", "test", "run", "profile", "lsp", "worker", "serve", "build", "jit",
+    "doctor", "version", "help",
 ];
 
 /// The closest command to `word`, if one is near enough to be a typing slip.

@@ -369,6 +369,27 @@ fn test_pick():
 
 Macros run in the interpreter, as `assert` does; the native backend does not compile them.
 
+## Profiling
+
+```sh
+telvax profile app.tvx                       # runs `main` and reports where the time and memory went
+telvax profile app.tvx handler 3 "text"      # another function, with its arguments
+telvax profile app.tvx --top 30 --json r.json --collapsed stacks.txt --speedscope p.json
+```
+
+The report has four parts: the wall time and the memory (the peak, the bytes allocated and how many
+allocations); the functions, with calls, the time in the function itself (`self`) and with the calls it
+makes (`total`), and the bytes it allocated; the statements, with how often each ran and how long it took
+until the next one of the same call started; and the `std` functions (`std.tensor.matmul`,
+`std.table.sql`, ...), with calls, time, the rows or elements that went in and came out, and the bytes of the
+result. `--json` writes all of it to a file, `--collapsed` writes call stacks for `flamegraph.pl` or
+`inferno`, and `--speedscope` writes a file for <https://www.speedscope.app>.
+
+Times are measured by the interpreter around what the program does, so they show where the *program*
+spends its time and include the time of the interpreter itself. Memory counts the whole process, so with
+several threads a function also counts what the other threads allocate meanwhile. Programs built with
+`telvax build` are not profiled.
+
 ## Formatting and linting
 
 ```sh

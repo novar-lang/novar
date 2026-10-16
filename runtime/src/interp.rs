@@ -113,6 +113,9 @@ pub struct Interp {
     pub(crate) debugger: RwLock<Option<Arc<dyn crate::debug::Debugger>>>,
     pub(crate) debugging: std::sync::atomic::AtomicBool,
     pub(crate) local_decls: std::sync::OnceLock<HashMap<String, Vec<crate::debug::LocalDecl>>>,
+    /// Told about every call, statement and `std` operation while a profiler is installed.
+    pub(crate) profiler: RwLock<Option<Arc<crate::profile::Profiler>>>,
+    pub(crate) profiling: std::sync::atomic::AtomicBool,
 }
 
 struct Mock {
@@ -183,6 +186,8 @@ impl Interp {
             debugger: RwLock::new(None),
             debugging: std::sync::atomic::AtomicBool::new(false),
             local_decls: std::sync::OnceLock::new(),
+            profiler: RwLock::new(None),
+            profiling: std::sync::atomic::AtomicBool::new(false),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -403,9 +408,31 @@ impl Interp {
             .clone()
     }
 
+    /// A `std` function called while profiling: measured, with the size of what went in and out.
+    fn profiled_call(
+        &self,
+        profiler: &Arc<crate::profile::Profiler>,
+        path: &str,
+        args: Vec<Value>,
+        result: &Ty,
+    ) -> Result<Value, RuntimeError> {
+        let name = path.replace("::", ".");
+        let kept = args.clone();
+        let _probe = crate::profile::Probe::enter(profiler.clone(), &name, true);
+        let began = std::time::Instant::now();
+        let out = std_impl::call_function(self, path, args, result);
+        if let Ok(v) = &out {
+            profiler.operation(&name, began.elapsed(), &kept, v);
+        }
+        out
+    }
+
     /// A statement is about to run: record it for coverage and let a debugger look.
     fn point(&self, start: usize, ctx: &Ctx) {
         self.cover(start);
+        if self.profiling.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::profile::statement(start);
+        }
         if self.debugging.load(std::sync::atomic::Ordering::Relaxed) {
             let debugger = self
                 .debugger
@@ -739,6 +766,12 @@ impl Interp {
             depth: depth + 1,
         };
         ctx.env.extend(f.params.iter().map(|p| p.id).zip(args));
+        let _probe = self
+            .profiling
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then(|| self.current_profiler())
+            .flatten()
+            .map(|p| crate::profile::Probe::enter(p, &f.name, false));
         let _call = self
             .debugging
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1254,12 +1287,20 @@ impl Interp {
                             Value::Err(v)
                         })
                     }
-                    _ => Ok(std_impl::call_function(
-                        self,
-                        &path.join("::"),
-                        args,
-                        result,
-                    )?),
+                    _ => {
+                        let path = path.join("::");
+                        match self
+                            .profiling
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                            .then(|| self.current_profiler())
+                            .flatten()
+                        {
+                            Some(profiler) => {
+                                Ok(self.profiled_call(&profiler, &path, args, result)?)
+                            }
+                            None => Ok(std_impl::call_function(self, &path, args, result)?),
+                        }
+                    }
                 }
             }
             ExprKind::Field { base, name } => {

@@ -2,6 +2,7 @@ mod bundle;
 mod check;
 mod doctor;
 mod native;
+mod profile;
 mod serve;
 
 use std::io::IsTerminal;
@@ -20,6 +21,8 @@ usage:
   telvax test [file.tvx|dir] [name] [--allow list] [--coverage] [--fail-under N]
                                                             run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
   telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
+  telvax profile <file.tvx> [function] [args...] [--allow list] [--top N] [--json f] [--collapsed f] [--speedscope f]
+                                                            time per function, line and std operation, and memory
   telvax doctor                                             what this build can do and how it is set up
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
@@ -35,6 +38,11 @@ usage:
 /// program's nesting (a sum of a few hundred terms, calls inside calls), and the 8 MB of a main
 /// thread is not enough for the deepest programs. Only the pages that are used are ever mapped.
 const STACK_BYTES: usize = 512 * 1024 * 1024;
+
+/// Counts allocations while `telvax profile` runs; otherwise it only checks a flag.
+#[global_allocator]
+static ALLOC: telvax_runtime::alloc_count::CountingAlloc =
+    telvax_runtime::alloc_count::CountingAlloc;
 
 fn main() -> ExitCode {
     match std::thread::Builder::new()
@@ -130,6 +138,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         }
         ["worker", rest @ ..] => worker(rest),
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
+        ["profile", rest @ ..] => profile::run(rest),
         ["lsp"] => telvax_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),
         ["build", file, rest @ ..] => native::build(file, rest),

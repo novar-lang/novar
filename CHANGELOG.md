@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **`telvax profile`:** runs a function and reports the time and calls per function (in the function
+  itself and with its calls), the hits and time per statement, the time, rows and bytes of each `std`
+  operation (`std.tensor.matmul`, `std.table.sql`, ...), and the memory (peak, bytes and number of
+  allocations, and the bytes each function allocated). `--top N` limits the statements, `--json`,
+  `--collapsed` (flame graph stacks) and `--speedscope` write files. It profiles the interpreter, not
+  `telvax build` programs. In the library, `telvax_runtime::profile` and `telvax_runtime::alloc_count`.
 * **Debugger hook in the interpreter:** `telvax_runtime::debug` lets a debugger be called before each
   statement, with the calls in progress, the variables of each call (name, type, value) and a way to
   look into lists, maps, types and variants. It is the base for a debug adapter; there is no `telvax debug`
