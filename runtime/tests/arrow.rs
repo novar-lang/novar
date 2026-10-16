@@ -588,3 +588,75 @@ fn shout():
     assert_eq!(out, json!(2));
     interp.call("shout", vec![]).unwrap();
 }
+
+const TABLE_OPS_SRC: &str = r#"
+type Row:
+    id: Int
+    score: f32
+    name: Text
+    ok: Bool
+
+fn load(path: Text) -> Table[Row]:
+    std.table.read_csv(path)
+
+fn ids(t: Table[Row]) -> List[Int]:
+    var out: List[Int] = []
+    for r in t:
+        out.push(r.id)
+    out
+
+fn first(t: Table[Row], n: Int) -> List[Int]:
+    ids(t.head(n))
+
+fn last(t: Table[Row], n: Int) -> List[Int]:
+    ids(t.tail(n))
+
+fn by_score_desc(t: Table[Row]) -> List[Int]:
+    ids(t.sort_by_desc("score"))
+
+fn by_name(t: Table[Row]) -> List[Int]:
+    ids(t.sort_by("name"))
+
+fn by_missing(t: Table[Row]) -> List[Int]:
+    ids(t.sort_by("nope"))
+
+fn doubled(t: Table[Row]) -> List[Int]:
+    ids(t.concat(t))
+
+fn good(t: Table[Row]) -> List[Int]:
+    ids(t.filter(r => r.ok))
+"#;
+
+fn ids(v: Value) -> Vec<i64> {
+    let Value::Vec(v) = v else { panic!("{v:?}") };
+    v.snapshot().into_iter().map(int).collect()
+}
+
+#[test]
+fn table_head_tail_sort_concat_filter() {
+    let i = load(TABLE_OPS_SRC);
+    let t = i.call("load", vec![Value::str(csv())]).unwrap();
+    let call = |f: &str, extra: Vec<Value>| {
+        let mut args = vec![t.clone()];
+        args.extend(extra);
+        i.call(f, args)
+    };
+    assert_eq!(ids(call("first", vec![Value::Int(2)]).unwrap()), [1, 2]);
+    assert_eq!(ids(call("first", vec![Value::Int(99)]).unwrap()), [1, 2, 3]);
+    assert_eq!(ids(call("last", vec![Value::Int(2)]).unwrap()), [2, 3]);
+    assert_eq!(
+        ids(call("last", vec![Value::Int(0)]).unwrap()),
+        [] as [i64; 0]
+    );
+    assert_eq!(ids(call("by_score_desc", vec![]).unwrap()), [3, 2, 1]);
+    assert_eq!(ids(call("by_name", vec![]).unwrap()), [1, 2, 3]);
+    assert_eq!(ids(call("doubled", vec![]).unwrap()), [1, 2, 3, 1, 2, 3]);
+    assert_eq!(ids(call("good", vec![]).unwrap()), [1, 3]);
+    let e = call("by_missing", vec![]).unwrap_err().to_string();
+    assert!(
+        e.contains("no column `nope`") && e.contains("id, score, name, ok"),
+        "{e}"
+    );
+    let e = call("first", vec![Value::Int(-1)]).unwrap_err().to_string();
+    assert!(e.contains("zero or more"), "{e}");
+}

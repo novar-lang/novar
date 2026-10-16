@@ -108,6 +108,24 @@ fn mean_score(t: Table[Row]) -> f32:
 `std.table.read_csv(path)` and `read_parquet` need the result type to be written down
 (`let t: Table[Row] = ...`), as do `std.tensor.zeros()`, `from_vec` and `reshape`.
 
+A table has methods that keep its rows' type. They do not need SQL, so they also work in `telvax-lite`:
+
+```telvax
+type Row:
+    id: Int
+    score: f32
+
+fn top_two(t: Table[Row]) -> Table[Row]:
+    t.sort_by_desc("score").head(2)
+
+fn passed(t: Table[Row]) -> Table[Row]:
+    t.filter(r => r.score > 0.5)
+```
+
+`head(n)` and `tail(n)` take the first or last `n` rows, `sort_by(column)` and `sort_by_desc(column)` order by one
+column, `filter(keep)` keeps the rows for which `keep` is true, and `a.concat(b)` appends the rows of `b`
+(both tables need the same row type). A column name that does not exist is a runtime error that lists the columns.
+
 ## HTTP endpoints
 
 ```telvax ignore
