@@ -81,6 +81,8 @@ struct Binding {
 pub struct Shown {
     pub text: String,
     pub ty: String,
+    /// A form that shows more than the text, for a table or a tensor.
+    pub html: Option<String>,
 }
 
 /// What an input did.
@@ -505,6 +507,7 @@ impl Session {
             out.value = Some(Shown {
                 text: interp.render(v, Some(&compiled.types[0])),
                 ty: compiled.types[0].to_string(),
+                html: telvax_runtime::rich::html(v),
             });
         }
         for (i, name) in compiled.names.iter().enumerate() {
@@ -593,6 +596,23 @@ impl Session {
         !opens_block || ended
     }
 
+    /// What is known about the name at `cursor`, as Markdown: its type or its signature.
+    pub fn hover(&self, input: &str, cursor: usize) -> Option<String> {
+        let cursor = cursor.min(input.len());
+        let definitions = self.definitions_text();
+        let separator = if definitions.is_empty() { "" } else { "\n\n" };
+        let header = self.header();
+        let body = indent(input);
+        let text = format!("{definitions}{separator}{header}{body}\n");
+        let offset =
+            definitions.len() + separator.len() + header.len() + body_offset(input, cursor);
+        let snap = Snapshot::analyze(text);
+        // A name that is not known has the type `_`, which says nothing.
+        snap.hover(offset)
+            .map(|(markdown, _)| markdown)
+            .filter(|markdown| !markdown.contains("\n_\n"))
+    }
+
     /// What the Tab key can complete the word before `cursor` to.
     pub fn complete(&self, input: &str, cursor: usize) -> (usize, Vec<Suggestion>) {
         let cursor = cursor.min(input.len());
@@ -608,11 +628,9 @@ impl Session {
         let header = self.header();
         let base = format!("{definitions}{separator}{header}{INDENT}pass\n");
         let first = Snapshot::analyze(base);
-        let before = indent(&input[..cursor]);
-        let after = indent(&input[cursor..]);
-        let text = format!("{definitions}{separator}{header}{before}{after}\n");
-        // `indent` adds four spaces to each line, and the first one starts the text.
-        let offset = definitions.len() + separator.len() + header.len() + before.len();
+        let text = format!("{definitions}{separator}{header}{}\n", indent(input));
+        let offset =
+            definitions.len() + separator.len() + header.len() + body_offset(input, cursor);
         let snap = Snapshot::analyze_after(text, None, Some(&first));
         let mut seen = std::collections::HashSet::new();
         let list = snap
@@ -704,6 +722,12 @@ fn indent(text: &str) -> String {
         }
     }
     out
+}
+
+/// Where byte `cursor` of the input is in the input indented by [`indent`].
+fn body_offset(input: &str, cursor: usize) -> usize {
+    let line_start = input[..cursor].rfind('\n').map_or(0, |i| i + 1);
+    indent(&input[..line_start]).len() + INDENT.len() + (cursor - line_start)
 }
 
 /// Where in the input the byte `at` of the indented probe is.

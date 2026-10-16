@@ -11,6 +11,7 @@ pub mod debug;
 pub mod gpu;
 mod interp;
 pub mod profile;
+pub mod rich;
 #[cfg(feature = "live")]
 mod services;
 mod show;

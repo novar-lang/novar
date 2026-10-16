@@ -79,6 +79,7 @@ telvax check examples/rag-service.tvx         # parse + type-check, diagnostics 
 telvax check --json examples/rag-service.tvx  # the same diagnostics as JSON, for CI and editors
 telvax run examples/basics/primes.tvx main    # interpret
 telvax repl                                   # type definitions, variables and expressions and see the result
+pip install "telvax[kernel]"                   # a Jupyter kernel for Telvax and the %%telvax magic (python/README.md)
 telvax dap                                    # debug adapter over stdio: breakpoints, stepping, variables
 telvax profile app.tvx main --top 10          # time per function, line and std operation; memory
 telvax test tests/ --coverage                 # run `test_*` functions with fixtures, cases and mocks; lines not run
