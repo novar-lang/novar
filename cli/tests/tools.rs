@@ -354,6 +354,68 @@ fn test_calls_without_a_mock():
 }
 
 #[test]
+fn coverage_lists_the_lines_the_tests_did_not_run() {
+    let src = r#"fn sign(n: Int) -> Text:
+    if n > 0:
+        "positive"
+    else:
+        "other"
+
+fn never_called() -> Int:
+    let x = 1
+    x + 1
+
+fn fixture_n() -> Int:
+    1
+
+fn teardown_n(n: Int):
+    print(f"{n}")
+
+fn test_sign(n: Int):
+    assert_eq(sign(5), "positive")
+    assert_eq(n, 1)
+"#;
+    let file = scratch("coverage", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path, "--coverage"]);
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("coverage (lines that ran"), "{out}");
+    // Lines 2, 3, 5, 8 and 9 have code, and 5, 8 and 9 never ran. The test, the fixture and the
+    // teardown are not counted.
+    assert!(out.contains("2/5  40.0%   missing 5, 8-9"), "{out}");
+    assert!(out.contains("total  2/5  40.0%"), "{out}");
+    let (ok, out, err) = run(&["test", path, "--fail-under", "40"]);
+    assert!(ok, "{out}{err}");
+    let (ok, out, err) = run(&["test", path, "--fail-under", "90"]);
+    assert!(!ok);
+    assert!(
+        err.contains("coverage is 40.0%, below the 90% that --fail-under asks for"),
+        "{out}{err}"
+    );
+    let (ok, _, err) = run(&["test", path, "--fail-under", "lots"]);
+    assert!(
+        !ok && err.contains("--fail-under takes a percentage"),
+        "{err}"
+    );
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn coverage_adds_up_over_a_directory() {
+    let dir = std::env::temp_dir().join(format!("telvax-tools-{}-covdir", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let one = "fn a(n: Int) -> Int:\n    if n > 0:\n        1\n    else:\n        2\n\nfn test_a():\n    assert_eq(a(1), 1)\n";
+    let two = "fn b() -> Int:\n    5\n\nfn test_b():\n    assert_eq(b(), 5)\n";
+    std::fs::write(dir.join("test_one.tvx"), one).unwrap();
+    std::fs::write(dir.join("test_two.tvx"), two).unwrap();
+    let (ok, out, err) = run(&["test", dir.to_str().unwrap(), "--coverage"]);
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("missing 5"), "{out}");
+    assert!(out.contains("total  3/4  75.0%"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn macros_quote_their_argument_and_dbg_gives_the_value_back() {
     let src = "fn pick(n: Int) -> Int:\n    if n > 0:\n        n\n    else:\n        todo!()\n\nfn test_dbg():\n    let x = dbg!(pick(4))\n    assert!(x == 4)\n\nfn test_quote():\n    let x = 1\n    assert!(x > 3)\n\nfn test_message():\n    assert!(1 > 3, \"one is small\")\n\nfn test_todo():\n    pick(0)\n\nfn test_panic():\n    panic!(\"boom\")\n";
     let file = scratch("macros", src);

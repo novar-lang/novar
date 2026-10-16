@@ -316,6 +316,28 @@ fn test_read():
 A replacement cannot call the function it replaces. Calls through methods (`x.len()`) cannot be
 mocked, and `std.test.*` itself cannot.
 
+### Coverage
+
+`--coverage` lists, for each file of the project, the lines with code and how many of them the tests
+ran, and the numbers of the lines that did not run. `--fail-under 90` also fails the run, with exit
+code 1, when fewer than 90% of the lines ran, so a pipeline can hold the line.
+
+```sh
+telvax test tests/ --coverage
+telvax test tests/ --fail-under 90
+```
+
+```text
+coverage (lines that ran / lines with code):
+  src/price.tvx  18/20  90.0%   missing 14-15
+  total  18/20  90.0%
+```
+
+A line counts when it has a statement, the last expression of a block or the body of a `case`. The
+`test_`, `fixture_`, `teardown_` and `cases_` functions are not counted, nor are files outside the
+project (the directory with `telvax.toml`, or the one you test). The count is of lines, not of
+branches: a line with an `if` and its two results written on it counts once.
+
 ## Macros
 
 A macro is written `name!(...)`. The compiler has five and you cannot define more. Each one is

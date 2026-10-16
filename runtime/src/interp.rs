@@ -106,6 +106,9 @@ pub struct Interp {
     /// Functions that tests replaced with `std.test.mock`, by name (`fetch`) or path (`std::fs::read`).
     mocks: Mutex<HashMap<String, Mock>>,
     mocked: std::sync::atomic::AtomicBool,
+    /// Where the statements that ran start, while `start_coverage` is on.
+    covered: Mutex<std::collections::HashSet<usize>>,
+    covering: std::sync::atomic::AtomicBool,
 }
 
 struct Mock {
@@ -171,6 +174,8 @@ impl Interp {
             device: std::sync::atomic::AtomicU8::new(0),
             mocks: Mutex::new(HashMap::new()),
             mocked: std::sync::atomic::AtomicBool::new(false),
+            covered: Mutex::new(std::collections::HashSet::new()),
+            covering: std::sync::atomic::AtomicBool::new(false),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -375,6 +380,29 @@ impl Interp {
     pub(crate) fn mock_calls(&self, key: &str) -> Option<i64> {
         let mocks = self.mocks.lock().unwrap_or_else(|e| e.into_inner());
         mocks.get(key).map(|m| m.calls)
+    }
+
+    /// Starts recording which statements run (see `telvax_hir::coverage`).
+    pub fn start_coverage(&self) {
+        self.covering
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The start offsets of the statements that ran since `start_coverage`.
+    pub fn covered(&self) -> std::collections::HashSet<usize> {
+        self.covered
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn cover(&self, start: usize) {
+        if self.covering.load(std::sync::atomic::Ordering::Relaxed) {
+            self.covered
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(start);
+        }
     }
 
     /// Puts back every function a test replaced. `telvax test` does this after each test.
@@ -709,6 +737,7 @@ impl Interp {
 
     fn block(&self, b: &hir::Block, ctx: &mut Ctx) -> Eval {
         for s in &b.stmts {
+            self.cover(telvax_hir::coverage::stmt_start(s));
             match s {
                 hir::Stmt::Let { local, init } => {
                     let v = self.eval(init, ctx)?;
@@ -720,7 +749,10 @@ impl Interp {
             }
         }
         match &b.tail {
-            Some(t) => self.eval(t, ctx),
+            Some(t) => {
+                self.cover(t.span.start);
+                self.eval(t, ctx)
+            }
             None => Ok(Value::Unit),
         }
     }
@@ -1127,6 +1159,7 @@ impl Interp {
                             }
                         }
                     }
+                    self.cover(arm.body.span.start);
                     return self.eval(&arm.body, ctx);
                 }
                 fail("no `match` arm matched")

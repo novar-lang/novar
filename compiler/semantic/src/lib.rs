@@ -1,6 +1,7 @@
 //! High-Level IR: name resolution, type checking and tensor-shape checking.
 
 mod check;
+pub mod coverage;
 pub mod hir;
 mod named;
 pub mod stdlib;
