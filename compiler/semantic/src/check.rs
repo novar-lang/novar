@@ -265,7 +265,14 @@ fn method_module(ty: &Ty, name: &str) -> Option<&'static str> {
         {
             Some("tensor")
         }
-        Ty::Table(_) if name == "sql" => Some("table"),
+        Ty::Table(_)
+            if matches!(
+                name,
+                "sql" | "filter" | "head" | "tail" | "sort_by" | "sort_by_desc" | "concat"
+            ) =>
+        {
+            Some("table")
+        }
         Ty::Vec(_)
             if matches!(
                 name,
@@ -4778,7 +4785,9 @@ impl Checker {
             },
             Ty::Table(s) => match n {
                 // A method call: `call` turns it into `std::table::sql(table, ..)`.
-                "sql" => Ty::Unknown,
+                "sql" | "filter" | "head" | "tail" | "sort_by" | "sort_by_desc" | "concat" => {
+                    Ty::Unknown
+                }
                 "is_empty" => Ty::Fn(vec![], Box::new(Ty::bool())),
                 "len" => Ty::Fn(vec![], Box::new(Ty::Prim(Prim::U64))),
                 _ => {

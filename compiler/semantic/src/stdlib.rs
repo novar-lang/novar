@@ -1077,6 +1077,33 @@ fn write_table(args: &[Ty]) -> Result<Ty, String> {
     Ok(Ty::Unit)
 }
 
+fn table_head(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let schema = want_table(args, 0)?;
+    want(args, 1, &Ty::Prim(Prim::I64))?;
+    Ok(schema.map_or(Ty::Unknown, Ty::Table))
+}
+
+fn table_sort(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let schema = want_table(args, 0)?;
+    want(args, 1, &s())?;
+    Ok(schema.map_or(Ty::Unknown, Ty::Table))
+}
+
+fn table_concat(args: &[Ty]) -> Result<Ty, String> {
+    arity(args, 2)?;
+    let a = want_table(args, 0)?;
+    let b = want_table(args, 1)?;
+    match (a, b) {
+        (Some(a), Some(b)) if a != b => Err(format!(
+            "`concat` needs two tables with the same rows, found `Table[{a}]` and `Table[{b}]`"
+        )),
+        (Some(a), _) => Ok(Ty::Table(a)),
+        (None, b) => Ok(b.map_or(Ty::Unknown, Ty::Table)),
+    }
+}
+
 fn filter_rows_hint(i: usize, prev: &[Ty]) -> Option<Ty> {
     match (i, prev.first()) {
         (1, Some(Ty::Table(s))) => Some(Ty::Fn(vec![Ty::Struct(s.clone())], Box::new(Ty::bool()))),
@@ -1525,6 +1552,11 @@ const FUNCTIONS: &[(&str, Sig)] = &[
     ("std::table::len", sig(table_len)),
     ("std::table::write_csv", sig(write_table)),
     ("std::table::write_parquet", sig(write_table)),
+    ("std::table::head", sig(table_head)),
+    ("std::table::tail", sig(table_head)),
+    ("std::table::sort_by", sig(table_sort)),
+    ("std::table::sort_by_desc", sig(table_sort)),
+    ("std::table::concat", sig(table_concat)),
     (
         "std::table::filter",
         Sig {
@@ -1755,6 +1787,12 @@ const TABLE_METHODS: &[BuiltinMethod] = &[
     ("len", "() -> u64"),
     ("is_empty", "() -> Bool"),
     ("sql", "(query: Text) -> Table"),
+    ("filter", "(keep: (row) -> Bool) -> Table"),
+    ("head", "(n: Int) -> Table"),
+    ("tail", "(n: Int) -> Table"),
+    ("sort_by", "(column: Text) -> Table"),
+    ("sort_by_desc", "(column: Text) -> Table"),
+    ("concat", "(other: Table) -> Table"),
 ];
 
 const TENSOR_METHODS: &[BuiltinMethod] = &[

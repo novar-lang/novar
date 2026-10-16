@@ -121,7 +121,8 @@ specification to what exists, what was verified and how, and what is still open.
 * **Tensors.** `Tensor[f32, 2, 3]` carries its shape: `std.tensor.matmul` of mismatched
   shapes is a compile error. Symbolic dimensions (`[N]`) accept any size.
 * **Tables.** `Table[Row]` is an Arrow table whose columns are the fields of type `Row`;
-  `t.score` is the column as a zero-copy tensor.
+  `t.score` is the column as a zero-copy tensor. `head`, `tail`, `sort_by`, `sort_by_desc`, `filter` and `concat`
+  are methods; `sql` runs a query.
 * **Modules.** `import util.helper`, `from crate.geometry import Point, norm`,
   `from mathx.vec import dot` (a dependency). A name that starts with `_` is private and cannot
   be imported.

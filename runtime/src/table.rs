@@ -11,7 +11,10 @@ use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array,
     Int64Array, LargeStringArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
-use arrow::compute::{cast, concat_batches, filter_record_batch};
+use arrow::compute::{
+    SortColumn, SortOptions, cast, concat_batches, filter_record_batch, lexsort_to_indices,
+    take_record_batch,
+};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use serde_json::Value as Json;
@@ -492,6 +495,56 @@ pub(crate) fn call(interp: &Interp, path: &str, args: &[Value], result: &Ty) -> 
             let batch = filter_record_batch(&t.batch, &BooleanArray::from(keep))
                 .map_err(io("filtering"))?;
             table(t.schema.clone(), batch)
+        }
+        "head" | "tail" => {
+            let t = want_table(&args[0])?;
+            let Value::Int(n) = args[1] else {
+                return err("the row count must be an integer");
+            };
+            let n = usize::try_from(n)
+                .map_err(|_| RuntimeError::new(format!("`{name}` needs a count of zero or more")))?
+                .min(t.rows());
+            let start = if name == "head" { 0 } else { t.rows() - n };
+            table(t.schema.clone(), t.batch.slice(start, n))
+        }
+        "sort_by" | "sort_by_desc" => {
+            let t = want_table(&args[0])?;
+            let column = want_str(&args[1])?;
+            let Some(i) = t.batch.schema().index_of(&column).ok() else {
+                let names: Vec<_> = t
+                    .batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|f| f.name().clone())
+                    .collect();
+                return err(format!(
+                    "no column `{column}` to sort by; the columns are {}",
+                    names.join(", ")
+                ));
+            };
+            let keys = [SortColumn {
+                values: t.batch.column(i).clone(),
+                options: Some(SortOptions {
+                    descending: name == "sort_by_desc",
+                    nulls_first: false,
+                }),
+            }];
+            let order = lexsort_to_indices(&keys, None).map_err(io("sorting"))?;
+            let batch = take_record_batch(&t.batch, &order).map_err(io("sorting"))?;
+            table(t.schema.clone(), batch)
+        }
+        "concat" => {
+            let (a, b) = (want_table(&args[0])?, want_table(&args[1])?);
+            if a.schema != b.schema {
+                return err(format!(
+                    "`concat` needs two tables with the same rows, found `Table[{}]` and `Table[{}]`",
+                    a.schema, b.schema
+                ));
+            }
+            let batch = concat_batches(&a.batch.schema(), [&a.batch, &b.batch])
+                .map_err(io("concatenating"))?;
+            table(a.schema.clone(), batch)
         }
         other => err(format!(
             "std function `std::table::{other}` is not implemented by the runtime"

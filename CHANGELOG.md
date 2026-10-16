@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* **Table methods:** `t.head(n)`, `t.tail(n)`, `t.sort_by("col")`, `t.sort_by_desc("col")`, `t.filter(r => ...)` and
+  `a.concat(b)` return a table of the same row type. They use Arrow directly, so they work in `telvax-lite` too.
 * **`telvax doc`:** writes a Markdown reference from the code: functions with their signatures, `type` fields
   and defaults, `enum` variants, `trait` and `extend` methods, and the `#` comment lines directly above each
   item. `telvax doc src/ -o REFERENCE.md`; `--public` skips names that start with `_`. It is the library
