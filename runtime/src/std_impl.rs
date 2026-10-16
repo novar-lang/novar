@@ -715,7 +715,7 @@ pub(crate) fn format_value(v: &Value, shown: &str, spec: &str) -> Result<String,
                 }
             };
             let text = match t {
-                'F' | 'E' | 'G' => text.to_uppercase(),
+                'E'..='G' => text.to_uppercase(),
                 '%' => format!("{text}%"),
                 _ => text,
             };
