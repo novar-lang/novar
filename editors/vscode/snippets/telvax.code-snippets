@@ -1,0 +1,47 @@
+{
+  "fn": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:x}: ${3:Int}) -> ${4:Int}:", "\t$0"],
+    "description": "A function"
+  },
+  "main": {
+    "prefix": "main",
+    "body": ["fn main():", "\t$0"],
+    "description": "The main function"
+  },
+  "type": {
+    "prefix": "type",
+    "body": ["type ${1:Name}:", "\t${2:field}: ${3:Int}"],
+    "description": "A record type"
+  },
+  "enum": {
+    "prefix": "enum",
+    "body": ["enum ${1:Name}:", "\t${2:First}(${3:Int})", "\t${4:Empty}"],
+    "description": "An enum"
+  },
+  "match": {
+    "prefix": "match",
+    "body": ["match ${1:value}:", "\tcase ${2:Some(x)}:", "\t\t$3", "\tcase ${4:None}:", "\t\t$0"],
+    "description": "A match on a value"
+  },
+  "for": {
+    "prefix": "for",
+    "body": ["for ${1:i} in ${2:range(10)}:", "\t$0"],
+    "description": "A for loop"
+  },
+  "test": {
+    "prefix": "test",
+    "body": ["fn test_${1:name}():", "\tassert!(${2:true})$0"],
+    "description": "A test for `telvax test`"
+  },
+  "endpoint": {
+    "prefix": "endpoint",
+    "body": ["@endpoint(${1:POST}, \"${2:/v1/path}\")", "fn ${3:handler}(input: ${4:Input}) -> Result[${5:Output}, Status]:", "\t$0"],
+    "description": "An HTTP endpoint served by `telvax serve`"
+  },
+  "trait": {
+    "prefix": "trait",
+    "body": ["trait ${1:Name}:", "\tfn ${2:method}(self) -> ${3:Int}: ..."],
+    "description": "A trait"
+  }
+}

@@ -7,7 +7,9 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
 * **Hover** with inferred types and function signatures.
 * **Inlay hints** showing the inferred type of `let` bindings and loop variables.
 * **Completion** for fields, table columns, methods, `std.` paths, functions and variables.
-* **Go to definition** and **document symbols**.
+* **Go to definition**, **find references**, **rename** and **document symbols**.
+* **Formatting** with the same rules as `telvax fmt`.
+* **Snippets** for `fn`, `main`, `type`, `enum`, `match`, `for`, `test`, `endpoint` and `trait`.
 
 ## Setup
 
@@ -29,11 +31,28 @@ or point the `telvax.server.path` setting at the executable. Each GitHub release
 
 Command: **Telvax: Restart Language Server**.
 
+## Publishing
+
+A release publishes the extension by itself (the `vscode` job of `release.yml`): it packages the
+`.vsix`, attaches it to the release and, when the secrets exist, publishes it.
+
+1. Visual Studio Marketplace: create the publisher `telvax` at <https://marketplace.visualstudio.com/manage>
+   (it needs an Azure DevOps organization), then create a Personal Access Token there with the scope
+   *Marketplace > Manage* and *All accessible organizations*. Save it as the repository secret `VSCE_PAT`.
+2. Open VSX (VSCodium, Cursor and others read from it): log in at <https://open-vsx.org> with a GitHub
+   account linked to an Eclipse account, sign the publisher agreement, create a token under
+   *Settings > Access Tokens*, and run `npx ovsx create-namespace telvax --pat <token>` once.
+   Save the token as the repository secret `OVSX_PAT`.
+3. Cut a release. A step is skipped while its secret is missing, so the two can be set up one at a time.
+
+To publish by hand: `npx vsce publish --packagePath telvax-<version>.vsix --pat <token>` and
+`npx ovsx publish telvax-<version>.vsix --pat <token>`.
+
 ## Development
 
 ```sh
 npm install
 npm run compile      # TypeScript -> out/
 npm test             # tokenises sample code with the real TextMate engine
-npx vsce package     # builds telvax-0.1.0.vsix
+npx vsce package     # builds telvax-<version>.vsix
 ```

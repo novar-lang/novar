@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **VS Code snippets and a fuller README:** the extension adds snippets for `fn`, `main`, `type`, `enum`,
+  `match`, `for`, `test`, `endpoint` and `trait`. Its README lists references, rename and formatting and
+  explains how the release publishes to the Marketplace and Open VSX.
 * **The documentation is tested:** every ```` ```telvax ```` block in the README, the tour and the use cases is
   checked, checked for formatting and, when it has `fn main`, run; every file under `examples/` is checked
   and checked for formatting. A block that is only a piece of a program is marked ```` ```telvax ignore ````.

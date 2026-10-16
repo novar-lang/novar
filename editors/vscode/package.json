@@ -88,7 +88,13 @@
         "editor.insertSpaces": true,
         "editor.inlayHints.enabled": "on"
       }
-    }
+    },
+    "snippets": [
+      {
+        "language": "telvax",
+        "path": "./snippets/telvax.code-snippets"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
