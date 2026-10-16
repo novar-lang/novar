@@ -16,6 +16,7 @@ members = [
     "cli",
     "benchmarks",
     "tools/lsp",
+    "tools/repl",
     "tools/dap",
     "tools/formatter",
     "tools/migrate",

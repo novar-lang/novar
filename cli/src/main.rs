@@ -3,6 +3,7 @@ mod check;
 mod doctor;
 mod native;
 mod profile;
+mod repl;
 mod serve;
 
 use std::io::IsTerminal;
@@ -24,6 +25,7 @@ usage:
   telvax profile <file.tvx> [function] [args...] [--allow list] [--top N] [--json f] [--collapsed f] [--speedscope f]
                                                             time per function, line and std operation, and memory
   telvax doctor                                             what this build can do and how it is set up
+  telvax repl [file.tvx...] [--allow list]                  type definitions, variables and expressions and see the result
   telvax dap                                                debug adapter over stdio (breakpoints, stepping, variables)
   telvax lsp                                                language server over stdio
   telvax worker [--listen host:port] [--token T]            run calls for a coordinator
@@ -140,6 +142,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
         ["worker", rest @ ..] => worker(rest),
         ["build", "--serve", file, rest @ ..] => bundle::build_serve(file, rest),
         ["profile", rest @ ..] => profile::run(rest),
+        ["repl", rest @ ..] => repl::run(rest),
         ["dap"] => telvax_dap::run_stdio().or_else(|e| failed(e.to_string())),
         ["lsp"] => telvax_lsp::run_stdio().or_else(|e| failed(e.to_string())),
         ["jit", file, func, rest @ ..] => native::jit(file, func, rest),

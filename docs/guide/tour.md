@@ -369,6 +369,46 @@ fn test_pick():
 
 Macros run in the interpreter, as `assert` does; the native backend does not compile them.
 
+## The REPL
+
+```sh
+telvax repl                    # an interactive session
+telvax repl app.tvx            # start with the definitions and variables of a file
+```
+
+```text
+>>> let xs = [3, 1, 2]
+>>> xs.len()
+3
+>>> fn total(v: List[Int]) -> Int:
+...     v.sum()
+...
+>>> total(xs)
+6
+>>> var n = 0
+>>> for x in xs:
+...     n = n + x
+...
+>>> n
+6
+>>> :type xs
+List[Int]
+```
+
+You can type a definition (`fn`, `type`, `enum`, `trait`, `extend`, `import`), a variable (`let`, `var`), a
+statement or an expression; the value of an expression is shown. A block ends with an empty line. Names last
+until `:reset`: a name can be defined again (`let x = x + 1`, or a new `fn` of the same name), and a `let`
+cannot be assigned to, as in a file. Each input is checked with everything defined before it, so a type error
+shows the line and leaves the session as it was. A number written alone (`let n = 4`) is an `Int`, so that
+functions that take an `Int` accept it. A closure needs the type of its parameters to be kept
+(`let inc = (n: Int) => n + 1`).
+
+Commands start with a colon: `:type <expression>`, `:vars`, `:defs`, `:load <file>`, `:reset`, `:help` and
+`:quit`. Tab completes names, fields and methods, and the arrow keys go through earlier inputs (kept in
+`~/.telvax_history`; `TELVAX_HISTORY` names another file). `--allow` limits what the session may do, as for
+`telvax run`. Each input is run once: what it prints or writes happens once, and values are not computed again
+when the next input is entered.
+
 ## Debugging
 
 ```sh

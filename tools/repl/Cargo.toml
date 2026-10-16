@@ -1,0 +1,20 @@
+[package]
+name = "telvax_repl"
+description = "Telvax: an interactive session (definitions and variables that last from one input to the next)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+telvax_ast = { path = "../../compiler/ast" }
+telvax_diagnostics = { path = "../../compiler/diagnostics" }
+telvax_hir = { path = "../../compiler/semantic" }
+telvax_lsp = { path = "../lsp", default-features = false }
+telvax_parser = { path = "../../compiler/parser" }
+telvax_runtime = { path = "../../runtime", default-features = false }
