@@ -226,7 +226,7 @@ the program runs, not when it is compiled, and `std.io.print` and `std.time` are
 
 ## Tests
 
-A function called `test_...` without arguments is a test. `assert(cond)` and `assert_eq(a, b)` stop
+A function called `test_...` is a test. `assert(cond)` and `assert_eq(a, b)` stop
 it with a message when they fail:
 
 ```telvax
@@ -240,9 +240,33 @@ fn test_double():
 ```sh
 telvax test file.tvx           # run them all, exit 1 if one fails
 telvax test file.tvx double    # only the tests whose name contains `double`
-telvax test tests/              # every `test_*.tvx` and `*_test.tvx` file under a directory
+telvax test tests/             # every `test_*.tvx` and `*_test.tvx` file under a directory
 telvax test                    # the same, in this directory
 ```
+
+### Fixtures
+
+A test that takes parameters gets them from fixtures. `fn test_total(order: Order)` calls
+`fixture_order()` and passes the result; a fixture can take other fixtures the same way. Each test
+gets new values. A `teardown_order(order: Order)` function, if there is one, runs after the test,
+whether it passed or not.
+
+```telvax
+fn fixture_base() -> Int:
+    10
+
+fn fixture_total(base: Int) -> Int:
+    base * 2
+
+fn teardown_total(total: Int):
+    print(f"done with {total}")
+
+fn test_total(base: Int, total: Int):
+    assert_eq(total, base * 2)
+```
+
+A parameter with no `fixture_...` function, or a fixture that returns another type, fails the test
+and says what to write.
 
 ## Macros
 

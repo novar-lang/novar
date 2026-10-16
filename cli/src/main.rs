@@ -450,21 +450,19 @@ fn test_file(
         .hir
         .fns
         .iter()
-        .filter(|f| f.name.starts_with("test_") && f.params.is_empty())
+        .filter(|f| f.name.starts_with("test_"))
         .filter(|f| filter.is_none_or(|n| f.name.contains(n)))
         .map(|f| f.name.clone())
         .collect();
     names.sort();
     if names.is_empty() {
-        return failed(
-            "no test functions found (a test is a function named `test_...` without arguments)",
-        );
+        return failed("no test functions found (a test is a function named `test_...`)");
     }
     let interp = Interp::with_caps(checked.hir, false, caps).or_else(|e| failed(e.to_string()))?;
     let mut failures = 0;
     for name in &names {
-        match interp.call(name, vec![]) {
-            Ok(_) => println!("ok      {name}"),
+        match run_test(&interp, name) {
+            Ok(()) => println!("ok      {name}"),
             Err(e) => {
                 failures += 1;
                 println!("FAILED  {name}: {e}");
@@ -472,6 +470,88 @@ fn test_file(
         }
     }
     Ok((names.len() - failures, failures))
+}
+
+/// Runs one test. Each parameter of the test is a fixture: `fn test_x(db: Db)` gets the value of
+/// `fixture_db()`, made again for every test. A `teardown_db(db)` function, if there is one, runs
+/// after the test whether it passed or not.
+fn run_test(interp: &Interp, name: &str) -> Result<(), String> {
+    let params = interp.signature(name).map(|(p, _)| p).unwrap_or_default();
+    let mut made: Vec<(String, Value)> = Vec::new();
+    let result = params
+        .iter()
+        .map(|(p, ty)| fixture(interp, p, Some(ty), &mut made, &mut Vec::new()))
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|args| {
+            interp
+                .call(name, args)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        });
+    let mut teardown = Ok(());
+    for (fixture_name, value) in made.iter().rev() {
+        let t = format!("teardown_{fixture_name}");
+        let Some((params, _)) = interp.signature(&t) else {
+            continue;
+        };
+        let done = if params.len() == 1 {
+            interp
+                .call(&t, vec![value.clone()])
+                .map(|_| ())
+                .map_err(|e| format!("`{t}` failed: {e}"))
+        } else {
+            Err(format!(
+                "`{t}` takes the fixture to clean up: write `fn {t}({fixture_name}: ...)`"
+            ))
+        };
+        if teardown.is_ok() {
+            teardown = done;
+        }
+    }
+    result.and(teardown)
+}
+
+/// The value of the fixture `name`, made once per test; `made` holds the ones already made, in order.
+fn fixture(
+    interp: &Interp,
+    name: &str,
+    wanted: Option<&telvax_hir::Ty>,
+    made: &mut Vec<(String, Value)>,
+    stack: &mut Vec<String>,
+) -> Result<Value, String> {
+    if let Some((_, v)) = made.iter().find(|(n, _)| n == name) {
+        return Ok(v.clone());
+    }
+    if stack.iter().any(|n| n == name) {
+        return Err(format!(
+            "fixture `{name}` needs itself ({} -> {name})",
+            stack.join(" -> ")
+        ));
+    }
+    let function = format!("fixture_{name}");
+    let Some((params, ret)) = interp.signature(&function) else {
+        return Err(format!(
+            "the test asks for `{name}` but there is no fixture: write `fn {function}() -> ...`"
+        ));
+    };
+    if let Some(ty) = wanted
+        && !ty.accepts(&ret)
+    {
+        return Err(format!(
+            "the test takes `{name}: {ty}` but `{function}` returns `{ret}`"
+        ));
+    }
+    stack.push(name.to_string());
+    let args = params
+        .iter()
+        .map(|(p, ty)| fixture(interp, p, Some(ty), made, stack))
+        .collect::<Result<Vec<_>, _>>()?;
+    stack.pop();
+    let value = interp
+        .call(&function, args)
+        .map_err(|e| format!("`{function}` failed: {e}"))?;
+    made.push((name.to_string(), value.clone()));
+    Ok(value)
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
