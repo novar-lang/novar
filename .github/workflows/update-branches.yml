@@ -1,8 +1,9 @@
 name: Update pull requests
 
 # The branch protection wants a pull request to be up to date with main before it can merge. After
-# every push to main this brings the open pull requests that have auto-merge turned on up to date, so
-# they keep going without anyone pressing "Update branch". It uses AUTO_MERGE_TOKEN because an
+# every push to main this brings the open pull requests that have auto-merge turned on and the
+# `update-branch` label up to date, so they keep going without anyone pressing "Update branch". Only
+# the labeled ones move: each update starts the checks again. It uses AUTO_MERGE_TOKEN because an
 # update made with GITHUB_TOKEN would not start the checks again.
 on:
   push:
@@ -31,8 +32,8 @@ jobs:
           fi
           # Give GitHub a moment to recompute which pull requests are behind.
           sleep 20
-          gh pr list --state open --json number,autoMergeRequest,mergeStateStatus,isDraft \
-            --jq '.[] | select(.autoMergeRequest != null and .isDraft == false and .mergeStateStatus == "BEHIND") | .number' |
+          gh pr list --state open --json number,autoMergeRequest,mergeStateStatus,isDraft,labels \
+            --jq '.[] | select(.autoMergeRequest != null and .isDraft == false and .mergeStateStatus == "BEHIND" and any(.labels[]; .name == "update-branch")) | .number' |
           while read -r number; do
             echo "updating #$number"
             gh pr update-branch "$number" || echo "could not update #$number (conflicts?)"
