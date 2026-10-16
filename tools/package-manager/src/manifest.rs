@@ -9,6 +9,10 @@
 //! [dependencies]
 //! mathx = "^1.2"                       # from the registry
 //! shared = { path = "../shared" }      # from a directory
+//!
+//! [lint]                               # what `telvax lint` does for each rule
+//! unused-variable = "deny"             # allow, warn or deny
+//! unused-function = "allow"
 //! ```
 
 use std::collections::BTreeMap;
@@ -31,6 +35,9 @@ pub struct Manifest {
     pub package: PackageInfo,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, Dependency>,
+    /// The level (`allow`, `warn`, `deny`) of each lint rule, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lint: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

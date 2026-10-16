@@ -373,7 +373,19 @@ telvax fmt file.tvx            # rewrite in place
 telvax fmt src/ tests/         # every `.tvx` file under the directories (no path: this directory)
 telvax fmt --check             # list files that would change (exit 1), for CI
 telvax fmt --diff src/         # show the lines that would change, write nothing (exit 1)
-telvax lint file.tvx           # unused variables and unused private functions
+telvax lint file.tvx           # unused variables, unused private functions, unreachable cases
+telvax lint --list-rules       # the rules and what they find
+```
+
+Each lint rule has a name (`unused-variable`, `unused-function`, `unreachable-case`) and a level:
+`allow` (say nothing), `warn` (the default) or `deny` (an error, so `telvax lint` fails). Set the
+levels for a package in `telvax.toml`, or for one run with `--allow rule`, `--warn rule` and
+`--deny rule`; a flag wins over the file. `--deny-warnings` makes any warning fail the run.
+
+```toml
+[lint]
+unused-variable = "deny"
+unused-function = "allow"
 ```
 
 Indentation is part of the syntax, so `telvax fmt` never moves a line between blocks: it sets four

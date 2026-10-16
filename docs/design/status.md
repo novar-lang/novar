@@ -80,6 +80,6 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 * Strings, vectors and tensors allocated by native code are never freed.
 * The interpreter is a tree walker: fine for serving glue, not for heavy numeric loops (use `telvax build`).
 * Enums and `match` run in the interpreter only; the native backend reports them as unsupported.
-* `telvax fmt` takes files and directories (`--check`, `--diff`) and keeps the line breaks you wrote (it fixes indentation, spacing and blank lines); it does not re-wrap long lines and has no settings. `telvax lint` only finds unused variables and unused private functions (names that start with `_`).
+* `telvax fmt` takes files and directories (`--check`, `--diff`) and keeps the line breaks you wrote (it fixes indentation, spacing and blank lines); it does not re-wrap long lines and has no settings. `telvax lint` has three rules: unused variables, unused private functions (names that start with `_`) and unreachable `case`s. Each can be set to `allow`, `warn` or `deny` in `telvax.toml` or with flags; there are no comments to silence one line.
 * `cargo test --workspace` runs on a Windows runner in CI and passes; it has not been tried on a physical Windows machine, and the native backend is not built there. Each published release is installed and run on Windows, Linux and macOS by the `verify` job of the release workflow.
 * PTX and StableHLO output have not been executed on NVIDIA or TPU hardware.

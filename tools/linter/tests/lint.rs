@@ -123,3 +123,48 @@ fn the_examples_have_nothing_to_report() {
     }
     assert!(seen > 0);
 }
+
+fn with_level(src: &str, rule: &str, level: &str) -> Vec<telvax_diagnostics::Diagnostic> {
+    let (ast, _) = telvax_parser::parse(src);
+    let (hir, _) = lower(&ast.unwrap());
+    let mut config = telvax_lint::Config::default();
+    config.set(
+        telvax_lint::Rule::parse(rule).unwrap(),
+        telvax_lint::Level::parse(level).unwrap(),
+    );
+    telvax_lint::lint_with(&hir, &config)
+}
+
+#[test]
+fn an_allowed_rule_reports_nothing() {
+    let src = "fn main():\n    let dead = 5\n";
+    assert!(with_level(src, "unused-variable", "allow").is_empty());
+}
+
+#[test]
+fn a_denied_rule_reports_errors() {
+    let src = "fn main():\n    let dead = 5\n";
+    let found = with_level(src, "unused-variable", "deny");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].is_error());
+}
+
+#[test]
+fn a_level_only_changes_its_own_rule() {
+    let src = "fn _helper() -> Int:\n    1\n\nfn main():\n    let dead = 5\n";
+    let found = with_level(src, "unused-variable", "allow");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].message.contains("_helper"));
+    assert!(!found[0].is_error());
+}
+
+#[test]
+fn unknown_rules_and_levels_say_what_to_write() {
+    let e = telvax_lint::Rule::parse("unused").unwrap_err();
+    assert!(
+        e.contains("unused-variable") && e.contains("unreachable-case"),
+        "{e}"
+    );
+    let e = telvax_lint::Level::parse("error").unwrap_err();
+    assert!(e.contains("allow, warn or deny"), "{e}");
+}

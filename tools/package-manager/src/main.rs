@@ -249,6 +249,7 @@ fn new_project(dir: &Path, name: &str, lib: bool) -> Res<()> {
             entry: None,
         },
         dependencies: Default::default(),
+        lint: Default::default(),
     }
     .write(dir)
     .map_err(|e| e.0)?;

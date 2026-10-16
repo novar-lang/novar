@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* **Lint rules you can configure:** the checks of `telvax lint` now have names (`unused-variable`,
+  `unused-function`, `unreachable-case`) and a level, `allow`, `warn` (the default) or `deny`. Set them in
+  a `[lint]` table in `telvax.toml` or with `--allow`, `--warn` and `--deny <rule>`; the flags win.
+  `telvax lint --list-rules` lists them. A `deny`ed rule is an error and makes the command fail.
 * **`telvax fmt` takes directories and shows a diff:** a directory means every `.tvx` file under it (hidden
   folders, `target`, `node_modules` and `.tvpm` are skipped), and no path means this directory.
   `--diff` prints the lines that would change as `@@ line N @@` blocks and writes nothing; like `--check`,
