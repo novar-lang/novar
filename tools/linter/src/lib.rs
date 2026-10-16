@@ -42,7 +42,7 @@ pub fn lint(program: &hir::Program) -> Vec<Diagnostic> {
         let exempt = f.is_pub
             || f.name == "main"
             || f.endpoint.is_some()
-            || ["test_", "fixture_", "teardown_"]
+            || ["test_", "fixture_", "teardown_", "cases_"]
                 .iter()
                 .any(|p| f.name.starts_with(p));
         if !exempt && !l.called.contains(&f.name) {

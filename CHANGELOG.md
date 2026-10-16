@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Cases in `telvax test`:** `fn cases_double() -> List[(Int, Int)]` runs `test_double(x, want)` once for
+  each item and lists each run as `test_double[(2, 4)]`. A tuple fills the first parameters; the rest are
+  fixtures. An empty list or items of the wrong type fail the test with a message.
 * **Fixtures in `telvax test`:** a test can take parameters; `fn test_x(db: Db)` gets `fixture_db()`, made
   again for each test, and `teardown_db(db)` runs after it even when the test fails. Fixtures can take
   other fixtures. `telvax lint` no longer calls `test_`, `fixture_` and `teardown_` functions unused.

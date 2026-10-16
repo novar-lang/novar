@@ -176,10 +176,84 @@ fn a_missing_or_mistyped_fixture_says_what_to_write() {
 
 #[test]
 fn lint_does_not_flag_tests_and_fixtures() {
-    let src = "fn fixture_n() -> Int:\n    1\n\nfn teardown_n(n: Int):\n    std.io.print(f\"{n}\")\n\nfn test_n(n: Int):\n    assert_eq(n, 1)\n";
+    let src = "fn fixture_n() -> Int:\n    1\n\nfn teardown_n(n: Int):\n    std.io.print(f\"{n}\")\n\nfn cases_m() -> List[Int]:\n    [1]\n\nfn test_m(m: Int, n: Int):\n    assert_eq(m, n)\n";
     let file = scratch("lintfixtures", src);
     let (ok, _, err) = run(&["lint", file.to_str().unwrap(), "--deny-warnings"]);
     assert!(ok, "{err}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn cases_run_a_test_once_for_each_value() {
+    let src = r#"fn double(x: Int) -> Int:
+    x * 2
+
+fn cases_double() -> List[(Int, Int)]:
+    [(1, 2), (2, 4), (3, 7)]
+
+fn test_double(x: Int, want: Int):
+    assert_eq(double(x), want)
+
+fn cases_small() -> List[Int]:
+    [1, 2]
+
+fn fixture_limit() -> Int:
+    5
+
+fn test_small(n: Int, limit: Int):
+    assert(n < limit)
+"#;
+    let file = scratch("cases", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path]);
+    assert!(!ok, "{out}{err}");
+    assert!(out.contains("ok      test_double[(1, 2)]"), "{out}");
+    assert!(out.contains("ok      test_double[(2, 4)]"), "{out}");
+    assert!(
+        out.contains("FAILED  test_double[(3, 7)]: assertion failed: left is `6`, right is `7`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("ok      test_small[1]") && out.contains("ok      test_small[2]"),
+        "{out}"
+    );
+    assert!(out.contains("4 passed, 1 failed"), "{out}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn bad_cases_say_what_is_wrong() {
+    let src = r#"fn cases_wide() -> List[(Int, Int, Int)]:
+    [(1, 2, 3)]
+
+fn test_wide(a: Int, b: Int):
+    assert(a < b)
+
+fn cases_typed() -> List[Text]:
+    ["a"]
+
+fn test_typed(n: Int):
+    assert(n > 0)
+
+fn cases_empty() -> List[Int]:
+    []
+
+fn test_empty(n: Int):
+    assert(n > 0)
+"#;
+    let file = scratch("badcases", src);
+    let path = file.to_str().unwrap();
+    let (ok, out, _) = run(&["test", path]);
+    assert!(!ok);
+    assert!(
+        out.contains("a case of `cases_wide` has 3 value(s) but `test_wide` takes 2 parameter(s)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("`test_typed` takes `n: Int` but the cases of `cases_typed` give `Text`"),
+        "{out}"
+    );
+    assert!(out.contains("`cases_empty` has no cases"), "{out}");
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }
 
