@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use telvax_diagnostics::Diagnostic;
 use telvax_hir::Ty;
@@ -12,6 +12,9 @@ use telvax_hir::hir::{self, ExprKind, ForIter, LocalId, Proj};
 use crate::position::LineIndex;
 
 mod completion;
+mod names;
+
+use names::{Edit, Key, Names};
 
 pub type Span = Range<usize>;
 
@@ -52,6 +55,10 @@ pub struct Snapshot {
     locals: HashMap<LocalId, LocalInfo>,
     /// Traits, aliases and type parameters, which the typed program no longer shows.
     decls: completion::Decls,
+    /// Functions, globals, types, variants, fields and methods, read from the syntax tree.
+    names: Names,
+    /// Where the document lives, for analysing a changed copy of it the same way.
+    path: Option<PathBuf>,
     /// The program came from an earlier version of the text because the current one could not
     /// be analysed (typically mid-edit). Types are still useful for completion, positions are not.
     pub stale: bool,
@@ -61,7 +68,11 @@ pub struct Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Occurrences {
     pub name: String,
+    /// Where the name is declared.
+    pub decl: Option<Span>,
     pub spans: Vec<Span>,
+    /// Finding every use needs the types (a field or a method): without them some are missed.
+    pub needs_types: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,9 +166,24 @@ impl Snapshot {
         if snap.hir.is_none()
             && let Some(prev) = previous.filter(|p| p.hir.is_some())
         {
+            // Positions of the earlier version are moved past the edit, so that definitions and
+            // references keep working while the text does not parse.
+            let edit = Edit::between(&prev.text, &snap.text);
             snap.hir = prev.hir.clone();
-            snap.nodes = prev.nodes.clone();
-            snap.locals = prev.locals.clone();
+            snap.nodes = prev
+                .nodes
+                .iter()
+                .filter_map(|n| edit.map(&n.span).map(|span| Node { span, ..n.clone() }))
+                .collect();
+            snap.locals = prev
+                .locals
+                .iter()
+                .filter_map(|(id, l)| {
+                    edit.map(&l.span)
+                        .map(|span| (*id, LocalInfo { span, ..l.clone() }))
+                })
+                .collect();
+            snap.names = prev.names.shifted(&edit);
             snap.decls = prev.decls.clone();
             snap.map = prev.map.clone();
             snap.stale = true;
@@ -202,6 +228,8 @@ impl Snapshot {
             nodes: Vec::new(),
             locals: HashMap::new(),
             decls: completion::Decls::of(&loaded.program),
+            names: Names::default(),
+            path: path.map(Path::to_path_buf),
             stale: false,
         };
         if let Some(h) = &hir {
@@ -210,6 +238,13 @@ impl Snapshot {
             snap.nodes = c.nodes;
             snap.locals = c.locals;
         }
+        let types: Option<HashMap<(usize, usize), Ty>> = hir.as_ref().map(|_| {
+            snap.nodes
+                .iter()
+                .map(|n| ((n.span.start, n.span.end), n.ty.clone()))
+                .collect()
+        });
+        snap.names = Names::of(&snap.text, types.as_ref());
         snap.hir = hir;
         snap
     }
@@ -307,77 +342,83 @@ impl Snapshot {
     }
 
     pub fn definition(&self, offset: usize) -> Option<Span> {
-        if self.stale {
-            return None;
+        if let Some((key, _)) = self.names.key_at(offset) {
+            return self.names.decl(key).cloned();
         }
         let prog = self.program()?;
         let node = self.node_at(offset)?;
         match &node.target {
             Target::Local(id) => self.locals.get(id).map(|l| l.span.clone()),
-            Target::Fn(name) => prog
-                .fns
-                .iter()
-                .find(|f| &f.name == name)
-                .map(|f| f.name_span.clone()),
+            Target::Fn(name) => self
+                .names
+                .decl(&Key::Fn(name.clone()))
+                .cloned()
+                .or_else(|| {
+                    prog.fns
+                        .iter()
+                        .find(|f| &f.name == name)
+                        .map(|f| f.name_span.clone())
+                }),
+            Target::Global(name) => self
+                .names
+                .decl(&Key::Global(name.clone()))
+                .cloned()
+                .or_else(|| {
+                    prog.globals
+                        .iter()
+                        .find(|g| &g.name == name)
+                        .map(|g| g.span.clone())
+                }),
             Target::Struct(name) => prog
                 .structs
                 .iter()
                 .find(|s| &s.name == name)
                 .map(|s| s.name_span.clone()),
-            Target::Global(name) => prog
-                .globals
-                .iter()
-                .find(|g| &g.name == name)
-                .map(|g| g.span.clone()),
             Target::Other => None,
         }
     }
 
-    /// The name under `offset` and every place it appears in this document (its definition
-    /// included), for a local variable or a function. `Err` says why a symbol cannot be handled.
+    /// The name under `offset` and every place it appears in this document (its declaration
+    /// included). `Err` says why a symbol cannot be handled.
     pub fn occurrences(&self, offset: usize) -> Result<Occurrences, String> {
-        if self.stale {
-            return Err("the document has errors that prevent analysing it".into());
-        }
-        let prog = self.program().ok_or("the document could not be analysed")?;
-        let target = self
-            .locals
-            .iter()
-            .find(|(_, l)| l.span.start <= offset && offset <= l.span.end)
-            .map(|(id, _)| Target::Local(*id))
-            .or_else(|| {
-                prog.fns
-                    .iter()
-                    .find(|f| f.name_span.start <= offset && offset <= f.name_span.end)
-                    .map(|f| Target::Fn(f.name.clone()))
-            })
-            .or_else(|| {
-                prog.structs
-                    .iter()
-                    .find(|s| s.name_span.start <= offset && offset <= s.name_span.end)
-                    .map(|s| Target::Struct(s.name.clone()))
-            })
-            .or_else(|| self.node_at(offset).map(|n| n.target.clone()))
-            .ok_or("there is no symbol here")?;
+        let target = match self.names.key_at(offset) {
+            Some((Key::Fn(n), _)) => Target::Fn(n.clone()),
+            Some((Key::Global(n), _)) => Target::Global(n.clone()),
+            Some((key, _)) => {
+                let (decl, spans) = self.names.spans(key);
+                return Ok(Occurrences {
+                    name: key.name().to_string(),
+                    decl,
+                    spans,
+                    needs_types: matches!(key, Key::Field(..) | Key::Method(..)),
+                });
+            }
+            None => self
+                .locals
+                .iter()
+                .find(|(_, l)| l.span.start <= offset && offset <= l.span.end)
+                .map(|(id, _)| Target::Local(*id))
+                .or_else(|| self.node_at(offset).map(|n| n.target.clone()))
+                .ok_or("there is no symbol here")?,
+        };
         let (name, decl) = match &target {
             Target::Local(id) => {
                 let l = self.locals.get(id).ok_or("unknown variable")?;
                 (l.name.clone(), l.span.clone())
             }
-            Target::Fn(name) => {
-                let f = prog
-                    .fns
-                    .iter()
-                    .find(|f| &f.name == name)
-                    .ok_or("unknown function")?;
-                (f.name.clone(), f.name_span.clone())
+            Target::Fn(name) | Target::Global(name) => {
+                let key = if matches!(target, Target::Fn(_)) {
+                    Key::Fn(name.clone())
+                } else {
+                    Key::Global(name.clone())
+                };
+                let decl = self
+                    .names
+                    .decl(&key)
+                    .ok_or_else(|| format!("`{name}` is defined in another file"))?;
+                (name.clone(), decl.clone())
             }
-            Target::Global(_) | Target::Struct(_) => {
-                return Err(
-                    "only variables and functions can be renamed or searched for now".into(),
-                );
-            }
-            Target::Other => return Err("there is no symbol here".into()),
+            Target::Struct(_) | Target::Other => return Err("there is no symbol here".into()),
         };
         let in_document =
             |s: &Span| s.end <= self.text.len() && self.text.get(s.clone()) == Some(name.as_str());
@@ -386,10 +427,10 @@ impl Snapshot {
         }
         let same = |t: &Target| match (t, &target) {
             (Target::Local(a), Target::Local(b)) => a == b,
-            (Target::Fn(a), Target::Fn(b)) => a == b,
+            (Target::Fn(a), Target::Fn(b)) | (Target::Global(a), Target::Global(b)) => a == b,
             _ => false,
         };
-        let mut spans: Vec<Span> = std::iter::once(decl)
+        let mut spans: Vec<Span> = std::iter::once(decl.clone())
             .chain(
                 self.nodes
                     .iter()
@@ -400,7 +441,12 @@ impl Snapshot {
             .collect();
         spans.sort_by_key(|s| s.start);
         spans.dedup();
-        Ok(Occurrences { name, spans })
+        Ok(Occurrences {
+            name,
+            decl: Some(decl),
+            spans,
+            needs_types: false,
+        })
     }
 
     /// The edits that rename the symbol under `offset` to `new_name`. The result is checked: the
@@ -421,12 +467,20 @@ impl Snapshot {
         if found.name == "main" {
             return Err("`main` is the entry point and cannot be renamed".into());
         }
+        if self.stale || !self.names.syntax_ok {
+            return Err("fix the syntax errors in this file before renaming".into());
+        }
+        if found.needs_types && !self.names.typed {
+            return Err(
+                "the types of this file are not known; fix its errors before renaming".into(),
+            );
+        }
         let mut renamed = self.text.clone();
         for span in found.spans.iter().rev() {
             renamed.replace_range(span.clone(), new_name);
         }
         let errors = |s: &Snapshot| s.diagnostics.iter().filter(|d| d.is_error()).count();
-        let after = Snapshot::analyze(renamed);
+        let after = Snapshot::analyze_in(renamed, self.path.as_deref());
         if errors(&after) > errors(self) {
             return Err(format!("`{new_name}` collides with another name in scope"));
         }
@@ -695,3 +749,6 @@ impl Collector {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

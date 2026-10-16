@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+* **Go to definition, references and rename for more than variables:** they now work on `type`s, `enum`s,
+  `trait`s and aliases (in annotations, `impl`, constructions and patterns), enum variants
+  (`Shape.Circle`, `case Shape.Circle(r)`), fields (`p.x`, `Point(x: 1)`, `Point(x: a)` patterns), methods
+  (`p.norm()`, `Point.new()`) and top-level `let` globals. Renaming a method also renames it in the trait
+  and in the types that implement it. While the file has a syntax error, definition and references keep
+  working from the last good analysis, with positions moved past the edit; rename waits until the file parses.
+  References no longer take the first match for the declaration, and the check that a rename does not
+  collide with another name analyses the file with its imports.
 * **Completion in context:** the language server now offers types after `:` and `->`, inside `List[..]`,
   `Map[..]` and `Table[..]`, after `type Id =` and for the fields of a `type` (built-in types, your
   `type`s, `enum`s, `trait`s, aliases and the type parameters in scope). After a dot it knows the methods

@@ -401,8 +401,9 @@ a closure you are writing (`xs.map(p => p.`) and the columns of a table inside `
 type the code expects comes first.
 
 The language server formats documents too, so VS Code can format on save. It also finds all
-references to a variable or function and renames them (a rename is refused when the new name
-would collide with another one in scope, or when the symbol is a type or lives in another file).
+references to a variable, function, global, type, enum variant, field or method and renames them (a
+rename is refused when the new name would collide with another one in scope, when the file has a syntax
+error, or when the symbol lives in another file).
 
 ## Strings and lists
 

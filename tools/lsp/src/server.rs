@@ -330,7 +330,7 @@ fn handle_request(state: &Documents, req: Request) -> Response {
             let found = snap.occurrences(snap.index.offset(pos.position));
             let locations: Vec<Location> = found
                 .map(|o| {
-                    let declaration = o.spans.first().cloned();
+                    let declaration = o.decl.clone();
                     o.spans
                         .into_iter()
                         .filter(|s| {

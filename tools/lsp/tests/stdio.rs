@@ -352,13 +352,8 @@ fn finds_references_and_renames_variables_and_functions() {
             .contains("collides"),
         "{clash}"
     );
+    // Types are renamed too: `Point` is declared on line 0 and used where it is built.
     let on_struct = c.request("textDocument/prepareRename", at(0, 7));
-    assert!(
-        on_struct["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("only variables and functions"),
-        "{on_struct}"
-    );
+    assert_eq!(on_struct["result"]["placeholder"], "Point", "{on_struct}");
     c.request("shutdown", json!(null));
 }

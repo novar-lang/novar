@@ -8,7 +8,8 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
 * **Inlay hints** showing the inferred type of `let` bindings and loop variables.
 * **Completion** for types, fields, table columns (also inside `t["..` and `t.sql("..`), methods of built-in and
   your own types, enum variants, `std.` paths, functions and variables, ordered by the type the code expects.
-* **Go to definition**, **find references**, **rename** and **document symbols**.
+* **Go to definition**, **find references**, **rename** and **document symbols** for variables, functions,
+  globals, types, enum variants, fields and methods.
 * **Formatting** with the same rules as `telvax fmt`.
 * **Snippets** for `fn`, `main`, `type`, `enum`, `match`, `for`, `test`, `endpoint` and `trait`.
 
