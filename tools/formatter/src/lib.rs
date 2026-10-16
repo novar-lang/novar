@@ -38,6 +38,73 @@ pub fn is_formatted(src: &str) -> Result<bool, String> {
     format(src).map(|f| f == src)
 }
 
+/// The lines that formatting changes: a `@@ line N @@` header for each change (N counts lines of
+/// `old`), then the lines taken out with `-` and the lines put in with `+`.
+pub fn diff(old: &str, new: &str) -> String {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let suffix = a[prefix..]
+        .iter()
+        .rev()
+        .zip(b[prefix..].iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
+    let (a_mid, b_mid) = (&a[prefix..a.len() - suffix], &b[prefix..b.len() - suffix]);
+    // `keep[i][j]`: lines of the common subsequence of `a_mid[i..]` and `b_mid[j..]`. A change too
+    // large for the table is shown as one block.
+    let mut out = String::new();
+    let mut hunk = |line: usize, removed: &[&str], added: &[&str]| {
+        if removed.is_empty() && added.is_empty() {
+            return;
+        }
+        out.push_str(&format!("@@ line {line} @@\n"));
+        removed
+            .iter()
+            .for_each(|l| out.push_str(&format!("-{l}\n")));
+        added.iter().for_each(|l| out.push_str(&format!("+{l}\n")));
+    };
+    if a_mid.len() * b_mid.len() > 4_000_000 {
+        hunk(prefix + 1, a_mid, b_mid);
+        return out;
+    }
+    let (n, m) = (a_mid.len(), b_mid.len());
+    let mut keep = vec![vec![0u32; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            keep[i][j] = if a_mid[i] == b_mid[j] {
+                keep[i + 1][j + 1] + 1
+            } else {
+                keep[i + 1][j].max(keep[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    let (mut start, mut removed, mut added) = (0, Vec::new(), Vec::new());
+    while i < n || j < m {
+        if i < n && j < m && a_mid[i] == b_mid[j] {
+            hunk(start, &removed, &added);
+            removed.clear();
+            added.clear();
+            i += 1;
+            j += 1;
+            continue;
+        }
+        if removed.is_empty() && added.is_empty() {
+            start = prefix + i + 1;
+        }
+        if j == m || (i < n && keep[i + 1][j] >= keep[i][j + 1]) {
+            removed.push(a_mid[i]);
+            i += 1;
+        } else {
+            added.push(b_mid[j]);
+            j += 1;
+        }
+    }
+    hunk(start, &removed, &added);
+    out
+}
+
 fn is_layout(t: &Token) -> bool {
     matches!(t, Token::Newline | Token::Indent | Token::Dedent)
 }

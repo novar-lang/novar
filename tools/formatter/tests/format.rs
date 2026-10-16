@@ -149,3 +149,22 @@ fn no_prefix_of_an_example_makes_the_formatter_panic() {
         }
     }
 }
+
+#[test]
+fn diff_shows_only_the_lines_that_change() {
+    let old = "fn f(a:Int):\n  a\n\nfn g():\n  1\n";
+    let new = fmt(old);
+    assert_eq!(
+        telvax_fmt::diff(old, &new),
+        "@@ line 1 @@\n-fn f(a:Int):\n-  a\n+fn f(a: Int):\n+    a\n@@ line 5 @@\n-  1\n+    1\n"
+    );
+    assert_eq!(telvax_fmt::diff(&new, &new), "");
+    assert_eq!(
+        telvax_fmt::diff("a\nb\n", "a\nx\nb\n"),
+        "@@ line 2 @@\n+x\n"
+    );
+    assert_eq!(
+        telvax_fmt::diff("a\nx\nb\n", "a\nb\n"),
+        "@@ line 2 @@\n-x\n"
+    );
+}
