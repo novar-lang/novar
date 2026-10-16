@@ -110,6 +110,36 @@ async function run() {
   assert.ok(await vscode.workspace.applyEdit(edit), "the edits apply");
   assert.strictEqual(messy.getText(), "fn main() -> i32:\n    let x = 1\n    x + 2\n");
 
+  // Debugging: a breakpoint in `norm` (line 6) stops the run started by the command.
+  await vscode.window.showTextDocument(ok);
+  const breakpoint = new vscode.SourceBreakpoint(new vscode.Location(ok.uri, new vscode.Position(5, 0)));
+  vscode.debug.addBreakpoints([breakpoint]);
+  await vscode.commands.executeCommand("telvax.debugFile");
+  const session = await until("a debug session", () => vscode.debug.activeDebugSession);
+  assert.strictEqual(session.type, "telvax");
+  // The program runs on its own thread: ask for the stack until it has stopped.
+  const frames = await until("the stop at the breakpoint", async () => {
+    try {
+      const r = await session.customRequest("stackTrace", { threadId: 1 });
+      return r.stackFrames.length ? r.stackFrames : null;
+    } catch {
+      return null;
+    }
+  });
+  assert.deepStrictEqual(
+    frames.map((f) => [f.name, f.line]),
+    [["norm", 6], ["main", 10]],
+  );
+  const scopes = await session.customRequest("scopes", { frameId: frames[0].id });
+  const locals = await session.customRequest("variables", {
+    variablesReference: scopes.scopes[0].variablesReference,
+  });
+  assert.deepStrictEqual(
+    locals.variables.map((v) => [v.name, v.value]),
+    [["p", "Point(x=1.0, y=2.0)"]],
+  );
+  await vscode.debug.stopDebugging(session);
+  vscode.debug.removeBreakpoints([breakpoint]);
 }
 
 module.exports = { run };

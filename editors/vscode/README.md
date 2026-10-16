@@ -10,6 +10,10 @@ Language support for [Telvax](https://github.com/telvax/telvax), powered by the 
   your own types, enum variants, `std.` paths, functions and variables, ordered by the type the code expects.
 * **Go to definition**, **find references**, **rename** and **document symbols** for variables, functions,
   globals, types, enum variants, fields and methods, across the files of the project.
+* **Debugger** for `.tvx` files: breakpoints, step over / into / out, the calls in progress, variables that
+  expand, and hovering a name or a field (`p.x`) to see its value. Press F5 on a Telvax file, use
+  **Telvax: Debug Current File**, or add a `telvax` launch configuration. It runs the program in the
+  interpreter through `telvax dap`.
 * **Formatting** with the same rules as `telvax fmt`.
 * **Snippets** for `fn`, `main`, `type`, `enum`, `match`, `for`, `test`, `endpoint` and `trait`.
 
@@ -31,7 +35,30 @@ or point the `telvax.server.path` setting at the executable. Each GitHub release
 | `telvax.server.args` | `["lsp"]` | arguments that select language-server mode |
 | `telvax.trace.server` | `off` | protocol tracing (`messages`, `verbose`) |
 
-Command: **Telvax: Restart Language Server**.
+Commands: **Telvax: Restart Language Server**, **Telvax: Debug Current File** and **Telvax: Run Current File
+Without Debugging**.
+
+## Debugging
+
+F5 on a `.tvx` file starts a session without a `launch.json`. To set it up, add a configuration:
+
+```json
+{
+  "type": "telvax",
+  "request": "launch",
+  "name": "Debug the current Telvax file",
+  "program": "${file}",
+  "function": "main",
+  "args": [],
+  "stopOnEntry": false
+}
+```
+
+`args` are the words you would give `telvax run` after the function name; `allow` takes the same list as
+`--allow` (`fs.read`, `net`, `none`, ...). The debugger stops before a statement, so a breakpoint on a line
+that starts no statement moves to the next one that does. `telvax.server.path` also selects the executable
+that is started as `telvax dap`. There are no conditional breakpoints, the debug console evaluates only names
+and their fields, and programs built with `telvax build` cannot be debugged.
 
 ## Publishing
 
