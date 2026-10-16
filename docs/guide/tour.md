@@ -369,6 +369,21 @@ fn test_pick():
 
 Macros run in the interpreter, as `assert` does; the native backend does not compile them.
 
+## Debugging
+
+```sh
+telvax dap       # a debug adapter on standard input and output
+```
+
+`telvax dap` speaks the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/), so an
+editor that has a client for it can run a program in the interpreter, stop it at breakpoints and step through
+it. Its launch request takes `program` (the `.tvx` file), `function` (default `main`), `args` (the words
+you would give `telvax run`), `stopOnEntry`, `noDebug` and `allow` (the same list as `--allow`). It stops
+before each statement, so a breakpoint goes on a line that starts a statement; on any other line it moves
+to the next one that does. While stopped it lists the calls in progress and their variables, and a name or
+a field of one (`p.x`, `xs.0`) can be evaluated; other expressions cannot. It debugs the interpreter, not
+programs from `telvax build`, and has no conditional breakpoints.
+
 ## Profiling
 
 ```sh

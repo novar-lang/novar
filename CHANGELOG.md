@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **`telvax dap`, a debug adapter:** speaks the Debug Adapter Protocol on standard input and output, so an
+  editor can run a `.tvx` file in the interpreter and stop it at breakpoints (a breakpoint on a line with no
+  statement moves to the next one), step over, into and out, pause, look at the calls in progress, open
+  variables (lists, maps, types, variants and tuples expand), hover over a name or a field such as `p.x`, and
+  see what the program prints in the debug console. The launch configuration takes `program`, `function`,
+  `args`, `stopOnEntry`, `noDebug` and `allow`. The VS Code extension does not use it yet.
 * **`telvax profile`:** runs a function and reports the time and calls per function (in the function
   itself and with its calls), the hits and time per statement, the time, rows and bytes of each `std`
   operation (`std.tensor.matmul`, `std.table.sql`, ...), and the memory (peak, bytes and number of
