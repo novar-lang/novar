@@ -99,8 +99,11 @@ fn work_is_spread_over_workers_and_results_keep_their_order() {
         spawn(None).unwrap(),
     );
     let interp = interp_with(vec![a.address(), b.address(), c.address()], None);
-    let out = ints(interp.call("squares", vec![range(300)]).unwrap());
-    assert_eq!(out, (0..300).map(|x| x * x).collect::<Vec<_>>());
+    // Each item takes long enough that one worker cannot drain the queue before the others start.
+    let sizes = Value::vec((0..300).map(|i| Value::Int(5_000 + i)).collect());
+    let out = ints(interp.call("crunch", vec![sizes.clone()]).unwrap());
+    let heavy = |n: i64| (0..n).map(|i| i * i % 7).sum::<i64>();
+    assert_eq!(out, (0..300).map(|i| heavy(5_000 + i)).collect::<Vec<_>>());
     let calls: Vec<u64> = [&a, &b, &c]
         .iter()
         .map(|w| health(&w.address())["calls"].as_u64().unwrap())
