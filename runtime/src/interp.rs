@@ -103,6 +103,14 @@ pub struct Interp {
     quantization: std::sync::atomic::AtomicU8,
     executor: RwLock<Option<Arc<dyn Executor>>>,
     device: std::sync::atomic::AtomicU8,
+    /// Functions that tests replaced with `std.test.mock`, by name (`fetch`) or path (`std::fs::read`).
+    mocks: Mutex<HashMap<String, Mock>>,
+    mocked: std::sync::atomic::AtomicBool,
+}
+
+struct Mock {
+    replacement: Value,
+    calls: i64,
 }
 
 impl fmt::Debug for Interp {
@@ -161,6 +169,8 @@ impl Interp {
             quantization: std::sync::atomic::AtomicU8::new(0),
             executor: RwLock::new(None),
             device: std::sync::atomic::AtomicU8::new(0),
+            mocks: Mutex::new(HashMap::new()),
+            mocked: std::sync::atomic::AtomicBool::new(false),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -324,6 +334,66 @@ impl Interp {
             need.name(),
             need.name()
         )))
+    }
+
+    /// The key a test names a function by: a std path (`"std.fs.read"`) or a function value.
+    pub(crate) fn mock_key(&self, target: &Value) -> Result<String, RuntimeError> {
+        match target {
+            Value::Func(name) if self.fns.contains_key(&**name) => Ok(name.to_string()),
+            Value::Func(name) => Err(RuntimeError::new(format!("no function `{name}`"))),
+            Value::Str(path) => {
+                let key = path.replace('.', "::");
+                if key.starts_with("std::test::") {
+                    Err(RuntimeError::new("the test functions cannot be mocked"))
+                } else if telvax_hir::stdlib::function_paths().any(|p| p == key) {
+                    Ok(key)
+                } else {
+                    Err(RuntimeError::new(format!(
+                        "`{path}` is not a std function; mock your own function by passing it without quotes: `std.test.mock(fetch, fake_fetch)`"
+                    )))
+                }
+            }
+            other => Err(RuntimeError::new(format!(
+                "cannot mock {}: pass a function or the path of a std function",
+                other.type_name()
+            ))),
+        }
+    }
+
+    pub(crate) fn set_mock(&self, key: String, replacement: Value) {
+        self.mocks.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            key,
+            Mock {
+                replacement,
+                calls: 0,
+            },
+        );
+        self.mocked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn mock_calls(&self, key: &str) -> Option<i64> {
+        let mocks = self.mocks.lock().unwrap_or_else(|e| e.into_inner());
+        mocks.get(key).map(|m| m.calls)
+    }
+
+    /// Puts back every function a test replaced. `telvax test` does this after each test.
+    pub fn reset_mocks(&self) {
+        self.mocks.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.mocked
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The replacement for `key`, counting the call, when a test mocked it.
+    fn mock_for(&self, key: &str) -> Option<Value> {
+        if !self.mocked.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let mut mocks = self.mocks.lock().unwrap_or_else(|e| e.into_inner());
+        mocks.get_mut(key).map(|m| {
+            m.calls += 1;
+            m.replacement.clone()
+        })
     }
 
     pub fn is_live(&self) -> bool {
@@ -1099,6 +1169,9 @@ impl Interp {
         match &callee.kind {
             ExprKind::Fn(name) => {
                 let args = eval_args(self, ctx)?;
+                if let Some(mock) = self.mock_for(name) {
+                    return self.apply_at(&mock, args, ctx.depth);
+                }
                 let f = self.fns.get(name).ok_or_else(|| {
                     Ctrl::Fail(RuntimeError::new(format!("no function `{name}`")))
                 })?;
@@ -1110,6 +1183,9 @@ impl Interp {
                     return Ok(v);
                 }
                 let mut args = eval_args(self, ctx)?;
+                if let Some(mock) = self.mock_for(&path.join("::")) {
+                    return self.apply_at(&mock, args, ctx.depth);
+                }
                 match path.as_slice() {
                     [n] if n == "Ok" || n == "Err" => {
                         let v = Box::new(args.remove(0));

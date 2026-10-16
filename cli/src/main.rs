@@ -473,7 +473,9 @@ fn test_file(
         };
         for (label, given) in runs {
             total += 1;
-            match run_test(&interp, name, given) {
+            let outcome = run_test(&interp, name, given);
+            interp.reset_mocks();
+            match outcome {
                 Ok(()) => println!("ok      {label}"),
                 Err(e) => {
                     failures += 1;

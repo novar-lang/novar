@@ -86,6 +86,25 @@ pub(crate) fn call_function(interp: &Interp, path: &str, args: Vec<Value>, resul
             Value::Bool(true) => Ok(Value::Unit),
             _ => err(want_str(&args[1])?.to_string()),
         },
+        "std::test::mock" => {
+            let key = interp.mock_key(&args[0])?;
+            interp.set_mock(key, args[1].clone());
+            Ok(Value::Unit)
+        }
+        "std::test::calls" => {
+            let key = interp.mock_key(&args[0])?;
+            match interp.mock_calls(&key) {
+                Some(n) => Ok(Value::Int(n)),
+                None => err(format!(
+                    "`{}` is not mocked: call `std.test.mock` first",
+                    key.replace("::", ".")
+                )),
+            }
+        }
+        "std::test::reset_mocks" => {
+            interp.reset_mocks();
+            Ok(Value::Unit)
+        }
         "std::test::fail" => err(want_str(&args[0])?.to_string()),
         "std::debug::dbg" => {
             eprintln!("{} = {}", want_str(&args[1])?, args[0]);
