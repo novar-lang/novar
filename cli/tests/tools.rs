@@ -90,6 +90,39 @@ fn test_runs_the_test_functions() {
 }
 
 #[test]
+fn test_on_a_directory_runs_every_test_file() {
+    let dir = std::env::temp_dir().join(format!("telvax-tools-{}-testdir", std::process::id()));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let good = "fn test_one():\n    assert_eq(1, 1)\n";
+    std::fs::write(dir.join("test_a.tvx"), good).unwrap();
+    std::fs::write(dir.join("sub").join("b_test.tvx"), good).unwrap();
+    std::fs::write(
+        dir.join("helper.tvx"),
+        "fn test_ignored():\n    assert_eq(1, 2)\n",
+    )
+    .unwrap();
+    let path = dir.to_str().unwrap();
+    let (ok, out, err) = run(&["test", path]);
+    assert!(ok, "{out}{err}");
+    assert!(
+        out.contains("test_a.tvx") && out.contains("b_test.tvx"),
+        "{out}"
+    );
+    assert!(!out.contains("helper.tvx"), "{out}");
+    assert!(out.contains("2 passed, 0 failed"), "{out}");
+    std::fs::write(
+        dir.join("test_c.tvx"),
+        "fn test_bad():\n    assert_eq(1, 2)\n",
+    )
+    .unwrap();
+    let (ok, out, _) = run(&["test", path]);
+    assert!(!ok && out.contains("2 passed, 1 failed"), "{out}");
+    let (ok, out, _) = run(&["test", path, "one"]);
+    assert!(ok && out.contains("2 passed, 0 failed"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn macros_quote_their_argument_and_dbg_gives_the_value_back() {
     let src = "fn pick(n: Int) -> Int:\n    if n > 0:\n        n\n    else:\n        todo!()\n\nfn test_dbg():\n    let x = dbg!(pick(4))\n    assert!(x == 4)\n\nfn test_quote():\n    let x = 1\n    assert!(x > 3)\n\nfn test_message():\n    assert!(1 > 3, \"one is small\")\n\nfn test_todo():\n    pick(0)\n\nfn test_panic():\n    panic!(\"boom\")\n";
     let file = scratch("macros", src);

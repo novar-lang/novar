@@ -5,7 +5,7 @@ mod native;
 mod serve;
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use telvax_diagnostics::Diagnostic;
@@ -16,7 +16,7 @@ usage:
   telvax check [--json] [file.tvx...]                       no file: the package in this directory
   telvax lint <file.tvx> [--deny-warnings]                    unused variables and functions
   telvax fmt [--check] <file.tvx>...                          format in place (`-` reads stdin)
-  telvax test <file.tvx> [name] [--allow list]              run the `test_*` functions
+  telvax test [file.tvx|dir] [name] [--allow list]          run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
   telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
   telvax doctor                                             what this build can do and how it is set up
   telvax lsp                                                language server over stdio
@@ -100,11 +100,16 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             [func, args @ ..] if !func.starts_with('-') => run(file, func, args),
             _ => run(file, "main", rest),
         },
-        ["test", file, rest @ ..] => {
+        // Without a path, `test` looks in this directory.
+        ["test", rest @ ..] => {
+            let (path, rest) = match rest {
+                [path, rest @ ..] if !path.starts_with('-') => (*path, rest),
+                _ => (".", rest),
+            };
             let (caps, rest) = take_allow(rest)?;
             match rest.as_slice() {
-                [] => test(file, None, caps),
-                [filter] => test(file, Some(filter), caps),
+                [] => test(path, None, caps),
+                [filter] => test(path, Some(filter), caps),
                 _ => Err(CliError::Usage),
             }
         }
@@ -367,9 +372,79 @@ fn call_arguments(interp: &Interp, func: &str, words: &[&str]) -> Result<Vec<Val
         .collect()
 }
 
-/// `telvax test <file> [name]`: runs every function called `test_*` that takes no arguments. A
+/// `telvax test [path] [name]`: runs every function called `test_*` that takes no arguments. A
 /// test passes when it returns and fails when it stops with an error (`assert`, `assert_eq`, ...).
-fn test(file: &str, filter: Option<&str>, caps: telvax_runtime::Caps) -> Result<(), CliError> {
+/// A directory runs every `test_*.tvx` and `*_test.tvx` file under it.
+fn test(path: &str, filter: Option<&str>, caps: telvax_runtime::Caps) -> Result<(), CliError> {
+    if !Path::new(path).is_dir() {
+        let (passed, failures) = test_file(path, filter, caps)?;
+        println!("{passed} passed, {failures} failed");
+        return if failures > 0 { failed("") } else { Ok(()) };
+    }
+    let mut files = Vec::new();
+    collect_test_files(Path::new(path), &mut files);
+    files.sort();
+    if files.is_empty() {
+        return failed(format!(
+            "no test files in `{path}` (a test file is named `test_*.tvx` or `*_test.tvx`)"
+        ));
+    }
+    let (mut passed, mut failures, mut ran) = (0, 0, 0);
+    for file in &files {
+        let file = file.to_string_lossy();
+        println!("== {file}");
+        match test_file(&file, filter, caps) {
+            Ok((p, f)) => {
+                passed += p;
+                failures += f;
+                ran += 1;
+            }
+            Err(CliError::Failed(msg)) if msg.starts_with("no test functions") => {}
+            Err(CliError::Failed(msg)) => {
+                failures += 1;
+                if !msg.is_empty() {
+                    eprintln!("error: {msg}");
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if ran == 0 && failures == 0 {
+        return failed(
+            "no test functions found (a test is a function named `test_...` without arguments)",
+        );
+    }
+    println!("{passed} passed, {failures} failed");
+    if failures > 0 { failed("") } else { Ok(()) }
+}
+
+/// The `test_*.tvx` and `*_test.tvx` files under `dir`, skipping hidden folders, `target` and
+/// `node_modules`.
+fn collect_test_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                collect_test_files(&path, out);
+            }
+        } else if let Some(stem) = name.strip_suffix(".tvx")
+            && (stem.starts_with("test_") || stem.ends_with("_test"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// Runs the tests of one file and returns how many passed and failed.
+fn test_file(
+    file: &str,
+    filter: Option<&str>,
+    caps: telvax_runtime::Caps,
+) -> Result<(usize, usize), CliError> {
     let checked = check_project(file)?;
     let mut names: Vec<String> = checked
         .hir
@@ -396,8 +471,7 @@ fn test(file: &str, filter: Option<&str>, caps: telvax_runtime::Caps) -> Result<
             }
         }
     }
-    println!("{} passed, {failures} failed", names.len() - failures);
-    if failures > 0 { failed("") } else { Ok(()) }
+    Ok((names.len() - failures, failures))
 }
 
 fn run(file: &str, func: &str, args: &[&str]) -> Result<(), CliError> {
