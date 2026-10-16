@@ -1,0 +1,16 @@
+[package]
+name = "telvax_doc"
+description = "Telvax: reference documentation generated from the source"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+telvax_ast = { path = "../../compiler/ast" }
+telvax_parser = { path = "../../compiler/parser" }

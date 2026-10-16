@@ -19,6 +19,7 @@ usage:
   telvax lint <file.tvx> [--allow|--warn|--deny rule]... [--deny-warnings] [--list-rules]
                                                             unused variables and functions, unreachable cases
   telvax fmt [--check] [--diff] [file.tvx|dir]...             format in place (`-` reads stdin; no path: this directory)
+  telvax doc [--public] [-o out.md] [file.tvx|dir]...      Markdown reference from the types, signatures and `#` comments
   telvax test [file.tvx|dir] [name] [--allow list] [--coverage] [--fail-under N]
                                                             run the `test_*` functions (a directory: `test_*.tvx`, `*_test.tvx`)
   telvax run <file.tvx> [function] [args...] [--allow list] [--quantize int8|int8-channel|int4-channel] [--device gpu]
@@ -100,6 +101,7 @@ fn dispatch(args: &[String]) -> Result<(), CliError> {
             }
             Ok(())
         }
+        ["doc", rest @ ..] => doc(rest),
         ["lint", file, rest @ ..] => lint(file, rest),
         ["--version" | "-V" | "version"] => {
             println!("telvax {}", env!("CARGO_PKG_VERSION"));
@@ -925,6 +927,62 @@ fn fmt(args: &[&str]) -> Result<(), CliError> {
         return failed(format!("{unformatted} file(s) need formatting"));
     }
     Ok(())
+}
+
+/// `telvax doc [--public] [-o out.md] [path...]`: a Markdown reference of the functions, types, enums
+/// and traits in each file, with the `#` comment lines above them. A directory means every `.tvx` file
+/// under it; no path means this directory. `--public` leaves out names that start with `_`.
+fn doc(args: &[&str]) -> Result<(), CliError> {
+    let mut opts = telvax_doc::Options::default();
+    let mut output: Option<&str> = None;
+    let mut paths: Vec<&str> = Vec::new();
+    let mut it = args.iter();
+    while let Some(&a) = it.next() {
+        match a {
+            "--public" => opts.public_only = true,
+            "-o" => output = Some(it.next().copied().ok_or(CliError::Usage)?),
+            _ if a.starts_with('-') => {
+                return failed(format!("unknown option `{a}` for `telvax doc`"));
+            }
+            _ => paths.push(a),
+        }
+    }
+    if paths.is_empty() {
+        paths.push(".");
+    }
+    let mut files: Vec<PathBuf> = Vec::new();
+    for path in paths {
+        if Path::new(path).is_dir() {
+            let mut found = Vec::new();
+            collect_tvx_files(Path::new(path), &mut found);
+            if found.is_empty() {
+                return failed(format!("no `.tvx` files in `{path}`"));
+            }
+            found.sort();
+            files.extend(found);
+        } else {
+            files.push(PathBuf::from(path));
+        }
+    }
+    let mut text = String::from("# Reference\n\n");
+    for file in files {
+        let name = file.to_string_lossy();
+        let src = std::fs::read_to_string(&file)
+            .or_else(|e| failed(format!("cannot read `{name}`: {e}")))?;
+        let section = telvax_doc::generate(&src, name.trim_start_matches("./"), opts)
+            .or_else(|e| failed(format!("`{name}`: {e}")))?;
+        text.push_str(&section);
+        text.push('\n');
+    }
+    match output {
+        Some(out) => {
+            std::fs::write(out, text).or_else(|e| failed(format!("cannot write `{out}`: {e}")))
+        }
+        None => {
+            print!("{text}");
+            Ok(())
+        }
+    }
 }
 
 /// Every `.tvx` file under `dir`, skipping hidden folders, `target`, `node_modules` and `.tvpm`.

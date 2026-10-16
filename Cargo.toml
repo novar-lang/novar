@@ -19,6 +19,7 @@ members = [
     "tools/repl",
     "tools/dap",
     "tools/formatter",
+    "tools/doc",
     "tools/migrate",
     "tools/linter",
     "tools/cluster",

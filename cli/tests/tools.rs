@@ -748,3 +748,24 @@ fn lint_levels_come_from_the_manifest_and_the_flags() {
     assert!(ok && out.contains("unused-function"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn doc_writes_markdown_from_signatures_and_comments() {
+    let file = scratch(
+        "documented",
+        "# Adds one.\nfn bump(n: Int) -> Int:\n    n + 1\n\nfn _hidden() -> Int:\n    0\n",
+    );
+    let path = file.to_str().unwrap();
+    let (ok, out, err) = run(&["doc", path]);
+    assert!(ok, "{err}");
+    assert!(
+        out.contains("fn bump(n: Int) -> Int") && out.contains("Adds one."),
+        "{out}"
+    );
+    assert!(out.contains("_hidden"), "{out}");
+    let (ok, out, _) = run(&["doc", "--public", path]);
+    assert!(ok && !out.contains("_hidden"), "{out}");
+    let (ok, _, err) = run(&["doc", "--nope", path]);
+    assert!(!ok && err.contains("unknown option"), "{err}");
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
