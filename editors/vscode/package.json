@@ -1,7 +1,7 @@
 {
   "name": "telvax",
   "displayName": "Telvax",
-  "description": "Language support for Telvax: syntax highlighting, diagnostics, hover, completion, go to definition and inferred-type hints.",
+  "description": "Language support for Telvax: syntax highlighting, diagnostics, hover, completion, go to definition, references, rename, inferred-type hints and a debugger with breakpoints.",
   "version": "0.0.5",
   "publisher": "telvax",
   "license": "MIT OR Apache-2.0",
@@ -23,7 +23,9 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:telvax"
+    "onLanguage:telvax",
+    "onDebugResolve:telvax",
+    "onDebugInitialConfigurations"
   ],
   "contributes": {
     "languages": [
@@ -52,7 +54,7 @@
         "telvax.server.path": {
           "type": "string",
           "default": "telvax",
-          "markdownDescription": "Path to the `telvax` executable. The extension starts it as `telvax lsp`."
+          "markdownDescription": "Path to the `telvax` executable. The extension starts it as `telvax lsp` for the language server and as `telvax dap` for the debugger."
         },
         "telvax.server.args": {
           "type": "array",
@@ -80,6 +82,14 @@
       {
         "command": "telvax.restartServer",
         "title": "Telvax: Restart Language Server"
+      },
+      {
+        "command": "telvax.debugFile",
+        "title": "Telvax: Debug Current File"
+      },
+      {
+        "command": "telvax.runFileWithoutDebugging",
+        "title": "Telvax: Run Current File Without Debugging"
       }
     ],
     "configurationDefaults": {
@@ -94,7 +104,102 @@
         "language": "telvax",
         "path": "./snippets/telvax.code-snippets"
       }
-    ]
+    ],
+    "breakpoints": [
+      {
+        "language": "telvax"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "telvax",
+        "label": "Telvax",
+        "languages": [
+          "telvax"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The .tvx file to run.",
+                "default": "${file}"
+              },
+              "function": {
+                "type": "string",
+                "description": "The function to run.",
+                "default": "main"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments for the function, as you would give them to `telvax run`.",
+                "default": []
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop at the first statement.",
+                "default": false
+              },
+              "noDebug": {
+                "type": "boolean",
+                "description": "Run without stopping at breakpoints.",
+                "default": false
+              },
+              "allow": {
+                "type": "string",
+                "description": "What the program may do outside itself, as for `telvax run --allow` (fs.read, fs.write, fs, env, net, all, none).",
+                "default": "all"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "telvax",
+            "request": "launch",
+            "name": "Debug the current Telvax file",
+            "program": "${file}",
+            "function": "main",
+            "stopOnEntry": false
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Telvax: Debug a file",
+            "description": "Run a .tvx file in the debugger.",
+            "body": {
+              "type": "telvax",
+              "request": "launch",
+              "name": "${1:Debug the current Telvax file}",
+              "program": "${2:${file}}",
+              "function": "${3:main}",
+              "args": [],
+              "stopOnEntry": false
+            }
+          }
+        ]
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "telvax.debugFile",
+          "when": "resourceLangId == telvax",
+          "group": "navigation@1"
+        },
+        {
+          "command": "telvax.runFileWithoutDebugging",
+          "when": "resourceLangId == telvax",
+          "group": "navigation@2"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",

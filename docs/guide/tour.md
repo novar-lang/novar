@@ -375,7 +375,7 @@ Macros run in the interpreter, as `assert` does; the native backend does not com
 telvax dap       # a debug adapter on standard input and output
 ```
 
-`telvax dap` speaks the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/), so an
+In VS Code, F5 on a Telvax file debugs it (see the extension's README). `telvax dap` speaks the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/), so an
 editor that has a client for it can run a program in the interpreter, stop it at breakpoints and step through
 it. Its launch request takes `program` (the `.tvx` file), `function` (default `main`), `args` (the words
 you would give `telvax run`), `stopOnEntry`, `noDebug` and `allow` (the same list as `--allow`). It stops

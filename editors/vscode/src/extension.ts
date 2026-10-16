@@ -41,8 +41,63 @@ async function start(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push({ dispose: () => void client?.stop() });
 }
 
+/** Starts `telvax dap` for each debug session. */
+class AdapterFactory implements vscode.DebugAdapterDescriptorFactory {
+  createDebugAdapterDescriptor(): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+    const command = vscode.workspace.getConfiguration("telvax").get<string>("server.path", "telvax");
+    return new vscode.DebugAdapterExecutable(command, ["dap"]);
+  }
+}
+
+/** Fills in a launch configuration for the file in the editor, so that F5 works without a launch.json. */
+class ConfigurationProvider implements vscode.DebugConfigurationProvider {
+  resolveDebugConfiguration(
+    _folder: vscode.WorkspaceFolder | undefined,
+    config: vscode.DebugConfiguration,
+  ): vscode.ProviderResult<vscode.DebugConfiguration> {
+    if (!config.type && !config.request && !config.name) {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "telvax") {
+        vscode.window.showErrorMessage("Open a .tvx file to debug it.");
+        return undefined;
+      }
+      config.type = "telvax";
+      config.request = "launch";
+      config.name = "Debug the current Telvax file";
+      config.program = "${file}";
+    }
+    if (!config.program) {
+      vscode.window.showErrorMessage('The launch configuration needs "program": the .tvx file to run.');
+      return undefined;
+    }
+    return config;
+  }
+}
+
+/** Runs the file in the editor in the debugger (or, with `noDebug`, without stopping). */
+async function launchCurrentFile(noDebug: boolean): Promise<boolean> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "telvax") {
+    vscode.window.showErrorMessage("Open a .tvx file to debug it.");
+    return false;
+  }
+  await editor.document.save();
+  const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+  return vscode.debug.startDebugging(folder, {
+    type: "telvax",
+    request: "launch",
+    name: "Debug the current Telvax file",
+    program: editor.document.uri.fsPath,
+    noDebug,
+  });
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory("telvax", new AdapterFactory()),
+    vscode.debug.registerDebugConfigurationProvider("telvax", new ConfigurationProvider()),
+    vscode.commands.registerCommand("telvax.debugFile", () => launchCurrentFile(false)),
+    vscode.commands.registerCommand("telvax.runFileWithoutDebugging", () => launchCurrentFile(true)),
     vscode.commands.registerCommand("telvax.restartServer", async () => {
       await client?.stop();
       await start(context);

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Debugging in VS Code:** the extension contributes a `telvax` debugger that starts `telvax dap`. F5 on a
+  `.tvx` file debugs it without a `launch.json`; the commands **Telvax: Debug Current File** and **Telvax: Run
+  Current File Without Debugging** are in the run menu of Telvax files; a launch configuration takes
+  `program`, `function`, `args`, `stopOnEntry`, `noDebug` and `allow`. The test that runs inside a real VS
+  Code now sets a breakpoint and reads the stack and variables.
 * **`telvax dap`, a debug adapter:** speaks the Debug Adapter Protocol on standard input and output, so an
   editor can run a `.tvx` file in the interpreter and stop it at breakpoints (a breakpoint on a line with no
   statement moves to the next one), step over, into and out, pause, look at the calls in progress, open
