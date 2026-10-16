@@ -90,10 +90,10 @@ fn fail<T>(msg: impl Into<String>) -> Result<T, Ctrl> {
 }
 
 pub struct Interp {
-    fns: HashMap<String, hir::FnDef>,
-    structs: HashMap<String, Vec<(String, Ty)>>,
-    enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
-    globals: RwLock<HashMap<String, Value>>,
+    pub(crate) fns: HashMap<String, hir::FnDef>,
+    pub(crate) structs: HashMap<String, Vec<(String, Ty)>>,
+    pub(crate) enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
+    pub(crate) globals: RwLock<HashMap<String, Value>>,
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     out: Mutex<Box<dyn std::io::Write + Send>>,
     live: std::sync::atomic::AtomicBool,
@@ -109,6 +109,10 @@ pub struct Interp {
     /// Where the statements that ran start, while `start_coverage` is on.
     covered: Mutex<std::collections::HashSet<usize>>,
     covering: std::sync::atomic::AtomicBool,
+    /// Called before each statement while a debugger is installed (see `crate::debug`).
+    pub(crate) debugger: RwLock<Option<Arc<dyn crate::debug::Debugger>>>,
+    pub(crate) debugging: std::sync::atomic::AtomicBool,
+    pub(crate) local_decls: std::sync::OnceLock<HashMap<String, Vec<crate::debug::LocalDecl>>>,
 }
 
 struct Mock {
@@ -176,6 +180,9 @@ impl Interp {
             mocked: std::sync::atomic::AtomicBool::new(false),
             covered: Mutex::new(std::collections::HashSet::new()),
             covering: std::sync::atomic::AtomicBool::new(false),
+            debugger: RwLock::new(None),
+            debugging: std::sync::atomic::AtomicBool::new(false),
+            local_decls: std::sync::OnceLock::new(),
         };
         for g in &program.globals {
             let mut ctx = Ctx {
@@ -394,6 +401,21 @@ impl Interp {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// A statement is about to run: record it for coverage and let a debugger look.
+    fn point(&self, start: usize, ctx: &Ctx) {
+        self.cover(start);
+        if self.debugging.load(std::sync::atomic::Ordering::Relaxed) {
+            let debugger = self
+                .debugger
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if let Some(d) = debugger {
+                crate::debug::statement(self, &*d, start, &ctx.env);
+            }
+        }
     }
 
     fn cover(&self, start: usize) {
@@ -717,6 +739,10 @@ impl Interp {
             depth: depth + 1,
         };
         ctx.env.extend(f.params.iter().map(|p| p.id).zip(args));
+        let _call = self
+            .debugging
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then(|| crate::debug::CallGuard::enter(&f.name));
         let result = stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
             self.block(&f.body, &mut ctx)
         });
@@ -737,7 +763,7 @@ impl Interp {
 
     fn block(&self, b: &hir::Block, ctx: &mut Ctx) -> Eval {
         for s in &b.stmts {
-            self.cover(telvax_hir::coverage::stmt_start(s));
+            self.point(telvax_hir::coverage::stmt_start(s), ctx);
             match s {
                 hir::Stmt::Let { local, init } => {
                     let v = self.eval(init, ctx)?;
@@ -750,7 +776,7 @@ impl Interp {
         }
         match &b.tail {
             Some(t) => {
-                self.cover(t.span.start);
+                self.point(t.span.start, ctx);
                 self.eval(t, ctx)
             }
             None => Ok(Value::Unit),
@@ -917,7 +943,7 @@ impl Interp {
     }
 
     /// `v` as text, knowing its type `ty`: an `f32` shows its own digits.
-    fn show(&self, v: &Value, ty: &Ty, quoted: bool) -> String {
+    pub(crate) fn show(&self, v: &Value, ty: &Ty, quoted: bool) -> String {
         let env = crate::show::TypeEnv {
             structs: Some(&self.structs),
             enums: Some(&self.enums),
@@ -1159,7 +1185,7 @@ impl Interp {
                             }
                         }
                     }
-                    self.cover(arm.body.span.start);
+                    self.point(arm.body.span.start, ctx);
                     return self.eval(&arm.body, ctx);
                 }
                 fail("no `match` arm matched")

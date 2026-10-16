@@ -5,6 +5,7 @@
 #![cfg_attr(feature = "gpu", recursion_limit = "256")]
 
 mod caps;
+pub mod debug;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod interp;
