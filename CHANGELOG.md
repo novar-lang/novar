@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* **`telvax test` takes a directory:** it runs every `test_*.tvx` and `*_test.tvx` file under it (no
+  path means this directory), prints each file, and ends with one total. Files with no tests are skipped.
 * **`tvpm new` writes valid Telvax, and `tvpm publish` checks first:** the files `new` and `init` create
   used `def` and `str` and failed `telvax check`; they now use `fn` and `Text`. `publish` type-checks the
   package (with its dependencies) and refuses to publish one that has errors, showing them. `tvpm check`,

@@ -240,6 +240,8 @@ fn test_double():
 ```sh
 telvax test file.tvx           # run them all, exit 1 if one fails
 telvax test file.tvx double    # only the tests whose name contains `double`
+telvax test tests/              # every `test_*.tvx` and `*_test.tvx` file under a directory
+telvax test                    # the same, in this directory
 ```
 
 ## Macros
