@@ -660,3 +660,101 @@ fn table_head_tail_sort_concat_filter() {
     let e = call("first", vec![Value::Int(-1)]).unwrap_err().to_string();
     assert!(e.contains("zero or more"), "{e}");
 }
+
+const NULLABLE_SRC: &str = r#"
+type Reading:
+    id: Int
+    temp: f64?
+    note: Text?
+
+fn load(path: Text) -> Table[Reading]:
+    std.table.read_csv(path)
+
+fn load_pq(path: Text) -> Table[Reading]:
+    std.table.read_parquet(path)
+
+fn save_pq(t: Table[Reading], path: Text):
+    std.table.write_parquet(t, path)
+
+fn temp_or(t: Table[Reading], i: Int) -> f64:
+    t[i].temp.unwrap_or(-1.0)
+
+fn has_note(t: Table[Reading], i: Int) -> Bool:
+    t[i].note.is_some()
+
+fn temps(t: Table[Reading]) -> List[f64?]:
+    t.temp
+
+fn warm(t: Table[Reading]) -> Table[Reading]:
+    t |> std.table.sql("SELECT * FROM t WHERE temp > 20.0")
+
+fn build() -> Table[Reading]:
+    std.table.from_rows([
+        Reading(id: 1, temp: Some(21.5), note: None),
+        Reading(id: 2, temp: None, note: Some("broken")),
+    ])
+"#;
+
+fn readings() -> String {
+    let path = scratch("readings.csv");
+    std::fs::write(&path, "id,temp,note\n1,21.5,\n2,,broken\n3,18.0,ok\n").unwrap();
+    path
+}
+
+#[test]
+fn nullable_columns_hold_nulls_as_options() {
+    let i = load(NULLABLE_SRC);
+    let t = i.call("load", vec![Value::str(readings())]).unwrap();
+    let at = |f: &str, n: i64| i.call(f, vec![t.clone(), Value::Int(n)]).unwrap();
+    assert_eq!(float(at("temp_or", 0)), 21.5);
+    assert_eq!(float(at("temp_or", 1)), -1.0);
+    assert!(matches!(at("has_note", 0), Value::Bool(false)));
+    assert!(matches!(at("has_note", 1), Value::Bool(true)));
+    let Value::Vec(col) = i.call("temps", vec![t.clone()]).unwrap() else {
+        panic!()
+    };
+    assert_eq!(
+        col.snapshot()
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>(),
+        ["Some(21.5)", "None", "Some(18.0)"]
+    );
+
+    // Parquet keeps the nulls, and SQL treats them as NULL.
+    let pq = scratch("readings.parquet");
+    i.call("save_pq", vec![t.clone(), Value::str(pq.clone())])
+        .unwrap();
+    let back = i.call("load_pq", vec![Value::str(pq)]).unwrap();
+    assert_eq!(
+        float(i.call("temp_or", vec![back, Value::Int(1)]).unwrap()),
+        -1.0
+    );
+    let warm = i.call("warm", vec![t]).unwrap();
+    let Value::Table(w) = warm else { panic!() };
+    assert_eq!(w.rows(), 1);
+}
+
+#[test]
+fn nullable_columns_from_rows_and_required_columns() {
+    let i = load(NULLABLE_SRC);
+    let t = i.call("build", vec![]).unwrap();
+    let at = |f: &str, n: i64| i.call(f, vec![t.clone(), Value::Int(n)]).unwrap();
+    assert_eq!(float(at("temp_or", 0)), 21.5);
+    assert_eq!(float(at("temp_or", 1)), -1.0);
+    assert!(matches!(at("has_note", 1), Value::Bool(true)));
+
+    // A column that is not declared `T?` still rejects empty values and says how to allow them.
+    let i = load(TABLE_SRC);
+    let path = scratch("holes.csv");
+    std::fs::write(&path, "id,score,name,ok\n1,,ann,true\n").unwrap();
+    let e = i
+        .call("load", vec![Value::str(path)])
+        .map(|_| ())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("column `score` contains empty values") && e.contains("f32?"),
+        "{e}"
+    );
+}

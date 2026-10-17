@@ -30,7 +30,7 @@ M-series laptop. Things that could not be exercised on this hardware are called 
 | Item | State |
 |---|---|
 | Tensors and tables backed by Arrow | done in the runtime (`ArrayRef` / `RecordBatch`). Reading a table column as a tensor shares the buffer (tested by pointer equality) |
-| Ingestion from CSV, Parquet, memory | done and tested (CSV and Parquet round trips, `from_rows`, JSON). Files are decoded into Arrow arrays, not memory-mapped |
+| Ingestion from CSV, Parquet, memory | done and tested (CSV and Parquet round trips, `from_rows`, JSON). Files are decoded into Arrow arrays, not memory-mapped. Columns typed `T?` hold nulls; other columns reject them |
 | Arrow C Data Interface | done through the Arrow PyCapsule protocol (`__arrow_c_array__`, `__arrow_c_stream__`): PyArrow and Polars in and out without copies (tested) |
 | PyO3 bridge, NumPy / PyTorch | done: NumPy `__array_interface__`, PyTorch through NumPy, pointer equality checked (tested with real NumPy, PyTorch, Polars) |
 | `cuda_array_interface` | protocol implemented (`DeviceTensor` adopts and re-exports a GPU buffer by pointer) and tested **with stand-in objects only**. It has not run against a physical GPU, and Telvax has no GPU kernels: device tensors cannot be passed to Telvax functions |

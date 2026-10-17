@@ -10,7 +10,9 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array,
     Int64Array, LargeStringArray, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    make_array,
 };
+use arrow::buffer::NullBuffer;
 use arrow::compute::{
     SortColumn, SortOptions, cast, concat_batches, filter_record_batch, lexsort_to_indices,
     take_record_batch,
@@ -35,6 +37,7 @@ fn io<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> RuntimeError + '_ {
 
 pub(crate) fn arrow_type(ty: &Ty) -> Result<DataType, RuntimeError> {
     Ok(match ty {
+        Ty::Option(inner) if !matches!(**inner, Ty::Option(_)) => return arrow_type(inner),
         Ty::Prim(Prim::I8) => DataType::Int8,
         Ty::Prim(Prim::I16) => DataType::Int16,
         Ty::Prim(Prim::I32) => DataType::Int32,
@@ -54,7 +57,7 @@ pub(crate) fn arrow_type(ty: &Ty) -> Result<DataType, RuntimeError> {
 pub(crate) fn schema_of(fields: &[(String, Ty)]) -> Result<Arc<Schema>, RuntimeError> {
     let cols = fields
         .iter()
-        .map(|(n, t)| Ok(Field::new(n, arrow_type(t)?, false)))
+        .map(|(n, t)| Ok(Field::new(n, arrow_type(t)?, matches!(t, Ty::Option(_)))))
         .collect::<Result<Vec<_>, RuntimeError>>()?;
     Ok(Arc::new(Schema::new(cols)))
 }
@@ -126,6 +129,17 @@ pub(crate) fn cell(array: &ArrayRef, i: usize) -> Result<Value, RuntimeError> {
     })
 }
 
+/// A cell of a column declared `T?`: `Some(value)`, or `None` for a null.
+fn field_cell(field: &Field, col: &ArrayRef, i: usize) -> Result<Value, RuntimeError> {
+    if !field.is_nullable() {
+        return cell(col, i);
+    }
+    if col.is_null(i) {
+        return Ok(Value::none());
+    }
+    cell(col, i).map(Value::some)
+}
+
 impl TableVal {
     pub fn rows(&self) -> usize {
         self.batch.num_rows()
@@ -142,7 +156,7 @@ impl TableVal {
         let schema = self.batch.schema();
         let mut fields = Vec::with_capacity(schema.fields().len());
         for (f, col) in schema.fields().iter().zip(self.batch.columns()) {
-            fields.push((f.name().clone(), cell(col, i)?));
+            fields.push((f.name().clone(), field_cell(f, col, i)?));
         }
         Ok(Value::Struct(Arc::new(StructVal {
             name: self.schema.clone(),
@@ -158,6 +172,14 @@ impl TableVal {
             .index_of(name)
             .map_err(|_| RuntimeError::new(format!("table has no column `{name}`")))?;
         let col = self.batch.column(idx).clone();
+        let field = self.batch.schema().field(idx).clone();
+        if field.is_nullable() {
+            return Ok(Value::vec(
+                (0..col.len())
+                    .map(|i| field_cell(&field, &col, i))
+                    .collect::<Result<_, _>>()?,
+            ));
+        }
         if col.data_type().is_numeric() {
             return Ok(Value::Tensor(Arc::new(TensorVal::from_array(
                 vec![col.len()],
@@ -180,7 +202,9 @@ impl TableVal {
                     for (f, col) in schema.fields().iter().zip(self.batch.columns()) {
                         m.insert(
                             f.name().clone(),
-                            cell(col, i).map(|v| v.to_json()).unwrap_or(Json::Null),
+                            field_cell(f, col, i)
+                                .map(|v| v.to_json())
+                                .unwrap_or(Json::Null),
                         );
                     }
                     Json::Object(m)
@@ -217,6 +241,9 @@ pub(crate) fn rows_to_batch(
 }
 
 fn build_column(ty: &Ty, cells: &[Value]) -> Result<ArrayRef, RuntimeError> {
+    if let Ty::Option(inner) = ty {
+        return build_nullable(inner, cells);
+    }
     let int = |v: &Value| match v {
         Value::Int(i) => Ok(*i),
         other => err(format!("expected an integer, found {}", other.type_name())),
@@ -278,6 +305,44 @@ fn build_column(ty: &Ty, cells: &[Value]) -> Result<ArrayRef, RuntimeError> {
     })
 }
 
+/// A column of `T?`: the `None` cells become nulls. They are built as a placeholder value of the
+/// element type first, then masked by the validity bitmap.
+fn build_nullable(inner: &Ty, cells: &[Value]) -> Result<ArrayRef, RuntimeError> {
+    let placeholder = match inner {
+        Ty::Prim(Prim::F32 | Prim::F64) => Value::Float(0.0),
+        Ty::Prim(Prim::Bool) => Value::Bool(false),
+        Ty::Prim(Prim::Str) => Value::str(""),
+        _ => Value::Int(0),
+    };
+    let mut valid = Vec::with_capacity(cells.len());
+    let mut plain = Vec::with_capacity(cells.len());
+    for c in cells {
+        match c {
+            Value::Enum(e) if e.name == "Option" => match e.fields.first() {
+                Some(v) => {
+                    valid.push(true);
+                    plain.push(v.clone());
+                }
+                None => {
+                    valid.push(false);
+                    plain.push(placeholder.clone());
+                }
+            },
+            other => {
+                return err(format!("expected an Option, found {}", other.type_name()));
+            }
+        }
+    }
+    let array = build_column(inner, &plain)?;
+    let data = array
+        .to_data()
+        .into_builder()
+        .nulls(Some(NullBuffer::from(valid)))
+        .build()
+        .map_err(io("building the table"))?;
+    Ok(make_array(data))
+}
+
 /// Reorders / casts `batch` to the columns of `fields` (matched by name).
 pub(crate) fn conform(
     batch: &RecordBatch,
@@ -294,8 +359,10 @@ pub(crate) fn conform(
         let col = cast(batch.column(idx), &want).map_err(|e| {
             RuntimeError::new(format!("column `{name}` cannot be read as {want}: {e}"))
         })?;
-        if col.null_count() > 0 {
-            return err(format!("column `{name}` contains empty values"));
+        if col.null_count() > 0 && !matches!(ty, Ty::Option(_)) {
+            return err(format!(
+                "column `{name}` contains empty values; declare it `{ty}?` to allow them"
+            ));
         }
         columns.push(col);
     }
@@ -334,7 +401,15 @@ fn table(schema: String, batch: RecordBatch) -> Res {
 }
 
 fn read_csv(path: &str, fields: &[(String, Ty)]) -> Result<RecordBatch, RuntimeError> {
-    let schema = schema_of(fields)?;
+    // Read every column as nullable so `conform` can report an empty value in a required column
+    // with the Telvax type, instead of Arrow's message.
+    let schema = Arc::new(Schema::new(
+        schema_of(fields)?
+            .fields()
+            .iter()
+            .map(|f| f.as_ref().clone().with_nullable(true))
+            .collect::<Vec<_>>(),
+    ));
     let file = File::open(path).map_err(io(&format!("cannot open `{path}`")))?;
     let reader = arrow::csv::ReaderBuilder::new(schema.clone())
         .with_header(true)
@@ -343,7 +418,8 @@ fn read_csv(path: &str, fields: &[(String, Ty)]) -> Result<RecordBatch, RuntimeE
     let batches = reader
         .collect::<Result<Vec<_>, _>>()
         .map_err(io("reading CSV"))?;
-    concat_batches(&schema, &batches).map_err(io("reading CSV"))
+    let all = concat_batches(&schema, &batches).map_err(io("reading CSV"))?;
+    conform(&all, fields)
 }
 
 fn write_csv(t: &TableVal, path: &str) -> Result<(), RuntimeError> {
