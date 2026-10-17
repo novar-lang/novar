@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* **Optional table columns:** a field typed `T?` in a table's row type is a nullable Arrow column. Empty CSV
+  cells, Parquet nulls and Arrow nulls from Python become `None`; `from_rows` writes `None` as null. A required
+  column that finds an empty value now says to declare it `T?`.
 * **Table methods:** `t.head(n)`, `t.tail(n)`, `t.sort_by("col")`, `t.sort_by_desc("col")`, `t.filter(r => ...)` and
   `a.concat(b)` return a table of the same row type. They use Arrow directly, so they work in `telvax-lite` too.
 * **`telvax doc`:** writes a Markdown reference from the code: functions with their signatures, `type` fields

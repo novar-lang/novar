@@ -126,6 +126,19 @@ fn passed(t: Table[Row]) -> Table[Row]:
 column, `filter(keep)` keeps the rows for which `keep` is true, and `a.concat(b)` appends the rows of `b`
 (both tables need the same row type). A column name that does not exist is a runtime error that lists the columns.
 
+A column typed `T?` may hold empty values: `temp: f64?` reads CSV cells that are empty, Parquet nulls and
+`None` from `from_rows` as `None`, and `t.temp` is then a `List[f64?]` (not a tensor). A column without `?`
+that finds an empty value is an error that names the column and says to write `?`.
+
+```telvax
+type Reading:
+    id: Int
+    temp: f64?
+
+fn warm(t: Table[Reading]) -> Table[Reading]:
+    t.filter(r => r.temp.unwrap_or(0.0) > 20.0)
+```
+
 ## HTTP endpoints
 
 ```telvax ignore

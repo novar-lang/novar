@@ -1564,6 +1564,30 @@ fn f(t: Table[Row]) -> List[Text]:
 }
 
 #[test]
+fn table_columns_can_be_optional() {
+    assert_clean(
+        r#"
+type R:
+    id: Int
+    temp: f64?
+
+fn f(t: Table[R]) -> List[f64?]:
+    t.temp
+"#,
+    );
+    assert_err(
+        r#"
+type R:
+    xs: List[i32]?
+
+fn f(t: Table[R]):
+    pass
+"#,
+        "table columns must be",
+    );
+}
+
+#[test]
 fn table_schemas_must_be_flat_structs() {
     assert_err(
         r#"

@@ -1196,10 +1196,14 @@ impl Checker {
             );
         }
         for (name, ty) in fields {
-            if !matches!(ty, Ty::Prim(_) | Ty::Unknown) {
+            let base = match &ty {
+                Ty::Option(inner) => &**inner,
+                other => other,
+            };
+            if !matches!(base, Ty::Prim(_) | Ty::Unknown) {
                 self.err(
                     span.clone(),
-                    format!("column `{name}` of `{sname}` has type `{ty}`; table columns must be numbers, bools or strings"),
+                    format!("column `{name}` of `{sname}` has type `{ty}`; table columns must be numbers, bools or strings, optionally followed by `?`"),
                 );
             }
         }
@@ -4803,6 +4807,8 @@ impl Checker {
                             shape: vec![Dim::Named("N".into())],
                         },
                         Some(Ty::Prim(p)) => Ty::Vec(Box::new(Ty::Prim(p))),
+                        // A column with empty values is a list of `T?`.
+                        Some(opt @ Ty::Option(_)) => Ty::Vec(Box::new(opt)),
                         Some(other) => other,
                         None => {
                             let ty = base.ty.clone();
